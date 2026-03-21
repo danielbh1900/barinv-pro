@@ -1,0 +1,81 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint + Typecheck + Test
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run test
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: ${{ github.ref_name }}
+          VITE_ENABLE_SENTRY: 'true'
+          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_FEATURE_OFFLINE: 'true'
+          VITE_FEATURE_GUESTLIST: 'true'
+          VITE_FEATURE_PURCHASING: 'true'
+          VITE_FEATURE_RECIPES: 'true'
+
+      - name: Apply Supabase migrations (production)
+        run: npx supabase db push --project-ref ${{ secrets.PROD_SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.PROD_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.PROD_SUPABASE_ANON_KEY }}
+          VITE_APP_ENV: production
+          VITE_APP_VERSION: ${{ github.ref_name }}
+          VITE_ENABLE_SENTRY: 'true'
+          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_FEATURE_OFFLINE: 'true'
+          VITE_FEATURE_GUESTLIST: 'true'
+          VITE_FEATURE_PURCHASING: 'true'
+          VITE_FEATURE_RECIPES: 'true'
+
+      - name: Deploy to Vercel (production)
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          vercel-args: '--prod'
+          working-directory: ./
+
+      - name: Create Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
+          version: ${{ github.ref_name }}
+          sourcemaps: ./dist/assets
