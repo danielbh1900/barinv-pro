@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#ff8c00">
 <title>BARINV</title>
 <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="img/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Barlow:wght@300;400;500;600;700&family=Fira+Mono:wght@400;500&display=swap" rel="stylesheet">
 
@@ -2666,6 +2667,7 @@ th.sortable span { font-size:10px; }
           </div>
         </div>
         <div class="field"><label>Ticket Code</label><input type="text" id="dsp-ticket" placeholder="SHOT-101 / COMP-5"></div>
+        <div class="field"><label>Note / Recipient</label><input type="text" id="dsp-note" placeholder="Who is this for? e.g. Mike, VIP Table 3, DJ booth..."></div>
       </div>
 
       <!-- Destination Selector (grouped) -->
@@ -5175,7 +5177,7 @@ function renderItems() {
   if (ind) ind.textContent = asc ? '▲' : '▼';
   tbody.innerHTML = items.map(i => `
     <tr>
-      <td style="font-weight:600;">${esc(i.name)}</td>
+      <td style="font-weight:600;"><div style="display:flex;align-items:center;gap:8px;">${i.image_url ? `<img src="${esc(i.image_url)}" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display='none'">` : `<div style="width:28px;height:28px;background:var(--s3);border-radius:4px;flex-shrink:0;"></div>`}<span>${esc(i.name)}</span></div></td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(i.sku || '—')}</td>
       <td>${esc(i.category || '—')}</td>
       <td><span class="badge" style="background:${(i.measurement_mode || 'shot') === 'shot' ? '#16253a' : (i.measurement_mode || 'shot') === 'ml' ? '#1b2930' : '#2d2415'};color:${(i.measurement_mode || 'shot') === 'shot' ? '#9fd0ff' : (i.measurement_mode || 'shot') === 'ml' ? '#98f0ff' : '#ffd38a'};border:1px solid ${ (i.measurement_mode || 'shot') === 'shot' ? '#355c85' : (i.measurement_mode || 'shot') === 'ml' ? '#3e7682' : '#7a6330'};">${esc(i.measurement_mode || 'shot')}</span></td>
@@ -5472,6 +5474,48 @@ function itemPreviewImage(url) {
   else { img.style.display = 'none'; }
 }
 
+function triggerItemImageUpload() {
+  document.getElementById('m-image-file').click();
+}
+
+async function uploadItemImage() {
+  const fileInput = document.getElementById('m-image-file');
+  const file = fileInput?.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('Please select an image file', 't-err'); return; }
+  if (file.size > 5 * 1024 * 1024) { toast('Image must be under 5MB', 't-err'); return; }
+
+  const btn = document.getElementById('m-image-upload-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+
+  try {
+    // Generate unique filename
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+    const itemName = (document.getElementById('m-name')?.value || 'item').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+    const fileName = `${itemName}_${Date.now()}.${ext}`;
+
+    const { data, error } = await SB.storage.from('item-images').upload(fileName, file, {
+      cacheControl: '31536000',
+      upsert: false
+    });
+    if (error) throw error;
+
+    // Get public URL
+    const { data: urlData } = SB.storage.from('item-images').getPublicUrl(fileName);
+    const publicUrl = urlData?.publicUrl;
+    if (!publicUrl) throw new Error('Could not get public URL');
+
+    document.getElementById('m-image').value = publicUrl;
+    itemPreviewImage(publicUrl);
+    toast('Image uploaded', 't-ok');
+  } catch (e) {
+    toast('Upload failed: ' + e.message, 't-err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📷'; }
+    fileInput.value = '';
+  }
+}
+
 function itemUnitChanged() {
   const unit = document.getElementById('m-unit')?.value || '';
   const isCase = unit === 'case';
@@ -5505,9 +5549,11 @@ function openAddItem() {
        <div class="field"><label>Bottle Cost ($) <span style="color:var(--muted);font-size:10px;">purchase price</span></label><input type="number" id="m-cost-price" min="0" step="0.01" value="" placeholder="45.00"></div>
        <div class="field"><label>Shot Sale Price ($) <span style="color:var(--muted);font-size:10px;">POS menu price</span></label><input type="number" id="m-sale-price" min="0" step="0.01" value="" placeholder="8.00"></div>
      </div>
-     <div class="field"><label>Image URL <span style="color:var(--muted);font-size:10px;">(bottle photo — paste any public URL)</span></label>
+     <div class="field"><label>Image <span style="color:var(--muted);font-size:10px;">(upload or paste URL)</span></label>
        <div style="display:flex;gap:8px;align-items:center;">
          <input type="url" id="m-image" placeholder="https://..." style="flex:1;" oninput="itemPreviewImage(this.value)">
+         <input type="file" id="m-image-file" accept="image/*" style="display:none;" onchange="uploadItemImage()">
+         <button type="button" id="m-image-upload-btn" class="btn btn-ghost btn-sm" onclick="triggerItemImageUpload()" title="Upload image" style="padding:4px 10px;font-size:16px;">📷</button>
          <img id="m-image-preview" src="" style="width:40px;height:40px;object-fit:contain;border:1px solid var(--border);background:var(--s2);display:none;">
        </div>
      </div>
@@ -5557,9 +5603,11 @@ function editItem(i) {
        <div class="field"><label>Bottle Cost ($) <span style="color:var(--muted);font-size:10px;">purchase price</span></label><input type="number" id="m-cost-price" min="0" step="0.01" value="${i.cost_price || ''}" placeholder="45.00"></div>
        <div class="field"><label>Shot Sale Price ($) <span style="color:var(--muted);font-size:10px;">POS menu price</span></label><input type="number" id="m-sale-price" min="0" step="0.01" value="${i.sale_price || ''}" placeholder="8.00"></div>
      </div>
-     <div class="field"><label>Image URL <span style="color:var(--muted);font-size:10px;">(bottle photo)</span></label>
+     <div class="field"><label>Image <span style="color:var(--muted);font-size:10px;">(upload or paste URL)</span></label>
        <div style="display:flex;gap:8px;align-items:center;">
          <input type="url" id="m-image" value="${i.image_url || ''}" placeholder="https://..." style="flex:1;" oninput="itemPreviewImage(this.value)">
+         <input type="file" id="m-image-file" accept="image/*" style="display:none;" onchange="uploadItemImage()">
+         <button type="button" id="m-image-upload-btn" class="btn btn-ghost btn-sm" onclick="triggerItemImageUpload()" title="Upload image" style="padding:4px 10px;font-size:16px;">📷</button>
          <img id="m-image-preview" src="${i.image_url || ''}" style="width:40px;height:40px;object-fit:contain;border:1px solid var(--border);background:var(--s2);${i.image_url ? '' : 'display:none;'}">
        </div>
      </div>
@@ -9512,6 +9560,7 @@ function dspRenderCards() {
         <span class="dsp-badge dsp-b-taken">Taken: ${s.taken}</span>
         <span class="dsp-badge dsp-b-returned">Returned: ${s.returned}</span>
         <span class="dsp-badge dsp-b-comp">Comp: ${s.comp}</span>
+        ${s.comp_recipients?.length ? `<span style="font-size:10px;color:#9d97ff;">→ ${s.comp_recipients.map(r => esc(r)).join(', ')}</span>` : ''}
         ${mode === 'shot' ? `<span class="dsp-badge dsp-b-shot">Shots: ${s.shot}</span>` : ''}
       </div>
       <div class="dsp-actions">
@@ -9550,6 +9599,12 @@ window.dspAdj = function(itemId, type, delta) {
   const labels = { taken:'TAKEN (dispatch out)', returned:'RETURNED', comp:'COMPLIMENTARY', shot:'FREE SHOTS' };
   const colors = { taken:'var(--a)', returned:'var(--a2)', comp:'#9d97ff', shot:'var(--a3)' };
 
+  const recipientField = type === 'comp' ? `
+    <div class="field" style="margin-top:12px;">
+      <label style="font-size:10px;letter-spacing:0.1em;color:var(--muted);">RECIPIENT (who received this comp?)</label>
+      <input type="text" id="dsp-comp-recipient" placeholder="Name, section, or reason..." style="font-size:14px;">
+    </div>` : '';
+
   openModal('Confirm',
     `<div style="display:flex;gap:16px;align-items:center;padding:10px 0;">
       ${item?.image_url ? `<img src="${esc(item.image_url)}" style="width:120px;height:120px;object-fit:contain;flex-shrink:0;border:1px solid var(--border);background:var(--s2);" onerror="this.style.display='none'">` : ''}
@@ -9558,10 +9613,15 @@ window.dspAdj = function(itemId, type, delta) {
         <div style="font-size:10px;color:var(--muted);letter-spacing:0.15em;margin-top:4px;">${labels[type] || type.toUpperCase()}</div>
         <div style="font-size:18px;font-weight:700;margin-top:12px;">${esc(name)}</div>
       </div>
-    </div>`,
+    </div>${recipientField}`,
     () => {
-      if (!DSP_STATE[itemId]) DSP_STATE[itemId] = { taken:0, returned:0, comp:0, shot:0, weighed:[] };
+      if (!DSP_STATE[itemId]) DSP_STATE[itemId] = { taken:0, returned:0, comp:0, shot:0, weighed:[], comp_recipients:[] };
       DSP_STATE[itemId][type] = Math.max(0, (DSP_STATE[itemId][type] || 0) + qty);
+      if (type === 'comp') {
+        const recipient = document.getElementById('dsp-comp-recipient')?.value.trim() || '';
+        if (!DSP_STATE[itemId].comp_recipients) DSP_STATE[itemId].comp_recipients = [];
+        if (recipient) DSP_STATE[itemId].comp_recipients.push(`${qty}× → ${recipient}`);
+      }
       try { dspPersistDraft(); } catch (_) {}
       closeModal();
       dspRenderCards();
@@ -9849,6 +9909,7 @@ async function dspSaveAll() {
   const nightId = document.getElementById('dsp-night')?.value || null;
   const source  = document.getElementById('dsp-source')?.value || 'Liquor Room';
   const ticket  = document.getElementById('dsp-ticket')?.value.trim() || null;
+  const dspNote = document.getElementById('dsp-note')?.value.trim() || null;
   const by      = SESSION.user?.email?.split('@')[0] || 'admin';
   const allStaff = SESSION.cache.staff || [];
 
@@ -9878,10 +9939,10 @@ async function dspSaveAll() {
       const weighNotes = (s.weighed || []).map((w, i) => `Weigh#${i+1}: ${w.weight}g → ${w.shotsUsed} shots used, ${w.shotsRemaining} remaining`).join(' | ');
 
       const baseNote = (parts) => parts.filter(Boolean).join(' | ');
-      if(s.taken > 0)    records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.taken, action:'DELIVERED', status:'APPROVED', submitted_by:by, notes: baseNote([`Dispatch from ${source}`, ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
-      if(s.returned > 0) records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.returned, action:'RETURNED', status:'APPROVED', submitted_by:by, notes: baseNote([`Return to ${source}`, staffNote, weighNotes]), _name: itemName });
-      if(s.comp > 0)     records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.comp, action:'ADJUSTMENT', status:'APPROVED', submitted_by:by, notes: baseNote([`COMP from ${source}`, ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
-      if(s.shot > 0)     records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.shot, action:'ADJUSTMENT', status:'APPROVED', submitted_by:by, notes: baseNote([`SHOT from ${source}`, ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
+      if(s.taken > 0)    records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.taken, action:'DELIVERED', status:'APPROVED', submitted_by:by, notes: baseNote([`Dispatch from ${source}`, dspNote ? `Note: ${dspNote}` : '', ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
+      if(s.returned > 0) records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.returned, action:'RETURNED', status:'APPROVED', submitted_by:by, notes: baseNote([`Return to ${source}`, dspNote ? `Note: ${dspNote}` : '', staffNote, weighNotes]), _name: itemName });
+      if(s.comp > 0)     records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.comp, action:'ADJUSTMENT', status:'APPROVED', submitted_by:by, notes: baseNote([`COMP from ${source}`, s.comp_recipients?.length ? 'To: ' + s.comp_recipients.join(', ') : '', dspNote ? `Note: ${dspNote}` : '', ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
+      if(s.shot > 0)     records.push({ night_id:nightId, bar_id:barId, item_id:itemId, qty:s.shot, action:'ADJUSTMENT', status:'APPROVED', submitted_by:by, notes: baseNote([`SHOT from ${source}`, dspNote ? `Note: ${dspNote}` : '', ticket ? `Ticket: ${ticket}` : '', staffNote]), _name: itemName });
     }
   }
 
