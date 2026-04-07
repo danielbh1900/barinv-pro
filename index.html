@@ -1695,7 +1695,28 @@ th.sortable span { font-size:10px; }
       </div>
 
       <div class="panel" style="margin-bottom:16px;">
-        <div class="panel-head"><div class="panel-title">Add / Edit Mapping</div></div>
+        <div class="panel-head">
+          <div class="panel-title">🔍 Auto-Discover Square Locations</div>
+        </div>
+        <div class="panel-body">
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">Fetch all locations from Square, then assign each to a BARINV bar. Already-mapped locations are shown with their current bar.</p>
+          <button class="btn btn-a" onclick="fetchSquareLocations()">⚡ Fetch Locations from Square</button>
+          <div id="sq-locations-wrap" style="display:none;margin-top:14px;">
+            <div class="tbl-wrap">
+              <table>
+                <thead><tr><th>Square Location</th><th>Location ID</th><th>Status</th><th>Assign to Bar</th><th></th></tr></thead>
+                <tbody id="sq-locations-tbody"></tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button class="btn" onclick="saveAllSquareMappings()">💾 Save All Mappings</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-head"><div class="panel-title">Add / Edit Mapping (Manual)</div></div>
         <div class="panel-body">
           <input type="hidden" id="pmap-id">
           <div class="pos-form-box">
@@ -3709,6 +3730,105 @@ function resetPosMappingForm() {
   document.getElementById('pmap-pos-location-name').value = '';
   document.getElementById('pmap-bar').value = '';
   document.getElementById('pmap-active').value = 'true';
+}
+
+async function fetchSquareLocations() {
+  const wrap = document.getElementById('sq-locations-wrap');
+  const tbody = document.getElementById('sq-locations-tbody');
+  if (!wrap || !tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;">⏳ Fetching from Square...</td></tr>';
+  wrap.style.display = 'block';
+
+  try {
+    const supabaseUrl = SB.supabaseUrl || localStorage.getItem('sb_url') || '';
+    const functionUrl = supabaseUrl + '/functions/v1/square-sync';
+    const res = await fetch(functionUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'locations' })
+    });
+    const result = await res.json();
+    if (!result.ok) throw new Error(result.error || 'Failed to fetch locations');
+    const locations = result.locations || [];
+    if (!locations.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">📍</div><div class="empty-text">No locations found in Square</div></div></td></tr>'; return; }
+
+    // Get existing mappings and bars
+    const [mapRes, barsRes, connRes] = await Promise.all([
+      SB.from('pos_bar_mappings').select('pos_location_id, bar_id, connection_id'),
+      SB.from('bars').select('id,name,active').order('name'),
+      SB.from('pos_connections').select('id,name,is_active').eq('is_active', true).limit(1),
+    ]);
+    const existingMaps = (mapRes.data || []).reduce((m, r) => { m[r.pos_location_id] = r; return m; }, {});
+    const bars = (barsRes.data || []).filter(b => b.active !== false);
+    const connectionId = connRes.data?.[0]?.id || '';
+
+    const barOptions = '<option value="">— skip —</option>' + bars.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+
+    tbody.innerHTML = locations.map(loc => {
+      const existing = existingMaps[loc.id];
+      const selectedBar = existing?.bar_id || '';
+      const opts = '<option value="">— skip —</option>' + bars.map(b =>
+        `<option value="${b.id}"${b.id === selectedBar ? ' selected' : ''}>${escapeHtml(b.name)}</option>`
+      ).join('');
+      return `<tr data-loc-id="${escapeHtml(loc.id)}" data-loc-name="${escapeHtml(loc.name)}" data-conn-id="${connectionId}">
+        <td><b>${escapeHtml(loc.name)}</b>${loc.address ? '<br><span style="font-size:11px;color:var(--muted);">' + escapeHtml(loc.address) + '</span>' : ''}</td>
+        <td><code style="font-size:11px;">${escapeHtml(loc.id)}</code></td>
+        <td>${loc.status === 'ACTIVE' ? '<span style="color:var(--ok);">Active</span>' : escapeHtml(loc.status || '')}</td>
+        <td><select class="sq-bar-select" style="width:100%;">${opts}</select></td>
+        <td>${existing ? '<span style="color:var(--ok);font-size:11px;">✓ Mapped</span>' : ''}</td>
+      </tr>`;
+    }).join('');
+
+    toast(`Found ${locations.length} Square location(s)`, 't-ok');
+  } catch (e) {
+    toast('Fetch locations failed: ' + e.message, 't-err');
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--err);padding:12px;">❌ ${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function saveAllSquareMappings() {
+  const rows = document.querySelectorAll('#sq-locations-tbody tr[data-loc-id]');
+  if (!rows.length) { toast('No locations to map', 't-err'); return; }
+
+  let saved = 0, skipped = 0, errors = 0;
+  for (const row of rows) {
+    const locId = row.getAttribute('data-loc-id');
+    const locName = row.getAttribute('data-loc-name');
+    const connId = row.getAttribute('data-conn-id');
+    const barId = row.querySelector('.sq-bar-select')?.value;
+    if (!barId) { skipped++; continue; }
+
+    // Check if mapping already exists for this location
+    const { data: existing } = await SB.from('pos_bar_mappings').select('id').eq('pos_location_id', locId);
+    try {
+      if (existing?.length) {
+        // Update existing mapping
+        await SB.venueUpdate('pos_bar_mappings', existing[0].id, {
+          bar_id: barId,
+          pos_location_name: locName,
+          connection_id: connId,
+          is_active: true,
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        // Insert new mapping
+        await SB.from('pos_bar_mappings').insert({
+          connection_id: connId,
+          pos_location_id: locId,
+          pos_location_name: locName,
+          bar_id: barId,
+          is_active: true,
+          updated_at: new Date().toISOString()
+        });
+      }
+      saved++;
+    } catch (e) { errors++; }
+  }
+
+  toast(`Saved ${saved} mapping(s), skipped ${skipped}${errors ? ', ' + errors + ' error(s)' : ''}`, saved ? 't-ok' : 't-err');
+  await loadPosMapping();
+  // Refresh the discover table to show updated status
+  await fetchSquareLocations();
 }
 async function loadPosMapping() {
   try {
