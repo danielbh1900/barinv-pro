@@ -7447,7 +7447,9 @@ async function checkInGuest(id, val) {
 }
 async function deleteGuest(id) {
   if(!confirm('Remove guest?')) return;
-  await SB.from('guestlist').delete().eq('id', id);
+  const res = await SB.venueDelete('guestlist', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadGuestlist();
 }
 
@@ -7558,8 +7560,8 @@ async function vipSaveRow(row) {
 }
 async function vipDeleteRow(id) {
   if (await vipRemoteEnabled() && !String(id || '').startsWith('local_')) {
-    const { error } = await SB.from('vip_tables').delete().eq('id', id);
-    if (!error) return true;
+    const res = await SB.venueDelete('vip_tables', id);
+    if (!res.error && res.data?.length) return true;
     VIP_REMOTE_AVAILABLE = false;
   }
   vipWriteLocal(vipReadLocal().filter(r => String(r.id) !== String(id)));
@@ -8257,7 +8259,9 @@ function editSupplier(s) {
 
 async function deleteSupplier(id) {
   if(!confirm('Delete this supplier?')) return;
-  await SB.from('suppliers').delete().eq('id', id);
+  const res = await SB.venueDelete('suppliers', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadSuppliers();
 }
 
@@ -8423,13 +8427,16 @@ async function addIngredientToRecipe(recipeId) {
 
 async function removeIngredient(riId, recipeId) {
   if(!confirm('Remove this ingredient?')) return;
-  await SB.from('recipe_ingredients').delete().eq('id', riId);
+  const res = await SB.venueDelete('recipe_ingredients', riId);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
   closeModal(); viewRecipe(recipeId);
 }
 
 async function deleteRecipe(id) {
   if(!confirm('Delete this recipe?')) return;
-  await SB.from('recipes').delete().eq('id', id);
+  const res = await SB.venueDelete('recipes', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadRecipes();
 }
 
@@ -8577,7 +8584,9 @@ async function markReceived(id) {
 }
 async function deleteOrder(id) {
   if(!confirm('Delete this purchase order?')) return;
-  await SB.from('purchase_orders').delete().eq('id', id);
+  const res = await SB.venueDelete('purchase_orders', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadOrders();
 }
 async function viewOrder(id) {
@@ -8752,12 +8761,14 @@ window.invAddLine = function() {
 };
 
 async function markInvoicePaid(id) {
-  await SB.from('invoices').update({ status:'PAID' }).eq('id', id);
+  await SB.venueUpdate('invoices', id, { status:'PAID' });
   loadInvoices(); toast('Marked as paid','t-ok');
 }
 async function deleteInvoice(id) {
   if(!confirm('Delete this invoice?')) return;
-  await SB.from('invoices').delete().eq('id', id);
+  const res = await SB.venueDelete('invoices', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadInvoices();
 }
 
@@ -9172,14 +9183,16 @@ function rcpViewImage(id) {
 }
 
 async function rcpApprove(id) {
-  const { error } = await SB.from('receipts').update({ status: 'APPROVED' }).eq('id', id);
-  if(error) { toast(error.message,'t-err'); return; }
+  const res = await SB.venueUpdate('receipts', id, { status: 'APPROVED' });
+  if(res.error) { toast(res.error.message,'t-err'); return; }
   loadReceipts(); toast('Receipt approved','t-ok');
 }
 
 async function rcpDelete(id) {
   if(!confirm('Delete this receipt?')) return;
-  await SB.from('receipts').delete().eq('id', id);
+  const res = await SB.venueDelete('receipts', id);
+  if (res.error) { toast(res.error.message, 't-err'); return; }
+  if (!res.data?.length) { toast('Delete failed: not found in this venue', 't-err'); return; }
   loadReceipts();
 }
 
