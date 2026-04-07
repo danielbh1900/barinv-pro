@@ -1585,6 +1585,7 @@ th.sortable span { font-size:10px; }
           <button class="btn btn-ghost btn-sm" onclick="loadPosMonitor()">↺ Refresh</button>
           <button class="btn btn-a btn-sm" onclick="openPosSyncModal()">⚡ Sync POS</button>
           <button class="btn btn-ghost btn-sm" onclick="exportPosMonitorCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportPosMonitorCSV('csv')">⬇ CSV</button>
         </div>
       </div>
 
@@ -1907,6 +1908,7 @@ th.sortable span { font-size:10px; }
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="exportBarsCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportBarsCSV('csv')">⬇ CSV</button>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('bars-import-file').click()">⬆ Import</button>
             <button class="btn btn-a btn-sm" onclick="openAddBar()">+ Add</button>
             <input type="file" id="bars-import-file" accept=".csv,text/csv" style="display:none">
@@ -1925,6 +1927,7 @@ th.sortable span { font-size:10px; }
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="exportStaffCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportStaffCSV('csv')">⬇ CSV</button>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('staff-import-file').click()">⬆ Import</button>
             <button class="btn btn-a btn-sm" onclick="openAddStaff()">+ Add</button>
             <input type="file" id="staff-import-file" accept=".csv,text/csv" style="display:none">
@@ -1943,6 +1946,7 @@ th.sortable span { font-size:10px; }
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" onclick="exportStationsCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportStationsCSV('csv')">⬇ CSV</button>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stations-import-file').click()">⬆ Import</button>
             <button class="btn btn-a btn-sm" onclick="openAddStation()">+ Add</button>
             <input type="file" id="stations-import-file" accept=".csv,text/csv" style="display:none">
@@ -1967,6 +1971,7 @@ th.sortable span { font-size:10px; }
           <div style="display:flex;gap:8px;flex-wrap:wrap;" onclick="event.stopPropagation()">
             <button class="btn btn-ghost btn-sm" id="toggle-inactive-btn" onclick="SHOW_INACTIVE_ITEMS=!SHOW_INACTIVE_ITEMS; this.textContent=SHOW_INACTIVE_ITEMS?'Hide OFF':'Show OFF'; renderItems();" style="font-size:10px;">Show OFF</button>
             <button class="btn btn-ghost btn-sm" onclick="exportItemsCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportItemsCSV('csv')">⬇ CSV</button>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('items-import-file').click()">⬆ Import</button>
             <button class="btn btn-a btn-sm" onclick="openAddItem()">+ Add</button>
             <input type="file" id="items-import-file" accept=".csv,text/csv" style="display:none">
@@ -2044,6 +2049,7 @@ th.sortable span { font-size:10px; }
             <option value="">All Bars</option>
           </select>
           <button class="btn btn-ghost btn-sm" onclick="exportAnalyticsCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportAnalyticsCSV('csv')">⬇ CSV</button>
         </div>
       </div>
 
@@ -2152,6 +2158,7 @@ th.sortable span { font-size:10px; }
         <div class="panel-head"><div class="panel-title">Export</div></div>
         <div class="panel-body" style="display:flex;gap:12px;flex-wrap:wrap;">
           <button class="btn btn-a" onclick="exportExcel()">⬇ Download Excel</button>
+          <button class="btn btn-ghost" onclick="exportExcel('csv')">⬇ Download CSV</button>
           <button class="btn btn-ghost" onclick="printReport()">🖨 Print PDF</button>
         </div>
       </div>
@@ -2190,6 +2197,7 @@ th.sortable span { font-size:10px; }
           </select>
           <button class="btn btn-ghost btn-sm" onclick="exportVariancePDF()">🖨 Print PDF</button>
           <button class="btn btn-ghost btn-sm" onclick="exportVarianceCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportVarianceCSV('csv')">⬇ CSV</button>
           <button class="btn btn-a2 btn-sm" onclick="exportAllNights()">🌐 All Nights CSV</button>
         </div>
       </div>
@@ -2213,6 +2221,7 @@ th.sortable span { font-size:10px; }
             <option value="">All Bars</option>
           </select>
           <button class="btn btn-ghost btn-sm" onclick="exportAccountabilityCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportAccountabilityCSV('csv')">⬇ CSV</button>
         </div>
       </div>
       <div id="acc-content">
@@ -2233,6 +2242,7 @@ th.sortable span { font-size:10px; }
             <option value="">All Categories</option>
           </select>
           <button class="btn btn-ghost btn-sm" onclick="exportStockCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportStockCSV('csv')">⬇ CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stock-import-file').click()">⬆ Import CSV</button>
           <input type="file" id="stock-import-file" accept=".csv,text/csv" style="display:none">
           <button class="btn btn-a btn-sm" onclick="stockBulkEdit()">✏ Bulk Edit</button>
@@ -2278,6 +2288,7 @@ th.sortable span { font-size:10px; }
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('guestlist-import-file').click()">⬆ Import CSV</button>
           <button class="btn btn-a btn-sm" onclick="openAddGuest()">+ Add Guest</button>
           <button class="btn btn-ghost btn-sm" onclick="exportGuestlistCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportGuestlistCSV('csv')">⬇ CSV</button>
         </div>
       </div>
       <div class="tbl-wrap">
@@ -2305,6 +2316,7 @@ th.sortable span { font-size:10px; }
           <input type="file" id="vip-import-file" accept=".csv,text/csv" style="display:none">
           <button class="btn btn-a btn-sm" onclick="openVipTableModal()">+ Add Table</button>
           <button class="btn btn-ghost btn-sm" onclick="exportVipTablesCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportVipTablesCSV('csv')">⬇ CSV</button>
         </div>
       </div>
       <div class="panel" style="margin-bottom:14px;">
@@ -2359,6 +2371,7 @@ th.sortable span { font-size:10px; }
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-ghost btn-sm" onclick="downloadCsvTemplate('suppliers')">⬇ Template</button>
           <button class="btn btn-ghost btn-sm" onclick="exportSuppliersCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportSuppliersCSV('csv')">⬇ CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('suppliers-import-file').click()">⬆ Import CSV</button>
           <button class="btn btn-a btn-sm" onclick="openAddSupplier()">+ Add Supplier</button>
         </div>
@@ -2379,6 +2392,7 @@ th.sortable span { font-size:10px; }
         <div class="ph-actions">
           <button class="btn btn-ghost btn-sm" onclick="downloadCsvTemplate('orders')">⬇ Template</button>
           <button class="btn btn-ghost btn-sm" onclick="exportOrdersCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportOrdersCSV('csv')">⬇ CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('orders-import-file').click()">⬆ Import CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="autoGenerateOrders()">⚡ Auto-Generate</button>
           <button class="btn btn-a btn-sm" onclick="openAddOrder()">+ New Order</button>
@@ -2402,6 +2416,7 @@ th.sortable span { font-size:10px; }
           </select>
           <button class="btn btn-ghost btn-sm" onclick="downloadCsvTemplate('invoices')">⬇ Template</button>
           <button class="btn btn-ghost btn-sm" onclick="exportInvoicesCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportInvoicesCSV('csv')">⬇ CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('invoices-import-file').click()">⬆ Import CSV</button>
           <button class="btn btn-a btn-sm" onclick="openAddInvoice()">+ Log Invoice</button>
         </div>
@@ -2750,6 +2765,7 @@ th.sortable span { font-size:10px; }
       <div class="wh-head-title">🏭 WAREHOUSE INVENTORY</div>
       <div style="display:flex;gap:10px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="whExportCSV()">⬇ Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="whExportCSV('csv')">⬇ CSV</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('wh-import-file').click()">⬆ Import BCL</button>
         <input type="file" id="wh-import-file" accept=".csv" style="display:none">
         <button onclick="closeWarehouse()" style="background:none;border:none;color:#888;font-size:20px;cursor:pointer;padding:0 4px;">×</button>
@@ -4096,7 +4112,7 @@ async function loadPosMonitorProducts(barId, barSummary) {
   }
 }
 
-function exportPosMonitorCSV() {
+function exportPosMonitorCSV(fmt) {
   const bars = window.POS_MONITOR_BARS || [];
   const products = window.POS_MONITOR_PRODUCTS || [];
   if(!bars.length && !products.length) { toast('No POS data to export — refresh first','t-err'); return; }
@@ -4147,7 +4163,7 @@ function exportPosMonitorCSV() {
 
   // Header info
   const header = [['POS Monitor Export'],['Period:', from + ' → ' + to],[]];
-  csvDownload('barinv-pos-' + dateSuffix + '.csv', [...header, ...barRows]);
+  downloadRows('barinv-pos-' + dateSuffix + '.csv', [...header, ...barRows], fmt);
   toast('POS data exported', 't-ok');
 }
 
@@ -6380,7 +6396,7 @@ function exportCSV() {
 }
 
 // ── EXPORT EXCEL (tab-separated .xls) ──
-function exportExcel() {
+function exportExcel(fmt) {
   if (!REPORT_DATA.length) { toast('No data to export', 't-err'); return; }
   const headers = ['Date','Time','By','Action','Item','SKU','Bar','Station','Qty','Unit','Total Units','Status','Notes'];
   const rows = [headers];
@@ -6398,8 +6414,8 @@ function exportExcel() {
       e.qty, itemObj?.unit || 'bottle', e.qty * upc, e.status, e.notes || ''
     ]);
   });
-  xlsxDownload('barinv-report-' + new Date().toISOString().slice(0,10) + '.xlsx', rows, 'Events');
-  toast('Excel downloaded', 't-ok');
+  downloadRows('barinv-report-' + new Date().toISOString().slice(0,10) + '.xlsx', rows, fmt, 'Events');
+  toast(fmt === 'csv' ? 'CSV downloaded' : 'Excel downloaded', 't-ok');
 }
 
 // ── PRINT PDF ──
@@ -6627,15 +6643,13 @@ async function whAddItem() {
   whRenderCats(); whRenderItems();
   toast(`Added: ${brand}`, 't-ok');
 }
-function whExportCSV() {
+function whExportCSV(fmt) {
   const { items } = WH_CACHE;
   if(!items.length) { toast('No items to export', 't-err'); return; }
-  const rows = [['Category','Brand','Size','Unit','Stock','Min Stock'].join(',')];
-  for(const i of items) rows.push([i.cat,i.brand,i.size,i.unit,i.stock,i.min||0].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
-  const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `warehouse_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-  toast('Warehouse CSV downloaded','t-ok');
+  const rows = [['Category','Brand','Size','Unit','Stock','Min Stock']];
+  for(const i of items) rows.push([i.cat, i.brand, i.size, i.unit, i.stock, i.min||0]);
+  downloadRows(`warehouse_${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
+  toast('Warehouse exported','t-ok');
 }
 document.getElementById('wh-import-file').addEventListener('change', async e => {
   const f = e.target.files[0]; if(!f) return;
@@ -6822,12 +6836,12 @@ window.stockBulkEdit = async function() {
   );
 };
 
-function exportStockCSV() {
+function exportStockCSV(fmt) {
   const items = (SESSION.cache.items||[]).filter(i => i.active !== false);
   if(!items.length) { toast('No items','t-err'); return; }
   const rows = [['name','sku','category','unit','liquor_room_stock','par_level','cost_price','sale_price']];
   items.forEach(i => rows.push([i.name, i.sku||'', i.category||'', i.unit||'bottle', Number(i.liquor_room_stock)||0, i.par_level||0, i.cost_price||'', i.sale_price||'']));
-  csvDownload(`barinv-stock-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  downloadRows(`barinv-stock-${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
   toast(`${items.length} items exported`, 't-ok');
 }
 
@@ -7463,16 +7477,15 @@ async function deleteGuest(id) {
   loadGuestlist();
 }
 
-function exportGuestlistCSV() {
-  const rows = [];
+function exportGuestlistCSV(fmt) {
+  const dataRows = [];
   document.querySelectorAll('#gl-tbody tr').forEach(tr => {
     const cells = tr.querySelectorAll('td');
-    if(cells.length >= 4) rows.push([cells[0].textContent.trim(), cells[1].textContent.trim(), cells[2].textContent.trim(), cells[3].textContent.trim()].map(v=>`"${v}"`).join(','));
+    if(cells.length >= 4) dataRows.push([cells[0].textContent.trim(), cells[1].textContent.trim(), cells[2].textContent.trim(), cells[3].textContent.trim()]);
   });
-  if(!rows.length) { toast('No guests to export','t-err'); return; }
-  const blob = new Blob([['Name,Phone,Type,Status'].join(',')+'\n'+rows.join('\n')], {type:'text/csv'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-  a.download = `guestlist_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  if(!dataRows.length) { toast('No guests to export','t-err'); return; }
+  const rows = [['Name','Phone','Type','Status'], ...dataRows];
+  downloadRows(`guestlist_${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
 }
 
 
@@ -7780,24 +7793,20 @@ async function deleteVipTable(id) {
   toast('VIP table removed', 't-ok');
 }
 
-async function exportVipTablesCSV() {
+async function exportVipTablesCSV(fmt) {
   const nightId = document.getElementById('vip-night')?.value;
   if (!nightId) { toast('Select a night first', 't-err'); return; }
   const rows = await vipFetchRows(nightId);
   if (!rows.length) { toast('No VIP tables to export', 't-err'); return; }
-  const csv = [['Table','Guest','Booked By','Server','Minimum Spend','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Notes'].join(',')];
+  const dataRows = [['Table','Guest','Booked By','Server','Minimum Spend','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Notes']];
   rows.forEach(r => {
     const c = vipCalc(r);
-    csv.push([
+    dataRows.push([
       r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', c.minimum, c.deposit, c.actual, c.comps, c.discounts, c.netSpend, c.remaining, c.status, r.notes || ''
-    ].map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+    ]);
   });
-  const blob = new Blob(['\uFEFF' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `vip_tables_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-  toast('VIP tables CSV downloaded', 't-ok');
+  downloadRows(`vip_tables_${new Date().toISOString().slice(0,10)}.csv`, dataRows, fmt);
+  toast('VIP tables exported', 't-ok');
 }
 
 
@@ -7972,36 +7981,36 @@ async function importItemsCSV() {
 }
 
 // ── Setup CSV Exports ────────────────────────────────
-function exportBarsCSV() {
+function exportBarsCSV(fmt) {
   const bars = SESSION.cache.bars || [];
   if(!bars.length) { toast('No bars to export','t-err'); return; }
   const rows = [['name','active']];
   bars.forEach(b => rows.push([b.name, b.active ? 'true' : 'false']));
-  csvDownload('barinv-bars-' + new Date().toISOString().slice(0,10) + '.csv', rows);
+  downloadRows('barinv-bars-' + new Date().toISOString().slice(0,10) + '.csv', rows, fmt);
   toast(`${bars.length} bars exported`, 't-ok');
 }
 
-function exportStaffCSV() {
+function exportStaffCSV(fmt) {
   const staff = SESSION.cache.staff || [];
   if(!staff.length) { toast('No staff to export','t-err'); return; }
   const rows = [['name','legal_name','role','email','phone','emergency_contact','notes','active']];
   staff.forEach(s => rows.push([s.name, s.legal_name||'', s.role, s.email||'', s.phone||'', s.emergency_contact||'', s.notes||'', s.active ? 'true' : 'false']));
-  csvDownload('barinv-staff-' + new Date().toISOString().slice(0,10) + '.xlsx', rows);
+  downloadRows('barinv-staff-' + new Date().toISOString().slice(0,10) + '.xlsx', rows, fmt);
   toast(`${staff.length} staff exported`, 't-ok');
 }
 
-function exportStationsCSV() {
+function exportStationsCSV(fmt) {
   const stations = SESSION.cache.stations || [];
   const bars = SESSION.cache.bars || [];
   if(!stations.length) { toast('No stations to export','t-err'); return; }
   const barMap = Object.fromEntries(bars.map(b => [b.id, b.name]));
   const rows = [['name','bar','active']];
   stations.forEach(s => rows.push([s.name, barMap[s.bar_id] || '', s.active ? 'true' : 'false']));
-  csvDownload('barinv-stations-' + new Date().toISOString().slice(0,10) + '.csv', rows);
+  downloadRows('barinv-stations-' + new Date().toISOString().slice(0,10) + '.csv', rows, fmt);
   toast(`${stations.length} stations exported`, 't-ok');
 }
 
-function exportItemsCSV() {
+function exportItemsCSV(fmt) {
   const items = SESSION.cache.items || [];
   if(!items.length) { toast('No items to export','t-err'); return; }
   const rows = [['name','sku','category','unit','units_per_case','bottle_size_ml','service_mode','full_shots','shot_weight_g','empty_bottle_weight_g','full_bottle_weight_g','par_level','cost_price','sale_price','image_url','active']];
@@ -8023,7 +8032,7 @@ function exportItemsCSV() {
     i.image_url || '',
     i.active ? 'true' : 'false'
   ]));
-  csvDownload('barinv-items-' + new Date().toISOString().slice(0,10) + '.csv', rows);
+  downloadRows('barinv-items-' + new Date().toISOString().slice(0,10) + '.csv', rows, fmt);
   toast(`${items.length} items exported`, 't-ok');
 }
 
@@ -10035,8 +10044,16 @@ function csvEscape(value) {
 }
 
 function csvDownload(filename, rows) {
-  // Convert to xlsx instead of csv
-  xlsxDownload(filename.replace(/\.csv$/i, '.xlsx'), rows);
+  const csv = '\uFEFF' + rows.map(r => r.map(v => csvEscape(v)).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = filename.endsWith('.csv') ? filename : filename.replace(/\.\w+$/, '.csv');
+  a.click();
+}
+
+function downloadRows(filename, rows, fmt, sheetName) {
+  if (fmt === 'csv') csvDownload(filename.replace(/\.\w+$/, '.csv'), rows);
+  else xlsxDownload(filename.replace(/\.\w+$/, '.xlsx'), rows, sheetName);
 }
 
 function xlsxDownload(filename, rows, sheetName) {
@@ -10100,7 +10117,7 @@ function csvOpenGoogleSheets(filename, rows) {
 }
 
 // ── Variance CSV ──
-function exportVarianceCSV() {
+function exportVarianceCSV(fmt) {
   const content = document.getElementById('var-content');
   if(!content?.querySelector('table')) { toast('Load a variance report first','t-err'); return; }
   const nightName = document.getElementById('var-night')?.options[document.getElementById('var-night')?.selectedIndex]?.text || 'night';
@@ -10124,12 +10141,12 @@ function exportVarianceCSV() {
     });
   });
 
-  csvDownload(`barinv-variance-${nightName.replace(/[^a-zA-Z0-9]/g,'_')}.csv`, rows);
+  downloadRows(`barinv-variance-${nightName.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, rows, fmt);
   toast('Variance CSV exported with all bars', 't-ok');
 }
 
 // ── Accountability CSV ──
-function exportAccountabilityCSV() {
+function exportAccountabilityCSV(fmt) {
   const content = document.getElementById('acc-content');
   if(!content?.querySelector('table')) { toast('Load accountability report first','t-err'); return; }
   const nightName = document.getElementById('acc-night')?.options[document.getElementById('acc-night')?.selectedIndex]?.text || 'night';
@@ -10146,12 +10163,12 @@ function exportAccountabilityCSV() {
     rows.push(cells);
   });
 
-  csvDownload(`barinv-accountability-${nightName.replace(/[^a-zA-Z0-9]/g,'_')}.csv`, rows);
+  downloadRows(`barinv-accountability-${nightName.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, rows, fmt);
   toast('Accountability CSV exported', 't-ok');
 }
 
 // ── Analytics CSV ──
-async function exportAnalyticsCSV() {
+async function exportAnalyticsCSV(fmt) {
   await preload();
   const nSel = document.getElementById('an-night');
   const bSel = document.getElementById('an-bar');
@@ -10165,22 +10182,22 @@ async function exportAnalyticsCSV() {
     const dt = new Date(e.created_at);
     rows.push([dt.toLocaleDateString(), dt.toLocaleTimeString(), e.nights?.name||'', e.bars?.name||'', e.items?.name||'', e.action, e.qty, e.submitted_by||'', e.notes||'']);
   });
-  csvDownload(`barinv-analytics-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  downloadRows(`barinv-analytics-${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
   toast(`${events.length} events exported`, 't-ok');
 }
 
 // ── Suppliers CSV ──
-async function exportSuppliersCSV() {
+async function exportSuppliersCSV(fmt) {
   const { data: suppliers } = await SB.from('suppliers').select('*').order('name');
   if(!suppliers?.length) { toast('No suppliers','t-err'); return; }
   const rows = [['name','email','phone','contact','notes','active']];
   suppliers.forEach(s => rows.push([s.name, s.email||'', s.phone||'', s.contact||'', s.notes||'', s.active?'true':'false']));
-  csvDownload(`barinv-suppliers-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  downloadRows(`barinv-suppliers-${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
   toast(`${suppliers.length} suppliers exported`, 't-ok');
 }
 
 // ── Purchase Orders CSV ──
-async function exportOrdersCSV() {
+async function exportOrdersCSV(fmt) {
   const { data: orders } = await SB.from('purchase_orders')
     .select('*, suppliers(name), po_items(*, items(name))').order('created_at', { ascending: false });
   if(!orders?.length) { toast('No orders','t-err'); return; }
@@ -10189,18 +10206,18 @@ async function exportOrdersCSV() {
     const itemList = (o.po_items||[]).map(pi => `${pi.items?.name||'?'} x${pi.quantity||1}`).join('; ');
     rows.push([o.po_number||'', o.suppliers?.name||'', o.ordered_at||o.created_at||'', o.status, o.total_cost||0, itemList]);
   });
-  csvDownload(`barinv-orders-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  downloadRows(`barinv-orders-${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
   toast(`${orders.length} orders exported`, 't-ok');
 }
 
 // ── Invoices CSV ──
-async function exportInvoicesCSV() {
+async function exportInvoicesCSV(fmt) {
   const { data: invoices } = await SB.from('invoices')
     .select('*, suppliers(name)').order('created_at', { ascending: false });
   if(!invoices?.length) { toast('No invoices','t-err'); return; }
   const rows = [['Invoice #','Supplier','Amount','Status','Due Date','Notes','Created']];
   invoices.forEach(i => rows.push([i.invoice_number||'', i.suppliers?.name||'', i.amount||0, i.status, i.due_date||'', i.notes||'', i.created_at||'']));
-  csvDownload(`barinv-invoices-${new Date().toISOString().slice(0,10)}.csv`, rows);
+  downloadRows(`barinv-invoices-${new Date().toISOString().slice(0,10)}.csv`, rows, fmt);
   toast(`${invoices.length} invoices exported`, 't-ok');
 }
 
