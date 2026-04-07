@@ -4967,7 +4967,7 @@ async function loadHistory() {
   const byName = SESSION.user?.name || '';
   const { data: events, error } = await SB
     .from('events')
-    .select('*, items(name), bars(name)')
+    .select('*, items(name, unit, units_per_case), bars(name)')
     .eq('submitted_by', byName)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -4978,16 +4978,20 @@ async function loadHistory() {
     return;
   }
 
-  tbody.innerHTML = events.map(e => `
+  tbody.innerHTML = events.map(e => {
+    const isCase = e.items?.unit === 'case';
+    const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
+    const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
+    return `
     <tr>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${new Date(e.created_at).toLocaleString()}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td style="font-weight:500;">${esc(e.items?.name || '—')}</td>
       <td>${esc(e.bars?.name || '—')}</td>
-      <td style="font-family:'Fira Mono',monospace;">${e.qty}</td>
+      <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
       <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════
@@ -5003,7 +5007,7 @@ async function loadEvents() {
   bf.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${b.id}" ${b.id === bv ? 'selected' : ''}>${b.name}</option>`).join('');
   nf.value = nv; bf.value = bv;
 
-  let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku)').order('created_at', { ascending: false }).limit(200);
+  let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku, unit, units_per_case)').order('created_at', { ascending: false }).limit(200);
   if (nf.value) q = q.eq('night_id', nf.value);
   if (bf.value) q = q.eq('bar_id', bf.value);
   const sv = document.getElementById('ef-status').value;
@@ -5022,13 +5026,16 @@ async function loadEvents() {
   tbody.innerHTML = events.map(e => {
     const time = new Date(e.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const date = new Date(e.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const isCase = e.items?.unit === 'case';
+    const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
+    const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
     return `<tr>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}<br><span style="color:var(--muted)">${date}</span></td>
       <td>${esc(e.submitted_by)}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td style="font-weight:500;">${esc(e.items?.name || '—')} ${e.items?.sku ? `<br><span style="font-family:'Fira Mono',monospace;font-size:10px;color:var(--muted)">${esc(e.items.sku)}</span>` : ''}</td>
       <td>${esc(e.bars?.name || '—')}<br><span style="font-size:11px;color:var(--muted)">${esc(e.stations?.name || '')}</span></td>
-      <td style="font-family:'Fira Mono',monospace;">${e.qty}</td>
+      <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
       <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
@@ -6277,7 +6284,7 @@ async function loadReportData() {
   const by     = document.getElementById('rp-by').value.trim();
 
   let q = SB.from('events')
-    .select('*, items(name,sku), bars(name), stations(name)')
+    .select('*, items(name,sku,unit,units_per_case), bars(name), stations(name)')
     .order('created_at', { ascending: false })
     .limit(2000);
 
@@ -6326,6 +6333,9 @@ function renderReportTable(events) {
     const d = new Date(e.created_at);
     const date = d.toLocaleDateString();
     const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isCase = e.items?.unit === 'case';
+    const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
+    const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
     return `<tr>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${date}</td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}</td>
@@ -6335,7 +6345,7 @@ function renderReportTable(events) {
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(e.items?.sku || '—')}</td>
       <td>${esc(e.bars?.name || '—')}</td>
       <td style="font-size:12px;color:var(--muted);">${esc(e.stations?.name || '—')}</td>
-      <td style="font-family:'Fira Mono',monospace;">${e.qty}</td>
+      <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
       <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
     </tr>`;
   }).join('');

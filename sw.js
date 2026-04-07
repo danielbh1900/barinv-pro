@@ -1,5 +1,5 @@
 // BARINV Service Worker — stale-while-revalidate for app shell
-const CACHE = 'barinv-v64';
+const CACHE = 'barinv-v65';
 const SHELL = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
