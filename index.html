@@ -3662,7 +3662,7 @@ async function savePosConnection() {
     };
     if (!payload.name) throw new Error('Connection name is required');
     let res;
-    if (id) res = await SB.from('pos_connections').update(payload).eq('id', id);
+    if (id) res = await SB.venueUpdate('pos_connections', id, payload);
     else res = await SB.from('pos_connections').insert(payload);
     if (res.error) throw res.error;
     toast('POS connection saved', 't-ok');
@@ -3694,8 +3694,9 @@ async function editPosConnection(id) {
 }
 async function deletePosConnection(id) {
   if (!confirm('Delete this POS connection?')) return;
-  const { error } = await SB.from('pos_connections').delete().eq('id', id);
-  if (error) return toast('Delete failed: ' + error.message, 't-err');
+  const res = await SB.venueDelete('pos_connections', id);
+  if (res.error) return toast('Delete failed: ' + res.error.message, 't-err');
+  if (!res.data || res.data.length === 0) return toast('Delete failed: connection not found in this venue', 't-err');
   toast('POS connection deleted', 't-ok');
   await loadPosConnections();
   await loadPosMapping();
@@ -3764,7 +3765,7 @@ async function savePosMapping() {
     };
     if (!payload.connection_id || !payload.pos_location_id || !payload.bar_id) throw new Error('Connection, POS Location ID, and BARINV bar are required');
     let res;
-    if (id) res = await SB.from('pos_bar_mappings').update(payload).eq('id', id);
+    if (id) res = await SB.venueUpdate('pos_bar_mappings', id, payload);
     else res = await SB.from('pos_bar_mappings').insert(payload);
     if (res.error) throw res.error;
     toast('POS mapping saved', 't-ok');
@@ -3791,8 +3792,9 @@ async function editPosMapping(id) {
 }
 async function deletePosMapping(id) {
   if (!confirm('Delete this mapping?')) return;
-  const { error } = await SB.from('pos_bar_mappings').delete().eq('id', id);
-  if (error) return toast('Delete failed: ' + error.message, 't-err');
+  const res = await SB.venueDelete('pos_bar_mappings', id);
+  if (res.error) return toast('Delete failed: ' + res.error.message, 't-err');
+  if (!res.data || res.data.length === 0) return toast('Delete failed: mapping not found in this venue', 't-err');
   toast('POS mapping deleted', 't-ok');
   await loadPosMapping();
 }
@@ -4030,7 +4032,7 @@ function exportPosMonitorCSV() {
 // ── POS Sync from App ────────────────────────────────
 function openPosSyncModal() {
   const bars = SESSION.cache.bars?.filter(b => b.active) || [];
-  const barOptions = bars.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  const barOptions = '<option value="__all__">🔄 All Mapped Bars</option>' + bars.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
 
   // Default date range: last 30 days
   const now = new Date();
@@ -4039,10 +4041,10 @@ function openPosSyncModal() {
 
   openModal('⚡ Sync POS Data from Square',
     `<div style="margin-bottom:14px;padding:10px;border:1px solid var(--border);background:var(--s2);font-size:11px;color:var(--muted);line-height:1.6;">
-      Fetches orders and payments from Square and saves them to the selected BARINV bar.<br>
-      All sales for your venue will be assigned to the bar you pick below.
+      Fetches orders and payments from Square and saves them to BARINV bars.<br>
+      <b>All Mapped Bars</b> uses your POS Bar Mappings. Or pick a single bar to override.
     </div>
-    <div class="field"><label>Assign Sales To Bar</label>
+    <div class="field"><label>Assign Sales To</label>
       <select id="sync-bar">${barOptions}</select>
     </div>
     <div class="fg fg-2">
@@ -4063,34 +4065,42 @@ function openPosSyncModal() {
 }
 
 async function runPosSync() {
-  const barId = document.getElementById('sync-bar')?.value;
+  const barVal = document.getElementById('sync-bar')?.value;
   const fromVal = document.getElementById('sync-from')?.value;
   const toVal = document.getElementById('sync-to')?.value;
   const progress = document.getElementById('sync-progress');
   const goBtn = document.getElementById('sync-go-btn');
 
-  if (!barId || !fromVal || !toVal) { toast('Fill all fields', 't-err'); return; }
+  if (!barVal || !fromVal || !toVal) { toast('Fill all fields', 't-err'); return; }
 
   const startAt = new Date(fromVal).toISOString();
   const endAt = new Date(toVal).toISOString();
-  const barName = SESSION.cache.bars.find(b => b.id === barId)?.name || 'Bar';
+  const allMode = barVal === '__all__';
 
-  // Update mapping to selected bar
-  if (progress) { progress.style.display = 'block'; progress.textContent = '① Updating bar mapping...'; }
+  if (progress) { progress.style.display = 'block'; progress.textContent = '① Loading mappings...'; }
   if (goBtn) goBtn.disabled = true;
 
-  const { data: mappings } = await SB.from('pos_bar_mappings').select('id, pos_location_id').eq('is_active', true).limit(1);
-  if (mappings?.length) {
-    await SB.from('pos_bar_mappings').update({ bar_id: barId }).eq('id', mappings[0].id);
+  // Get all active mappings
+  const { data: mappings } = await SB.from('pos_bar_mappings').select('id, pos_location_id, bar_id').eq('is_active', true);
+  if (!mappings?.length) {
+    toast('No active POS bar mappings found. Set them up in POS Bar Mapping first.', 't-err');
+    if (progress) progress.textContent = '❌ No active mappings';
+    if (goBtn) goBtn.disabled = false;
+    return;
   }
 
-  const locationId = mappings?.[0]?.pos_location_id || 'RNHHV9B945FD6';
+  // If single bar selected, update the first mapping to point to it
+  if (!allMode) {
+    await SB.venueUpdate('pos_bar_mappings', mappings[0].id, { bar_id: barVal });
+  }
 
-  // Get Edge Function URL from Supabase config
+  // Collect unique locationIds from all active mappings
+  const locationIds = [...new Set(mappings.map(m => m.pos_location_id))];
+
   const supabaseUrl = SB.supabaseUrl || localStorage.getItem('sb_url') || '';
   const functionUrl = supabaseUrl + '/functions/v1/square-sync';
 
-  if (progress) progress.textContent = '② Fetching from Square...';
+  if (progress) progress.textContent = `② Fetching from Square (${locationIds.length} location${locationIds.length > 1 ? 's' : ''})...`;
 
   try {
     const res = await fetch(functionUrl, {
@@ -4098,7 +4108,7 @@ async function runPosSync() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mode: 'summary',
-        locationIds: [locationId],
+        locationIds,
         startAt,
         endAt,
         bucketMinutes: 60
@@ -4113,14 +4123,14 @@ async function runPosSync() {
       return;
     }
 
+    const label = allMode ? `${mappings.length} mapped bar(s)` : esc(SESSION.cache.bars.find(b => b.id === barVal)?.name || 'Bar');
     if (progress) progress.innerHTML = `✅ Sync complete!<br>
       <b>${result.orderCount || 0}</b> orders · <b>${result.paymentCount || 0}</b> payments<br>
       <b>${result.insertedBarSnapshots || 0}</b> bar snapshots · <b>${result.insertedProductSnapshots || 0}</b> product snapshots<br>
-      Assigned to: <b>${esc(barName)}</b>`;
+      Assigned to: <b>${label}</b>`;
 
-    toast(`✓ POS synced: ${result.orderCount} orders → ${barName}`, 't-ok');
+    toast(`✓ POS synced: ${result.orderCount} orders → ${label}`, 't-ok');
 
-    // Auto refresh the monitor
     setTimeout(() => { closeModal(); loadPosMonitor(); }, 2000);
 
   } catch (e) {
