@@ -1,1 +1,0 @@
-export { RequireVenue } from './RequireAuth'

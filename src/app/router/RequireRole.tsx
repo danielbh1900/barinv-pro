@@ -1,1 +1,0 @@
-export { RequireRole } from './RequireAuth'
