@@ -10328,7 +10328,7 @@ async function importStationsCSVFile() {
   const barMap = new Map((SESSION.cache.bars || []).map(b => [String(b.name || '').trim().toLowerCase(), b.id]));
   const payload = [];
   for (const r of rows) {
-    const barId = barMap.get(String(r.bar_name || '').trim().toLowerCase());
+    const barId = barMap.get(String(r.bar_name || r.bar || '').trim().toLowerCase());
     const name = String(r.name || '').trim();
     if (!barId || !name) continue;
     payload.push({
