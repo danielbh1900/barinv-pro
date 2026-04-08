@@ -7872,16 +7872,32 @@ function clearCsvInput(inputId) {
 function openCsvImportHelp() {
   openModal('CSV Import Templates', `
     <div style="display:grid;gap:10px;font-size:12px;line-height:1.5;">
-      <div><b>Bars</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,active</span></div>
-      <div><b>Staff</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,legal_name,role,email,phone,emergency_contact,notes,active</span></div>
-      <div><b>Stations</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,bar,active</span></div>
-      <div><b>Items / Liquor List</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,sku,category,unit,units_per_case,bottle_size_ml,service_mode,full_shots,shot_weight_g,empty_bottle_weight_g,full_bottle_weight_g,par_level,cost_price,sale_price,image_url,active</span></div>
-      <div><b>Suppliers</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,contact,email,phone,address,notes,active</span></div>
-      <div><b>Guestlist</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,phone,ticket_type,notes,checked_in</span></div>
-      <div><b>VIP Tables</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">table_name,guest_name,booked_by,server_name,minimum_spend,deposit_paid,actual_spend,comps,discounts,notes,status</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Bars</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,active</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('bars')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Staff</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,legal_name,role,email,phone,emergency_contact,notes,active</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('staff')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Stations</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,bar,active</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('stations')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Items / Liquor List</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;font-size:10px;">name,sku,category,unit,units_per_case,bottle_size_ml,service_mode,full_shots,shot_weight_g,empty_bottle_weight_g,full_bottle_weight_g,par_level,cost_price,sale_price,image_url,active</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('items')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Suppliers</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,contact,email,phone,address,notes,active</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('suppliers')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>Guestlist</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;">name,phone,ticket_type,notes,checked_in</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('guestlist')">⬇ CSV</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;"><div><b>VIP Tables</b><br><span style="color:var(--muted);font-family:'Fira Mono',monospace;font-size:10px;">table_name,guest_name,booked_by,server_name,minimum_spend,deposit_paid,actual_spend,comps,discounts,notes,status</span></div><button class="btn btn-ghost btn-xs" onclick="downloadTemplate('vip')">⬇ CSV</button></div>
       <div style="padding:10px 12px;border:1px solid var(--border);background:var(--s2);color:var(--muted);font-family:'Fira Mono',monospace;">Tip: header names are flexible. For example, "table" also works for table_name, and "guest" works for guest_name.</div>
     </div>
-  `, () => closeModal(), 'Close');
+  `, () => closeModal(),
+  `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>`);
+}
+function downloadTemplate(kind) {
+  const templates = {
+    bars: [['name','active'], ['B1-B1','true']],
+    staff: [['name','legal_name','role','email','phone','emergency_contact','notes','active'], ['John','John Smith','bartender','john@email.com','+16045551234','','','true']],
+    stations: [['name','bar','active'], ['Station 1','B1-B1','true']],
+    items: [['name','sku','category','unit','units_per_case','bottle_size_ml','service_mode','full_shots','shot_weight_g','empty_bottle_weight_g','full_bottle_weight_g','par_level','cost_price','sale_price','image_url','active'], ['JAMESON','','Irish Whiskey','bottle','','1140','all_bars','36','29.5','450','1155','0','45','8','','true']],
+    suppliers: [['name','contact','email','phone','address','notes','active'], ['Sample Supplier','Sales Rep','rep@email.com','','123 Main St','','true']],
+    guestlist: [['name','phone','ticket_type','notes','checked_in'], ['Guest One','','General','','false']],
+    vip: [['table_name','guest_name','booked_by','server_name','minimum_spend','deposit_paid','actual_spend','comps','discounts','notes','status'], ['TABLE 01','VIP Guest','Manager','Server A','1000','500','0','0','0','','OPEN']]
+  };
+  const rows = templates[kind];
+  if (!rows) { toast('No template for this type', 't-err'); return; }
+  csvDownload(`${kind}_template.csv`, rows);
+  toast(`${kind} template downloaded`, 't-ok');
 }
 async function importBarsCSV() {
   const rows = await readCsvObjectsFromInput('bars-import-file');
