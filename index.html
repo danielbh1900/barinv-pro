@@ -9235,6 +9235,163 @@ async function rcpDelete(id) {
 // ══════════════════════════════════════════════════════
 // DISPATCH / STOCK ROOM MODULE
 // ══════════════════════════════════════════════════════
+// ── BLE SCALE (Web Bluetooth — Chrome/Mac only) ──
+const BLE_SCALE = { device: null, server: null, characteristic: null, lastWeight: null, connected: false };
+
+async function bleScaleConnect(emptyW, shotW, fullShots) {
+  if (!navigator.bluetooth) {
+    toast('Bluetooth not supported — use Chrome on Mac', 't-err');
+    return;
+  }
+  const btn = document.getElementById('ble-scale-btn');
+
+  // If already connected, disconnect
+  if (BLE_SCALE.connected && BLE_SCALE.device?.gatt?.connected) {
+    try { BLE_SCALE.device.gatt.disconnect(); } catch(_) {}
+    BLE_SCALE.connected = false;
+    BLE_SCALE.device = null;
+    BLE_SCALE.lastWeight = null;
+    if (btn) { btn.textContent = '📶 Scale'; }
+    toast('Scale disconnected', 't-info');
+    return;
+  }
+
+  if (btn) { btn.textContent = '⏳ Scanning...'; btn.disabled = true; }
+
+  try {
+    // Scan for BLE devices — try name filter first, fall back to acceptAllDevices
+    let device;
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [
+          { namePrefix: 'Escali' },
+          { namePrefix: 'SmartConnect' },
+          { namePrefix: 'SC115' },
+          { namePrefix: 'ESCALI' }
+        ],
+        optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb', '0000181d-0000-1000-8000-00805f9b34fb', 'weight_scale']
+      });
+    } catch (e) {
+      // Fall back to accept all if name filter fails
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb', '0000181d-0000-1000-8000-00805f9b34fb']
+      });
+    }
+
+    BLE_SCALE.device = device;
+    if (btn) btn.textContent = '⏳ Connecting...';
+
+    device.addEventListener('gattserverdisconnected', () => {
+      BLE_SCALE.connected = false;
+      BLE_SCALE.lastWeight = null;
+      const b = document.getElementById('ble-scale-btn');
+      if (b) b.textContent = '📶 Scale';
+      toast('Scale disconnected', 't-info');
+    });
+
+    const server = await device.gatt.connect();
+    BLE_SCALE.server = server;
+
+    if (btn) btn.textContent = '⏳ Discovering...';
+
+    // Discover all services and find weight characteristic
+    const services = await server.getPrimaryServices();
+    let found = false;
+
+    for (const service of services) {
+      try {
+        const chars = await service.getCharacteristics();
+        for (const char of chars) {
+          // Look for characteristics that support notify (weight data streams)
+          if (char.properties.notify || char.properties.indicate) {
+            await char.startNotifications();
+            char.addEventListener('characteristicvaluechanged', (event) => {
+              const value = event.target.value;
+              const weight = bleParseWeight(value);
+              if (weight !== null && weight >= 0 && weight <= 5500) {
+                BLE_SCALE.lastWeight = weight;
+                const inp = document.getElementById('dsp-weigh-input');
+                if (inp && weight > 0) {
+                  inp.value = weight;
+                  inp.dispatchEvent(new Event('input'));
+                  dspWeighCalc(emptyW, shotW, fullShots);
+                }
+                const b = document.getElementById('ble-scale-btn');
+                if (b) b.textContent = `📶 ${weight}g`;
+              }
+            });
+            found = true;
+            console.log('BLE Scale: subscribed to', service.uuid, char.uuid);
+          }
+        }
+      } catch (e) { console.log('BLE service skip:', service.uuid, e.message); }
+    }
+
+    if (!found) {
+      toast('Connected but no weight data found. Try placing item on scale.', 't-err');
+      if (btn) { btn.textContent = '📶 No data'; btn.disabled = false; }
+      return;
+    }
+
+    BLE_SCALE.connected = true;
+    if (btn) { btn.textContent = '📶 Connected'; btn.disabled = false; }
+    toast(`Scale connected: ${device.name || 'BLE Scale'}`, 't-ok');
+
+  } catch (e) {
+    if (e.name !== 'NotFoundError') toast('Scale error: ' + e.message, 't-err');
+    if (btn) { btn.textContent = '📶 Scale'; btn.disabled = false; }
+  }
+}
+
+function bleParseWeight(dataView) {
+  // Try multiple common BLE weight data formats
+  try {
+    const len = dataView.byteLength;
+    if (len === 0) return null;
+
+    // Format 1: Simple 16-bit integer (grams) — common for kitchen scales
+    if (len >= 2) {
+      const w16 = dataView.getInt16(0, true); // little-endian
+      if (w16 >= 0 && w16 <= 5500) return w16;
+    }
+
+    // Format 2: Bytes with sign/unit flags (Escali-like)
+    // Many scales: byte[0]=flags, byte[1-2]=weight
+    if (len >= 3) {
+      const w = dataView.getInt16(1, true);
+      if (w >= 0 && w <= 5500) return w;
+    }
+
+    // Format 3: 32-bit float
+    if (len >= 4) {
+      const f = dataView.getFloat32(0, true);
+      if (f >= 0 && f <= 5500 && Number.isFinite(f)) return Math.round(f);
+    }
+
+    // Format 4: Standard Weight Measurement (Bluetooth SIG 0x2A9D)
+    // flags(1) + weight(2) in 0.005kg resolution
+    if (len >= 3) {
+      const flags = dataView.getUint8(0);
+      const raw = dataView.getUint16(1, true);
+      const isKg = !(flags & 0x01);
+      const grams = isKg ? Math.round(raw * 5) : Math.round(raw * 5 * 453.592 / 1000);
+      if (grams >= 0 && grams <= 5500) return grams;
+    }
+
+    // Format 5: ASCII string (some scales send "1234g")
+    let str = '';
+    for (let i = 0; i < len; i++) str += String.fromCharCode(dataView.getUint8(i));
+    const match = str.match(/([\d.]+)/);
+    if (match) {
+      const v = parseFloat(match[1]);
+      if (v >= 0 && v <= 5500) return Math.round(v);
+    }
+
+    return null;
+  } catch (e) { return null; }
+}
+
 let DSP_STATE = {}; // { itemId: { taken:0, returned:0, comp:0, shot:0 } }
 let DSP_SELECTED_BARS = []; // array of bar IDs
 let DSP_AUTO_SELECTED_ONCE = false;
@@ -9767,7 +9924,12 @@ window.dspWeighReturn = function(itemId) {
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">FULL SHOTS</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${fullShots}</div></div>
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">SHOT WEIGHT</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${shotW}g</div></div>
       </div>
-      <div class="field"><label>Current Bottle Weight (g)</label><input type="number" id="dsp-weigh-input" min="0" step="1" placeholder="Place on scale and enter weight" autofocus oninput="dspWeighCalc(${emptyW},${shotW},${fullShots})"></div>
+      <div class="field"><label>Current Bottle Weight (g)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" id="dsp-weigh-input" min="0" step="1" placeholder="Place on scale and enter weight" autofocus oninput="dspWeighCalc(${emptyW},${shotW},${fullShots})" style="flex:1;">
+          <button type="button" id="ble-scale-btn" class="btn btn-ghost btn-sm" onclick="bleScaleConnect(${emptyW},${shotW},${fullShots})" title="Connect Bluetooth Scale" style="padding:4px 10px;font-size:14px;white-space:nowrap;">${BLE_SCALE.device ? '📶 ' + (BLE_SCALE.lastWeight || '—') + 'g' : '📶 Scale'}</button>
+        </div>
+      </div>
       <div id="dsp-weigh-result" style="margin-top:12px;padding:14px;border:1px solid var(--border);background:var(--s2);display:none;">
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
           <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">LIQUID REMAINING</span><div id="dsp-w-liquid" style="font-family:'Fira Mono',monospace;font-size:20px;color:var(--a2);">—</div></div>
