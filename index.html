@@ -9259,24 +9259,21 @@ async function bleScaleConnect(emptyW, shotW, fullShots) {
   if (btn) { btn.textContent = '⏳ Scanning...'; btn.disabled = true; }
 
   try {
-    // Scan for BLE devices — try name filter first, fall back to acceptAllDevices
+    // Scan for BLE devices — show all devices
     let device;
     try {
       device = await navigator.bluetooth.requestDevice({
-        filters: [
-          { namePrefix: 'Escali' },
-          { namePrefix: 'SmartConnect' },
-          { namePrefix: 'SC115' },
-          { namePrefix: 'ESCALI' }
-        ],
-        optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb', '0000181d-0000-1000-8000-00805f9b34fb', 'weight_scale']
+        acceptAllDevices: true,
+        optionalServices: [
+          '0000fff0-0000-1000-8000-00805f9b34fb',
+          '0000181d-0000-1000-8000-00805f9b34fb',
+          '0000180a-0000-1000-8000-00805f9b34fb',
+          '0000ffe0-0000-1000-8000-00805f9b34fb'
+        ]
       });
     } catch (e) {
-      // Fall back to accept all if name filter fails
-      device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb', '0000181d-0000-1000-8000-00805f9b34fb']
-      });
+      if (e.name === 'NotFoundError') { if (btn) { btn.textContent = '📶 Scale'; btn.disabled = false; } return; }
+      throw e;
     }
 
     BLE_SCALE.device = device;
