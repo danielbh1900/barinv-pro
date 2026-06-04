@@ -602,6 +602,36 @@ if (!TEST_MODE_BARBACK) {
 //    ?reset=full  — also clears the production offline cache snapshot
 //                   (use only when STARTING FRESH on a new device)
 // ════════════════════════════════════════════════════════════════════
+
+// PLAN-2026-06-04 — barbackKillStaleSW: unconditional service-worker
+// unregister + Cache Storage purge on every page load.
+//
+// Why this exists: a previous barback PWA build deployed a
+// barback_sw.js that, once installed on iOS Safari, would persist
+// across hard refreshes and intercept /functions/v1/* fetches.
+// With the SW dropping the barback-pin-login POST, the PIN screen
+// would do nothing on submit (no network traffic, no audit entry,
+// no error) — exactly the symptom we just bisected. Running this
+// block at the top of the script guarantees that by the time
+// Phase3.login fires the fetch later in the page lifecycle, no
+// SW is in the way. Idempotent and safe: only touches SW
+// registrations and Cache Storage (HTTP cache), not localStorage /
+// sessionStorage / IndexedDB.
+(function barbackKillStaleSW() {
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker.getRegistrations().then(rs => {
+        rs.forEach(r => { try { r.unregister(); } catch (_) {} });
+      }).catch(() => {});
+    }
+    if (window.caches && caches.keys) {
+      caches.keys().then(keys => {
+        keys.forEach(k => { try { caches.delete(k); } catch (_) {} });
+      }).catch(() => {});
+    }
+  } catch (_) { /* best-effort */ }
+})();
+
 (function maybeResetLocalCache() {
   try {
     const q = new URLSearchParams(window.location.search);
@@ -3021,15 +3051,16 @@ function queueHealth() {
 }
 $('review-export')?.addEventListener('click', exportQueueBackup);
 
-// 5. PWA — register service worker for offline shell caching
-if ('serviceWorker' in navigator) {
-  // Defer until after first paint
-  setTimeout(() => {
-    navigator.serviceWorker.register('barback_sw.js', { scope: './' })
-      .then(reg => { console.log('[barback] sw registered, scope:', reg.scope); })
-      .catch(err => { console.warn('[barback] sw register failed:', err); });
-  }, 0);
-}
+// 5. PWA — SW REGISTRATION DISABLED (PLAN-2026-06-04 SW-kill).
+// A prior barback_sw.js (from an earlier iteration of this PWA) was
+// caching Edge Function fetches; once installed on iOS Safari the SW
+// persisted across reloads and silently swallowed the
+// barback-pin-login POST. Registration is OFF here; the unconditional
+// unregister + cache purge at the top of this script
+// (search "barbackKillStaleSW") handles cleanup on every load. The
+// barback_sw.js file on the server is a kill switch — when an old
+// client checks for SW updates, it pulls the new worker, which
+// self-unregisters and clears caches on activate.
 
 // ════════════════════════════════════════════════════════════════════
 //  Boot
