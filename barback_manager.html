@@ -927,6 +927,35 @@ async function afterSignedIn() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Capability filter — who can receive a barback link?
+// ════════════════════════════════════════════════════════════════════
+// Business rule (PLAN-2026-06-04):
+//   • A staff member is eligible to be checked under STAFF ASSIGNED
+//     iff their `staff.role` text mentions BARBACK or MANAGER.
+//   • `staff.role` is a single TEXT column that holds comma-separated
+//     labels in this venue's data — e.g. "bartender, server, manager",
+//     "bartender, barback, other", "manager, liquor room".
+//   • The check is substring-based on a fully-stripped lowercase form
+//     ("[^a-z]" removed), so it tolerates "Tables Manager",
+//     "table_manager", "Floor Manager", "bar manager", etc.
+//   • Inactive staff are always excluded.
+//
+// Examples (real venue rows):
+//   "barback"                       → eligible (barback)
+//   "bartender, barback"            → eligible (barback)
+//   "bartender, server, manager"    → eligible (manager) — Irish
+//   "manager, liquor room"          → eligible (manager)
+//   "tables manager"                → eligible (manager substring)
+//   "bartender"                     → NOT eligible
+//   "bartender, server"             → NOT eligible
+//   "coat check" / "security"       → NOT eligible
+function canUseBarbackLink(s) {
+  if (!s || s.active === false) return false;
+  const norm = String(s.role || '').toLowerCase().replace(/[^a-z]/g, '');
+  return norm.indexOf('barback') !== -1 || norm.indexOf('manager') !== -1;
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Load venue context (nights, bars, staff) from DB
 // ════════════════════════════════════════════════════════════════════
 async function loadVenueContext() {
@@ -960,17 +989,32 @@ async function loadVenueContext() {
   ).join('');
 
   // Staff
+  // PLAN-2026-06-04 — barback-link recipients are capability-filtered.
+  // `staff.role` is a single TEXT column that already holds comma-separated
+  // labels (e.g. "bartender, server, manager", "bartender, barback").
+  // Include a staff member in the STAFF ASSIGNED list iff their role
+  // string mentions BARBACK or MANAGER (covers "manager", "tables
+  // manager", "table_manager", "floor manager", "bar manager", etc.).
+  // Pure bartender / server / coat check / security / etc. are excluded
+  // unless they also carry one of the included capabilities.
+  // state.staffList stays as the FULL list — telemetry tables and the
+  // audit-filter dropdown still need every staff name for name lookups
+  // on historical events.
   const { data: staffRows } = await SB.from('staff')
-    .select('id, name')
+    .select('id, name, role, active')
     .eq('venue_id', state.venueId)
     .order('name');
   state.staffList = staffRows || [];
-  $('c-staff').innerHTML = state.staffList.map(s =>
-    '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
-      ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
-        '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a>' +
-    '</label>'
-  ).join('');
+  const linkStaff = state.staffList.filter(canUseBarbackLink);
+  $('c-staff').innerHTML = linkStaff.length
+    ? linkStaff.map(s =>
+        '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+          ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
+            '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a>' +
+        '</label>'
+      ).join('')
+    : '<div class="muted small">No barbacks / managers / table-managers found for this venue. ' +
+      'Edit staff roles to include "barback", "manager", or "table manager" to make them eligible.</div>';
   // Wire per-staff rotate links (click consumes the event so the
   // checkbox above doesn't toggle as a side-effect)
   $$('[data-rotate-staff]').forEach(a => {
