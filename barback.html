@@ -1912,6 +1912,98 @@ function installHidListener() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Events insert — REST-fetch fallback when supabase-js is absent
+// ════════════════════════════════════════════════════════════════════
+// PLAN-2026-06-04 — the barback web page does NOT load the supabase-js
+// vendor bundle on a plain Safari/Chrome load (only barinv-public-config.js
+// is included via <script src>). window.supabase is therefore undefined,
+// buildSupabaseClient() returns null, and SB stays null forever — even
+// after a successful PIN login. Phase3.login works regardless because it
+// uses native fetch(). saveCore and syncOutbox previously used
+// SB.from('events').insert(...), so every save and sync attempt failed
+// with "no Supabase config" / "No Supabase configured" — the visible
+// symptom in Daniel's iPhone test.
+//
+// This helper:
+//   1. Uses SB.from('events').insert(record) when SB is available (e.g.
+//      the iOS Capacitor app where window.supabase IS loaded by the
+//      parent bundle).
+//   2. Falls back to a direct PostgREST fetch when SB is null but the
+//      page has supabaseCfg (anon key + URL) AND a scoped JWT.
+//   3. Returns a normalized { error } shape so the existing call sites
+//      need only swap SB.from('events').insert(...) → eventsInsert(...).
+//
+// Never logs the JWT, apikey, raw PIN, or full record body — only path
+// (supabase-js vs rest-fetch), hasJwt boolean, and the record's
+// source/action labels.
+async function eventsInsert(record) {
+  // Path 1: supabase-js (preferred when present).
+  if (SB) {
+    try {
+      console.log('[events-insert]', {
+        path: 'supabase-js',
+        hasJwt: !!state.jwt,
+        source: record.source || null,
+        action: record.action,
+      });
+    } catch (_) { /* console may be unavailable */ }
+    try {
+      const { error } = await SB.from('events').insert(record);
+      return { error: error || null };
+    } catch (e) {
+      return { error: { message: (e && e.message) || String(e) } };
+    }
+  }
+  // Path 2: direct PostgREST fetch.
+  if (!supabaseCfg || !supabaseCfg.url || !supabaseCfg.key) {
+    return { error: { message: 'no Supabase config (public-config missing)' } };
+  }
+  if (!state.jwt) {
+    return { error: { message: 'no scoped JWT — sign in again' } };
+  }
+  try {
+    console.log('[events-insert]', {
+      path: 'rest-fetch',
+      hasJwt: !!state.jwt,
+      source: record.source || null,
+      action: record.action,
+    });
+  } catch (_) { /* console may be unavailable */ }
+  try {
+    const url = supabaseCfg.url.replace(/\/+$/, '') + '/rest/v1/events';
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseCfg.key,
+        'Authorization': 'Bearer ' + state.jwt,
+        'Content-Type': 'application/json',
+        // return=minimal: tell PostgREST to skip serializing the row back
+        // — we don't read the response body on success and this saves a
+        // round-trip serialization. The 23505 unique-violation path still
+        // works (PostgREST always returns the error envelope on 4xx).
+        'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify(record),
+    });
+    if (resp.ok) return { error: null };
+    // PostgREST error envelope: { code, message, details, hint }
+    let body = null;
+    try { body = await resp.json(); } catch (_) { body = null; }
+    return {
+      error: {
+        code:    body && body.code ? String(body.code) : '',
+        message: (body && body.message) || ('HTTP ' + resp.status),
+        details: (body && body.details) || null,
+        hint:    (body && body.hint) || null,
+        status:  resp.status,
+      },
+    };
+  } catch (e) {
+    return { error: { message: (e && e.message) || String(e), status: 0 } };
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Save core — used by manual SAVE button, rapid scan, HID, and undo
 // ════════════════════════════════════════════════════════════════════
 async function saveCore(payload) {
@@ -1986,16 +2078,20 @@ async function saveCore(payload) {
                         (state.serverSession && state.serverSession.session_id) || null;
   }
 
+  // PLAN-2026-06-04 — eventsInsert() routes through supabase-js when SB
+  // is available; otherwise uses direct PostgREST fetch with supabaseCfg
+  // + state.jwt. The previous gate `if (SB && navigator.onLine)` was
+  // failing on plain Safari because supabase-js never loads on this page
+  // (no <script> tag for it), making SB permanently null and every save
+  // fall through to "no Supabase config".
   let synced = false, err = null;
-  if (SB && navigator.onLine) {
-    try {
-      const { error } = await SB.from('events').insert(record);
-      if (!error) synced = true;
-      else if (error.code === '23505') synced = true;
-      else err = error;
-    } catch (e) { err = e; }
+  if (navigator.onLine) {
+    const r = await eventsInsert(record);
+    if (!r.error)                       synced = true;
+    else if (r.error.code === '23505')  synced = true; // unique-violation = idempotent OK
+    else                                err = r.error;
   } else {
-    err = { message: SB ? 'offline' : 'no Supabase config' };
+    err = { message: 'offline' };
   }
 
   // Revoke / auth-error detection — Phase 3 only.
@@ -2197,7 +2293,10 @@ async function undoLast() {
 // ════════════════════════════════════════════════════════════════════
 async function syncOutbox(opts) {
   opts = opts || {};
-  if (!SB) { return { ok:false, msg:'No Supabase configured', total:0 }; }
+  // PLAN-2026-06-04 — eventsInsert() now uses a direct REST fallback
+  // when supabase-js isn't loaded, so the queue can sync from a plain
+  // Safari page as long as supabaseCfg + state.jwt are present. The
+  // legacy `if (!SB) return No Supabase configured` bail is gone.
   if (!navigator.onLine) { return { ok:false, msg:'Offline', total:0 }; }
   const outbox = Outbox.load();
   if (!outbox.length) return { ok:true, msg:'Queue empty', total:0 };
@@ -2211,7 +2310,7 @@ async function syncOutbox(opts) {
     if (opts.progress) opts.progress(i + 1, target.length);
     const { queued_at, attempts, last_error, last_attempt_at, ...rec } = ev;
     try {
-      const { error } = await SB.from('events').insert(rec);
+      const { error } = await eventsInsert(rec);
       if (!error || error.code === '23505') {
         Outbox.removeById(ev.client_event_id);
         Recent.markStatus(ev.client_event_id, 'SYNCED');
@@ -2472,7 +2571,9 @@ function renderReview() {
   const recent = Recent.load().slice(0, 20);
   $('review-meta').textContent =
     'last ' + recent.length + ' saves · ' + queued.length + ' queued · ' +
-    (SB ? (navigator.onLine ? 'online' : 'OFFLINE') : 'no Supabase configured');
+    (SB || (supabaseCfg && state.jwt)
+      ? (navigator.onLine ? 'online' : 'OFFLINE')
+      : 'no Supabase configured');
 
   $('review-queued').innerHTML = queued.length === 0
     ? '<div class="muted small">empty</div>'
