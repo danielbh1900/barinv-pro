@@ -928,9 +928,32 @@ const Auth = {
   decodeToken(tokenStr) {
     if (!tokenStr) return { ok:false, error:'empty token' };
     try {
-      const json = base64UrlDecode(tokenStr);
+      // PLAN-2026-06-04 — accept both v1 and v2 envelopes.
+      //   v1 legacy: single-part  "<payload_b64u>"            (no signature)
+      //   v2 signed: two-part      "<payload_b64u>.<sig_b64u>" (HMAC-SHA256)
+      // The signature on a v2 token is verified server-side by
+      // barback-login via _shared/jwt.ts verifyBarbackSessionToken. The
+      // client has no shared secret available, so it only decodes the
+      // payload here for UI rendering and trusts the server to reject
+      // tampered tokens at login time.
+      //
+      // The previous implementation fed the whole token string into
+      // base64UrlDecode, which threw "The string contains invalid
+      // characters" because '.' isn't a base64 character — this is the
+      // "Invalid link format" / "token parse error" the manager saw on
+      // the iPhone after scanning the QR.
+      const parts = String(tokenStr).split('.');
+      if (parts.length !== 1 && parts.length !== 2) {
+        return { ok:false, error:'expected 1 or 2 token parts, got ' + parts.length };
+      }
+      const payloadPart = parts[0];
+      if (!payloadPart) return { ok:false, error:'empty payload part' };
+
+      const json = base64UrlDecode(payloadPart);
       const payload = JSON.parse(json);
-      if (!payload || payload.v !== 1) return { ok:false, error:'unknown token version' };
+      if (!payload || (payload.v !== 1 && payload.v !== 2)) {
+        return { ok:false, error:'unknown token version' };
+      }
       // Phase 3 tokens require session_id but use the same envelope.
       // Phase 2 tokens require venue_id/night_id only.
       if (!payload.venue_id || !payload.night_id) {
