@@ -870,6 +870,18 @@ const Phase3 = {
       // (barback-pin-login) instead of the legacy access-code
       // 'barback-login' slug which is still serving the older
       // night_staff_assignments flow under that name.
+      //
+      // Safe pre-flight log so iPhone Safari Web Inspector confirms the
+      // fetch is actually firing. NEVER prints the PIN value, full token
+      // bytes, JWT, service key, or any secret — only the endpoint name
+      // and presence/length signals.
+      try {
+        console.log('[pin-login] phase3 POST', {
+          endpoint: 'barback-pin-login',
+          staff_id_present: !!staffId,
+          pin_len: (pin || '').length,
+        });
+      } catch (_) { /* console may be unavailable */ }
       const resp = await fetch(fb + '/barback-pin-login', {
         method: 'POST',
         headers: {
@@ -1028,7 +1040,15 @@ const Auth = {
     if (AUTH_MODE === 'phase2_test') return 'phase2_test';
     if (AUTH_MODE === 'phase3')      return 'phase3';
     // auto:
-    if (this.isPhase3Token(tokenPayload) && phase3Reachable()) return 'phase3';
+    // PLAN-2026-06-04 — a token carrying session_id is a manager-issued
+    // Phase-3 token. Stay on the phase3 code path EVEN IF phase3Reachable()
+    // is false. The prior auto-fallback to phase2_test silently checked the
+    // typed PIN against a local localStorage test value and returned a
+    // misleading "wrong PIN" when the real cause was "Supabase config not
+    // ready yet". verifyPin now surfaces a clear "Config not ready" error
+    // instead, and ensures the PIN POST is actually attempted whenever the
+    // session token comes from the manager UI.
+    if (this.isPhase3Token(tokenPayload)) return 'phase3';
     return 'phase2_test';
   },
   // Dispatching verifyPin
@@ -1036,6 +1056,16 @@ const Auth = {
     if (!pin || pin.length < 4) return { ok:false, error:'PIN too short' };
     const path = this.pathFor(tokenPayload);
     if (path === 'phase3') {
+      // PLAN-2026-06-04 — explicit config-ready preflight. If the
+      // functions endpoint isn't built yet (supabase config not loaded,
+      // public-config script slow, etc.), surface that as the real error
+      // rather than silently sliding into phase2_test and showing a
+      // confusing "wrong PIN" against a local test value. Phase3.login
+      // also returns "no functions endpoint configured" — but checking
+      // here yields a clearer, operator-friendly message at the source.
+      if (!functionsBase()) {
+        return { ok:false, error:'Config not ready — cannot contact PIN server' };
+      }
       // Reconstruct the token from the payload (we may have lost the
       // original string on session restore).
       const tok = (typeof state !== 'undefined' && state && state.tokenStr)
