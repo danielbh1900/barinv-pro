@@ -1465,23 +1465,72 @@ function enterMain() {
   const venue  = (cache.venues || []).find(v => v.id === p.venue_id);
   const night  = (cache.nights || []).find(n => n.id === p.night_id);
   const bar    = p.bar_id ? (cache.bars || []).find(b => b.id === p.bar_id) : null;
-  $('who-line').innerHTML = [
-    '<b>' + esc(state.staffName || 'staff') + '</b>',
-    esc(bar ? bar.name : (p.bar_id ? p.bar_id.slice(0,8) : '(any bar)')),
-    esc(night ? (night.date || night.name || '') : '(no night)'),
-  ].filter(Boolean).join(' · ');
+  // PLAN-2026-06-04 — session-scoped bar list + label fallbacks.
+  //
+  // BUG #1 fix: previously the BAR picker showed every active venue
+  // bar (B1-*, B2-*, B3-*) regardless of which bars the manager
+  // actually selected for the barback (e.g. B3-B2, B3-B3, B3-B4, B3-B5).
+  // The token payload carries allowed_bars[] (and an optional primary
+  // bar_id) — show ONLY those in the picker. Fall back to all active
+  // venue bars only when neither field is set (legacy phase-2 tokens).
+  //
+  // BUG #2 fix: header used to print "(any bar)" / "(no night)" when
+  // the iPhone hadn't seeded the production cache (cache.bars and
+  // cache.nights are empty on a fresh personal phone). The token
+  // payload carries UI hints (bar_name / night_label / allowed_bars
+  // length) and we now fall back through them before showing
+  // "(no night)" / "(any bar)".
+  const cachedBars = (cache.bars || []).filter(b => b.active !== false);
+  let sessionBars = cachedBars;
+  if (Array.isArray(p.allowed_bars) && p.allowed_bars.length > 0) {
+    const allowed = new Set(p.allowed_bars);
+    if (p.bar_id) allowed.add(p.bar_id);
+    sessionBars = cachedBars.filter(b => allowed.has(b.id));
+  } else if (p.bar_id) {
+    sessionBars = cachedBars.filter(b => b.id === p.bar_id);
+  }
 
-  state.selectedBarId = p.bar_id || null;
-  const allowedBars = (cache.bars || []).filter(b => b.active !== false);
-  if (!p.bar_id && allowedBars.length > 1) {
+  // Initial selection — primary bar_id wins; else first allowed bar.
+  state.selectedBarId = p.bar_id || (sessionBars[0] && sessionBars[0].id) || null;
+
+  function renderWhoLine() {
+    const selBar = state.selectedBarId
+      ? cachedBars.find(b => b.id === state.selectedBarId)
+      : null;
+    const barLabel =
+      (selBar && selBar.name) ||
+      p.bar_name ||
+      (state.selectedBarId
+        ? ('bar ' + String(state.selectedBarId).slice(0, 8))
+        : (Array.isArray(p.allowed_bars) && p.allowed_bars.length > 1
+            ? (p.allowed_bars.length + ' allowed bars')
+            : '(any bar)'));
+    const nightLabel =
+      (night && (night.date || night.name)) ||
+      p.night_label ||
+      (p.night_id ? ('night ' + String(p.night_id).slice(0, 8)) : '(no night)');
+    $('who-line').innerHTML = [
+      '<b>' + esc(state.staffName || 'staff') + '</b>',
+      esc(barLabel),
+      esc(nightLabel),
+    ].filter(Boolean).join(' · ');
+  }
+  renderWhoLine();
+
+  if (sessionBars.length > 1) {
     const sel = $('bar-pick');
-    sel.innerHTML = allowedBars.map(b =>
+    sel.innerHTML = sessionBars.map(b =>
       '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>').join('');
-    if (allowedBars[0]) state.selectedBarId = allowedBars[0].id;
-    sel.value = state.selectedBarId || '';
-    sel.onchange = () => { state.selectedBarId = sel.value; };
+    sel.value = state.selectedBarId || sessionBars[0].id;
+    if (state.selectedBarId !== sel.value) state.selectedBarId = sel.value;
+    sel.onchange = () => {
+      state.selectedBarId = sel.value;
+      try { renderWhoLine(); } catch (_) {}
+    };
     $('bar-pick-row').style.display = '';
   } else {
+    // Zero or one allowed bar: hide the picker. The header above
+    // already shows the locked-in bar name.
     $('bar-pick-row').style.display = 'none';
   }
 
@@ -1551,12 +1600,44 @@ $('rapid-mode').addEventListener('change', (e) => {
 // ════════════════════════════════════════════════════════════════════
 //  Item search + barcode lookup
 // ════════════════════════════════════════════════════════════════════
+// PLAN-2026-06-04 — barcode normalization for scanner item lookup.
+//
+// public.items uses sku as the de facto barcode field (no separate
+// barcode/code column exists). Stored SKUs are UPC-A zero-padded to
+// EAN-13 form (e.g. CASAMIGO REPOSADO is stored as sku
+// "0652341401024"). The phone camera reads UPC-A as 12 digits
+// ("652341401024") with NO leading zero — so the prior exact-string
+// match failed on every Casamigos-style row.
+//
+// normalizeBarcodeLike: strip non-alphanumeric, lowercase, and strip
+// the leading-zero run for purely-numeric values. UPC-A vs EAN-13
+// zero-padding now collide into the same canonical key. Non-numeric
+// codes (alphanumeric SKUs / supplier serials) keep their leading
+// characters — only the digit-only form is leading-zero-stripped.
+//
+// Safe by construction:
+//   normalize("652341401024")   -> "652341401024"
+//   normalize("0652341401024")  -> "652341401024"   (strips one leading 0)
+//   normalize("00080480981082") -> "80480981082"    (strips both leading 0s)
+//   normalize("CAB-12-345")     -> "cab12345"       (mixed → keep all chars)
+//   normalize("")               -> ""               (empty → no match)
+function normalizeBarcodeLike(value) {
+  const s = String(value || '').trim().toLowerCase().replace(/[^0-9a-z]/g, '');
+  if (!s) return '';
+  if (/^[0-9]+$/.test(s)) return s.replace(/^0+/, '');
+  return s;
+}
+
 function lookupByBarcode(raw) {
-  if (!raw) return null;
-  const c = String(raw).trim().toLowerCase();
+  const target = normalizeBarcodeLike(raw);
+  if (!target) return null;
   return (cache.items || []).find(it => {
-    const cands = [it.barcode, it.code, it.sku].filter(Boolean).map(x => String(x).toLowerCase());
-    return cands.includes(c);
+    // it.barcode / it.code are kept in the candidate list for forward
+    // compatibility — public.items may grow real barcode columns later
+    // (and an item_aliases table is on the roadmap). Today only
+    // it.sku is populated by the bundle.
+    const cands = [it.barcode, it.code, it.sku].filter(Boolean).map(normalizeBarcodeLike);
+    return cands.includes(target);
   }) || null;
 }
 function setPickedItem(it) {
@@ -1644,6 +1725,17 @@ async function ensureZXing() {
 }
 
 async function openScanner() {
+  // PLAN-2026-06-04 — safe diagnostic so iPhone Web Inspector can
+  // tell whether the scanner actually opened. Logs ZERO secrets — only
+  // the continuous flag, the action-gate boolean, and the cached item
+  // count. NEVER prints the token, PIN, JWT, or apikey.
+  try {
+    console.log('[scanner] open', {
+      continuous: !!$('rapid-mode').checked,
+      hasAction: !!state.selectedAction,
+      cache_items_count: (cache.items || []).length,
+    });
+  } catch (_) { /* console may be unavailable */ }
   if (!state.selectedAction) {
     Feedback.warn();
     alert('Pick TAKEN or RETURN first.');
@@ -1671,6 +1763,14 @@ async function openScanner() {
     (result, err, controls) => {
       if (!result || !result.getText) return;
       const code = result.getText();
+      // PLAN-2026-06-04 — safe diagnostic. Logs ZXing decode every time
+      // it fires, before the dupe-window suppresses repeats. Length and
+      // last 4 chars only — never the full barcode body (some venues
+      // treat barcodes as semi-sensitive serials).
+      try {
+        const s = String(code || '');
+        console.log('[scanner] decoded', { len: s.length, last4: s.slice(-4) });
+      } catch (_) { /* console may be unavailable */ }
       const now = Date.now();
       const last = state.scannerCooldown[code] || 0;
       if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
@@ -1683,15 +1783,40 @@ async function openScanner() {
 
 async function onBarcodeScanned(code, controls) {
   const it = lookupByBarcode(code);
+  // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
+  // distinguish "ZXing decoded but no item match" from "ZXing never
+  // decoded anything". No secret content — just lookup result + cache
+  // size. Item id is shown only as last-8 suffix.
+  try {
+    const s = String(code || '');
+    console.log('[scanner] lookup', {
+      code_len: s.length,
+      code_last4: s.slice(-4),
+      matched: !!it,
+      item_id_suffix: it ? String(it.id || '').slice(-8) : null,
+      cache_items_count: (cache.items || []).length,
+    });
+  } catch (_) { /* console may be unavailable */ }
   if (!it) {
-    showScannerToast('? Unknown barcode: ' + code, 'warn');
+    // Surface the decoded code in BOTH modes (rapid + one-shot) so the
+    // operator can see exactly what ZXing read. Previously the rapid-
+    // mode toast disappeared in 1.4 s and the search field was never
+    // populated — the operator had no way to inspect the bad barcode.
+    showScannerToast(
+      'Barcode scanned but item not found (' + code + ') — ' +
+        (cache.items || []).length + ' cached items',
+      'warn'
+    );
+    try { $('search-input').value = code; } catch (_) {}
     if (!state.scannerContinuous) {
       // One-shot: drop into manual search with code prefilled
       if (controls && controls.stop) controls.stop();
       closeScanner();
-      $('search-input').value = code;
       searchItems(code);
     }
+    // Rapid mode: stay in scanner so the next bottle can be scanned;
+    // the unmatched code is now in the search field for review when
+    // the operator closes the scanner.
     return;
   }
 
