@@ -836,7 +836,11 @@ const Phase3 = {
     const fb = functionsBase();
     if (!fb) return { ok:false, error:'no functions endpoint configured' };
     try {
-      const resp = await fetch(fb + '/barback-login', {
+      // PLAN-2026-06-04 — call the PIN-aware login endpoint
+      // (barback-pin-login) instead of the legacy access-code
+      // 'barback-login' slug which is still serving the older
+      // night_staff_assignments flow under that name.
+      const resp = await fetch(fb + '/barback-pin-login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
