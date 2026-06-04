@@ -791,15 +791,82 @@ function fmtTime(d) {
   return x.toLocaleString();
 }
 function jwt() { return SB.auth.getSession().then(r => r.data.session?.access_token || null); }
+
+// PLAN-2026-06-04 — fresh-token helper.
+// Always fetch a fresh manager access_token immediately before each
+// Edge Function call. Supabase JS auto-refresh occasionally lags or
+// leaves an expired access_token sitting in localStorage; the Edge
+// Function then 401s with "invalid or expired manager JWT". This
+// helper:
+//   1. asks getSession() for the current session;
+//   2. if there's no access_token OR it's within 60s of expiry, calls
+//      refreshSession() explicitly;
+//   3. throws on failure so the caller surfaces "Manager login expired".
+async function getFreshManagerAccessTokenOrThrow() {
+  const skewSec = 60;
+  let session = null;
+  try {
+    const r = await SB.auth.getSession();
+    session = r && r.data && r.data.session ? r.data.session : null;
+  } catch (_) {}
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const needsRefresh =
+    !session || !session.access_token ||
+    (typeof session.expires_at === 'number' && (session.expires_at - nowSec) < skewSec);
+
+  if (needsRefresh) {
+    try {
+      const rr = await SB.auth.refreshSession();
+      session = rr && rr.data && rr.data.session ? rr.data.session : null;
+      if ((rr && rr.error) || !session || !session.access_token) {
+        throw new Error('MANAGER_AUTH_EXPIRED');
+      }
+    } catch (_) {
+      throw new Error('MANAGER_AUTH_EXPIRED');
+    }
+  }
+
+  if (!session || !session.access_token) throw new Error('MANAGER_AUTH_EXPIRED');
+  return session.access_token;
+}
+
 async function fnInvoke(path, body) {
-  const tok = await jwt();
-  if (!tok) throw new Error('not signed in');
+  let tok;
+  try {
+    tok = await getFreshManagerAccessTokenOrThrow();
+  } catch (_) {
+    throw new Error('Manager login expired. Please sign out and sign in again.');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + tok,
+  };
+  // Defensive: also send apikey (anon/publishable) so the Supabase
+  // Edge gateway routes/identifies the request consistently. cfg.key
+  // is the publishable/anon key seeded from localStorage or
+  // barinv-public-config.js — NEVER the service-role key.
+  try { if (typeof cfg !== 'undefined' && cfg && cfg.key) headers['apikey'] = cfg.key; } catch (_) {}
+
   const r = await fetch(FN_BASE + '/' + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+    headers: headers,
     body: JSON.stringify(body || {}),
   });
   const j = await r.json().catch(() => ({}));
+
+  if (r.status === 401) {
+    // SANITISED logging — never print the access_token or apikey.
+    try {
+      console.warn('[barback-fn] 401', {
+        path: path,
+        status: 401,
+        body: JSON.stringify(j).slice(0, 200),
+      });
+    } catch (_) {}
+    throw new Error('Manager login expired. Please sign out and sign in again.');
+  }
   if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
   return j;
 }
