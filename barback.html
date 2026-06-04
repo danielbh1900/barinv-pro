@@ -296,6 +296,13 @@
     }
     .chip:active { background:#374151; color:#fff; }
   </style>
+  <!-- Public Supabase config fallback for barbacks on personal phones
+       that have never opened the BARINV admin app. Loaded BEFORE the
+       main inline script so loadSupabaseConfig() can see
+       window.BARINV_PUBLIC_SUPABASE_CONFIG. onerror is tolerant: if the
+       file is missing, the page falls back to the legacy localStorage
+       chain. See barinv-public-config.js. -->
+  <script src="barinv-public-config.js" onerror="console.warn('[barinv] barinv-public-config.js missing — barbacks need localStorage seeded')"></script>
 </head>
 <body>
 
@@ -788,6 +795,17 @@ function loadSupabaseConfig() {
       }
     } catch (_) {}
   }
+  // PUBLIC CONFIG FALLBACK — for barbacks on personal phones that have
+  // never opened the BARINV admin app. The public {url, anonKey} shape
+  // is remapped to the {url, key} shape this loader returns. The anon
+  // key is browser-safe by design; RLS + the signed barback session
+  // token enforce all access. See barinv-public-config.js.
+  try {
+    const pub = window.BARINV_PUBLIC_SUPABASE_CONFIG;
+    if (pub && pub.url && pub.anonKey) {
+      return { url: pub.url, key: pub.anonKey };
+    }
+  } catch (_) {}
   return null;
 }
 let supabaseCfg = loadSupabaseConfig();

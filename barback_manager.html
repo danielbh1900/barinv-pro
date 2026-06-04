@@ -235,6 +235,12 @@
     .pilot-go-nogo  { background:linear-gradient(90deg,#b91c1c,#7c2d12); color:#fee2e2; }
     .pilot-go-unknown { background:#1f2937; color:#9ca3af; border:1px dashed #374151; }
   </style>
+  <!-- Public Supabase config fallback. Loaded BEFORE the inline scripts
+       so loadCfg() can see window.BARINV_PUBLIC_SUPABASE_CONFIG and the
+       "Supabase config missing" error never fires for the public deploy.
+       onerror tolerant: missing file just falls back to legacy
+       localStorage. See barinv-public-config.js. -->
+  <script src="barinv-public-config.js" onerror="console.warn('[barinv] barinv-public-config.js missing — manager needs localStorage seeded')"></script>
 </head>
 <body>
 
@@ -710,6 +716,16 @@ function loadCfg() {
       }
     } catch (_) {}
   }
+  // PUBLIC CONFIG FALLBACK — for the public deploy. The {url, anonKey}
+  // shape is remapped to {url, key} this loader returns. The anon key
+  // is browser-safe by design; RLS + signed barback session tokens
+  // enforce all access. See barinv-public-config.js.
+  try {
+    const pub = window.BARINV_PUBLIC_SUPABASE_CONFIG;
+    if (pub && pub.url && pub.anonKey) {
+      return { url: pub.url, key: pub.anonKey };
+    }
+  } catch (_) {}
   return null;
 }
 
