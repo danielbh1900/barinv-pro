@@ -1,0 +1,2997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="manifest" href="barback_manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/barback-icon.svg">
+  <link rel="apple-touch-icon" href="icons/barback-icon.svg">
+  <title>BARINV — Barback</title>
+  <!--
+    BARINV BARBACK WEB LINK FLOW
+    ────────────────────────────────────────────────────────────────────
+    Phase 2 ("operational MVP") — 2026-05-15
+    Phase 3 ("production auth") layered in 2026-05-15
+
+    Shareable-link PWA for barbacks operating from their own phone, no
+    BARINV iOS app install required. Built for nightclub speed: minimal
+    taps, fast scan, big color cues for low-light environments, robust
+    offline handling, graceful identity/session re-login.
+
+    Auth path selection (AUTH_MODE):
+      • 'auto' (default) — call the barback-login Edge Function if the
+        Supabase config + functions endpoint are reachable AND the token
+        carries a session_id. Falls back to phase 2 test PIN otherwise.
+      • 'phase3'        — require Edge Function login; refuse on failure.
+      • 'phase2_test'   — never call the Edge Function; legacy test mode.
+
+    Phase 3 contract (talks to supabase/functions/barback-login):
+      • Posts { token, staff_id, pin } → receives { jwt, expires_at,
+        session, staff, bundle:{ items, bars, staff } }.
+      • Stores the JWT, re-creates the Supabase client with an
+        Authorization header so PostgREST switches to the `barback_user`
+        role and RLS narrows inserts to the session's scope.
+      • Writes proper columns on `events`: source, staff_id, session_id.
+        Legacy tag-in-notes ([source=...] etc.) is dropped when a JWT
+        is present (still emitted in Phase 2 fallback for compatibility).
+      • Revoke awareness: if any insert returns a 401/403/PostgREST RLS
+        violation, the session is force-cleared and the user is sent
+        back to the token-entry screen.
+
+    Architecture boundaries (UNCHANGED):
+      • TEST_MODE_BARBACK = true gate (single switch to disable page).
+      • Production code paths untouched (index.html, BLE config, FSM,
+        advisor, POS math, PDF, inventory, ESP32 firmware).
+      • Auth = { … } object is still the swap-in boundary — Phase 3
+        plugs in alongside Phase 2 rather than replacing it, so a
+        manager-staged test PIN still works for offline dev.
+      • Reads production offline cache READ-ONLY (Phase 2 fallback);
+        Phase 3 receives a server-side bundle from barback-login.
+
+    See BARBACK_WEB_LINK_ARCHITECTURE.md for the spec, and
+    PHASE3_DEPLOY_RUNBOOK.md for deployment.
+  -->
+  <style>
+    *,*::before,*::after { box-sizing:border-box; -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
+    html,body { margin:0; padding:0; background:#0a0a0a; color:#e6e6e6;
+      font-family:-apple-system,"SF Pro Display",system-ui,sans-serif;
+      -webkit-font-smoothing:antialiased; min-height:100vh; }
+    button { font-family:inherit; }
+
+    /* ── Sticky strips at top ─────────────────────────────────────── */
+    .test-warn {
+      background:linear-gradient(90deg,#b91c1c,#7c2d12);
+      color:#fff; padding:8px 14px; font-weight:800;
+      letter-spacing:0.12em; text-align:center; font-size:11px;
+      position:sticky; top:0; z-index:100;
+    }
+    .expiration-strip {
+      background:#0a0a0a; border-bottom:1px solid #222;
+      padding:6px 14px; text-align:center; font-size:11px;
+      color:#7dd3fc; letter-spacing:0.08em;
+      position:sticky; top:0; z-index:99;
+    }
+    .expiration-strip.warning { color:#fbbf24; }
+    .expiration-strip.danger { color:#fca5a5; background:#3f0c0c; }
+
+    /* ── Page wrapper ─────────────────────────────────────────────── */
+    .wrap { padding:12px; max-width:600px; margin:0 auto; padding-bottom:120px; }
+    h1 { font-size:18px; margin:0 0 4px; letter-spacing:0.04em; }
+    h2 { font-size:13px; margin:0 0 12px; color:#888; font-weight:500; letter-spacing:0.06em; }
+    .row { margin:10px 0; }
+    label { display:block; font-size:10px; letter-spacing:0.14em; color:#888; margin-bottom:6px; }
+    input,select,textarea {
+      width:100%; padding:14px;
+      background:#1a1a1a; border:1px solid #333; border-radius:6px;
+      color:#fff; font-size:16px; font-family:inherit; -webkit-user-select:text; user-select:text;
+    }
+    input:focus,select:focus,textarea:focus { outline:none; border-color:#fb923c; }
+    input[type="number"] { font-size:18px; }
+    .pin-input { font-size:26px; letter-spacing:0.4em; text-align:center; }
+
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .btn { width:100%; padding:18px; margin:8px 0;
+      background:#3b82f6; color:#fff; font-size:15px; font-weight:700;
+      letter-spacing:0.08em; border:none; border-radius:8px; cursor:pointer; }
+    .btn:active { background:#2563eb; }
+    .btn[disabled] { background:#333; color:#666; }
+    .btn-secondary { background:#1a1a1a; color:#bbb; border:1px solid #333; }
+    .btn-secondary:active { background:#374151; }
+    .btn-success { background:#22c55e; color:#000; font-weight:800; }
+    .btn-success:active { background:#16a34a; }
+    .btn-danger { background:#7c2d12; }
+    .btn-taken { background:#b91c1c; color:#fff; }
+    .btn-taken:active { background:#7c2d12; }
+    .btn-return { background:#047857; color:#fff; }
+    .btn-return:active { background:#065f46; }
+
+    /* ── Action picker (giant, color-coded for dark venues) ──────── */
+    .action-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:6px 0; }
+    .action {
+      padding:36px 8px; background:#1a1a1a; color:#666;
+      border:3px solid #333; border-radius:12px; cursor:pointer;
+      font-size:22px; font-weight:800; letter-spacing:0.18em;
+      transition:transform .08s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease, color .12s ease;
+    }
+    .action:active { transform:scale(0.98); }
+    .action.selected[data-action="TAKEN"] {
+      background:linear-gradient(135deg,#dc2626,#7c2d12);
+      color:#fff; border-color:#fb923c;
+      box-shadow:0 0 28px rgba(251,146,60,0.45);
+      transform:scale(1.02);
+    }
+    .action.selected[data-action="RETURNED"] {
+      background:linear-gradient(135deg,#10b981,#065f46);
+      color:#fff; border-color:#34d399;
+      box-shadow:0 0 28px rgba(52,211,153,0.45);
+      transform:scale(1.02);
+    }
+
+    /* ── Identity bar (top of main screen) ───────────────────────── */
+    .identity-bar {
+      background:#1a1a1a; border-bottom:1px solid #333; padding:10px 14px;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+      font-size:11px; color:#aaa;
+    }
+    .identity-bar b { color:#fb923c; }
+    .identity-bar .who { flex:1; }
+    .identity-bar .logout { padding:6px 12px; background:#7c2d12; color:#fff;
+      border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
+
+    /* ── Scan/save action-tinted callouts ────────────────────────── */
+    .scan-cta {
+      width:100%; padding:24px 12px;
+      background:#1f2937; color:#fff; font-size:18px; font-weight:800;
+      border:2px solid #374151; border-radius:10px; cursor:pointer;
+      letter-spacing:0.08em; margin:8px 0;
+    }
+    .scan-cta:active { background:#111827; }
+    .scan-cta.tinted-taken  { background:linear-gradient(135deg,#dc2626,#7c2d12); border-color:#fb923c; }
+    .scan-cta.tinted-return { background:linear-gradient(135deg,#10b981,#065f46); border-color:#34d399; color:#fff; }
+
+    /* ── Item picker ─────────────────────────────────────────────── */
+    .item-results {
+      max-height:220px; overflow-y:auto;
+      background:#0a0a0a; border:1px solid #222;
+      margin-top:6px; border-radius:6px;
+    }
+    .item-row {
+      padding:12px 14px; border-bottom:1px solid #1a1a1a;
+      cursor:pointer; font-size:14px;
+    }
+    .item-row:last-child { border-bottom:none; }
+    .item-row:active { background:#1a1a1a; }
+    .item-row .sku { color:#666; font-size:11px; float:right; }
+    .selected-item {
+      margin-top:8px; padding:12px;
+      background:rgba(251,146,60,0.10); border:1px solid #fb923c; border-radius:6px;
+      color:#fbbf24; font-weight:600; font-size:14px;
+    }
+
+    /* ── Scanner modal ───────────────────────────────────────────── */
+    .scanner-box {
+      position:fixed; inset:0; background:#000; z-index:200;
+      display:none; flex-direction:column;
+    }
+    .scanner-box.active { display:flex; }
+    .scanner-box video { flex:1; width:100%; height:auto; object-fit:cover; background:#000; }
+    .scanner-box .closebar {
+      padding:12px 14px; background:#1a1a1a; display:flex; justify-content:space-between; align-items:center;
+    }
+    .scanner-box .closebar .left { color:#fff; font-weight:800; letter-spacing:0.1em; font-size:13px; }
+    .scanner-box .closebar button { padding:10px 16px; background:#b91c1c; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:12px; }
+    .scanner-box .closebar .rapid-tag {
+      display:inline-block; padding:3px 8px; border-radius:4px; margin-left:8px;
+      background:#fb923c; color:#000; font-size:10px; font-weight:800; letter-spacing:0.1em;
+    }
+    .scanner-box .hint { color:#aaa; font-size:12px; padding:0 14px 10px; text-align:center; }
+    .scanner-toast {
+      position:absolute; top:60px; left:14px; right:14px;
+      background:rgba(0,0,0,0.85); border:2px solid #22c55e; color:#4ade80;
+      padding:14px; border-radius:10px; font-size:16px; font-weight:700;
+      text-align:center; display:none; z-index:201;
+    }
+    .scanner-toast.warn { border-color:#f59e0b; color:#fbbf24; }
+    .scanner-toast.err { border-color:#ef4444; color:#fca5a5; }
+
+    /* ── Toasts / status pills ───────────────────────────────────── */
+    .status { padding:14px; margin:10px 0; border-radius:6px; font-weight:600; font-size:13px; line-height:1.45; }
+    .status.ok   { background:rgba(34,197,94,0.10);  color:#4ade80; border:1px solid #22c55e; }
+    .status.warn { background:rgba(245,158,11,0.10); color:#fbbf24; border:1px solid #f59e0b; }
+    .status.err  { background:rgba(239,68,68,0.10);  color:#f87171; border:1px solid #ef4444; }
+    .status.info { background:rgba(59,130,246,0.10); color:#93c5fd; border:1px solid #3b82f6; }
+
+    /* ── Success toast (full-screen, after save) ─────────────────── */
+    .ok-overlay {
+      position:fixed; inset:0; z-index:300;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(0,0,0,0.7); animation:fadein .15s ease;
+    }
+    .ok-overlay.active { display:flex; }
+    .ok-overlay .card {
+      background:#064e3b; color:#fff; border:3px solid #22c55e;
+      border-radius:18px; padding:30px 40px;
+      font-size:30px; font-weight:800; letter-spacing:0.08em;
+      text-align:center; box-shadow:0 0 40px rgba(34,197,94,0.4);
+      max-width:90vw;
+    }
+    .err-overlay .card { background:#3f0c0c; border-color:#ef4444; box-shadow:0 0 40px rgba(239,68,68,0.4); }
+    .ok-overlay .card .sub { font-size:13px; color:#bbf7d0; font-weight:500; letter-spacing:0.04em; margin-top:8px; }
+    .err-overlay .card .sub { color:#fecaca; }
+    @keyframes fadein { from { opacity:0 } to { opacity:1 } }
+
+    /* ── Recent panel ────────────────────────────────────────────── */
+    .recent {
+      font-size:12px; line-height:1.7; color:#aaa;
+      max-height:220px; overflow-y:auto;
+      background:#0a0a0a; border:1px solid #222; border-radius:6px;
+      padding:8px 10px;
+    }
+    .recent .row-r { padding:6px 0; border-bottom:1px solid #161616; display:flex; gap:8px; align-items:center; }
+    .recent .row-r:last-child { border-bottom:none; }
+    .recent .badge {
+      display:inline-block; padding:2px 6px; border-radius:4px; font-size:9px;
+      font-weight:800; letter-spacing:0.08em; min-width:46px; text-align:center;
+    }
+    .recent .badge.synced { background:#064e3b; color:#4ade80; }
+    .recent .badge.queued { background:#3f2c0a; color:#fbbf24; }
+    .recent .badge.undone { background:#1f2937; color:#9ca3af; }
+    .recent .badge.error  { background:#3f0c0c; color:#fca5a5; }
+    .recent .ts { color:#666; font-size:10px; min-width:44px; }
+    .recent .body { flex:1; }
+    .recent .body.undone { text-decoration:line-through; color:#666; }
+    .recent .act-T { color:#fb923c; font-weight:700; }
+    .recent .act-R { color:#34d399; font-weight:700; }
+
+    /* ── Footer ──────────────────────────────────────────────────── */
+    .footer {
+      position:fixed; bottom:0; left:0; right:0;
+      background:#0a0a0a; border-top:1px solid #222;
+      padding:8px 8px env(safe-area-inset-bottom, 8px);
+      display:flex; gap:6px; z-index:90;
+    }
+    .footer button {
+      flex:1; padding:12px 4px; background:#1a1a1a; color:#aaa;
+      border:1px solid #333; border-radius:6px; cursor:pointer;
+      font-size:10px; font-weight:700; letter-spacing:0.04em;
+    }
+    .footer .queue-count { color:#fb923c; font-weight:800; }
+    .footer .footer-status { background:#3f2c0a; color:#fbbf24; }
+    .footer .footer-status.green { background:#064e3b; color:#4ade80; }
+
+    /* ── Misc ────────────────────────────────────────────────────── */
+    .screen { display:none; }
+    .screen.active { display:block; }
+    .center { text-align:center; }
+    .small { font-size:11px; color:#888; line-height:1.5; }
+    .muted { color:#666; }
+    code { background:#000; padding:1px 6px; border-radius:3px; color:#fbbf24; font-size:11px; }
+    pre.token-out {
+      background:#000; padding:12px; border-radius:6px; font-size:11px;
+      word-break:break-all; white-space:pre-wrap; color:#fbbf24; max-height:200px; overflow:auto;
+    }
+    #qr-out { background:#fff; padding:14px; border-radius:8px; display:inline-block; }
+    #qr-out svg { display:block; max-width:100%; height:auto; }
+    .checkbox-row { display:flex; gap:8px; align-items:center; padding:8px 0; font-size:13px; color:#bbb; }
+    .checkbox-row input[type="checkbox"] { width:18px; height:18px; flex:0 0 auto; }
+    .ble-card {
+      background:#0e1116; border:1px solid #1f2937; border-radius:8px;
+      padding:12px; margin:10px 0; font-size:12px; color:#9ca3af;
+    }
+    .ble-card.connected { border-color:#10b981; color:#a7f3d0; }
+    .ble-weight { font-size:32px; font-weight:800; color:#4ade80; text-align:center; padding:8px 0; }
+    .ble-weight.unstable { color:#fbbf24; }
+
+    /* Phase 5: recent-item quick-pick chips */
+    .recent-chips { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 4px; }
+    .chip {
+      flex:0 0 auto; background:#1f2937; color:#bbb;
+      border:1px solid #374151; border-radius:18px;
+      padding:8px 12px; font-size:12px; font-weight:600;
+      cursor:pointer; font-family:inherit;
+      max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .chip:active { background:#374151; color:#fff; }
+  </style>
+</head>
+<body>
+
+<!-- ============================ STICKY STRIPS ============================ -->
+<div class="test-warn" id="test-warn">⚠ TEST MODE — NO SECURITY ⚠</div>
+<div id="net-banner" style="display:none;position:sticky;top:0;z-index:101;
+     background:#3f0c0c;color:#fca5a5;padding:6px 14px;text-align:center;
+     font-size:11px;font-weight:800;letter-spacing:0.08em;border-bottom:1px solid #ef4444;">
+  ⚠ OFFLINE — saves are queued locally and will sync when the network returns
+</div>
+<div class="expiration-strip" id="expiration-strip" style="display:none;">—</div>
+
+<!-- ============================ SCREEN 1: TOKEN ENTRY ============================ -->
+<div class="screen" id="screen-token">
+  <div class="wrap">
+    <h1>BARINV Barback</h1>
+    <h2>Enter or paste your access link</h2>
+    <div class="row">
+      <label>ACCESS LINK / TOKEN</label>
+      <input id="token-input" type="text" placeholder="paste full URL or token..." autocomplete="off">
+      <button class="btn" id="token-continue">CONTINUE →</button>
+    </div>
+    <div class="row small">
+      Your manager will share a link like:<br>
+      <code>barback.html?token=eyJ2IjoxLC...</code><br>
+      or a QR you can scan with your phone camera.
+    </div>
+    <div class="row" style="margin-top:30px;">
+      <details>
+        <summary class="small" style="cursor:pointer;color:#888;">Developer / manager helpers</summary>
+        <div class="small" style="padding:10px 0;">
+          <a href="?builder=1" style="color:#3b82f6;">→ Build a test token (with QR)</a><br>
+          <a href="?setup=1" style="color:#3b82f6;">→ Set the test PIN</a><br>
+          <a href="?review=1" style="color:#3b82f6;">→ Review queued events</a>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 2: PIN + STAFF ============================ -->
+<div class="screen" id="screen-pin">
+  <div class="wrap">
+    <h1>Who are you?</h1>
+    <h2 id="screen-pin-meta">Venue / Night / Bar</h2>
+    <div class="row" id="staff-select-row">
+      <label>STAFF</label>
+      <select id="staff-select"><option value="">(loading…)</option></select>
+    </div>
+    <div class="row">
+      <label>PIN (4–6 digits)</label>
+      <input id="pin-input" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+             class="pin-input" placeholder="••••" autocomplete="off">
+    </div>
+    <button class="btn btn-success" id="pin-submit">SIGN IN</button>
+    <button class="btn btn-secondary" id="pin-cancel">← Back</button>
+    <div id="pin-status"></div>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 3: MAIN WORKFLOW ============================ -->
+<div class="screen" id="screen-main">
+  <div class="identity-bar">
+    <div class="who" id="who-line">—</div>
+    <button class="logout" id="logout-btn">Logout</button>
+  </div>
+
+  <div class="wrap">
+
+    <div class="row">
+      <label>ACTION</label>
+      <div class="action-row">
+        <button type="button" class="action" data-action="TAKEN">TAKEN</button>
+        <button type="button" class="action" data-action="RETURNED">RETURN</button>
+      </div>
+    </div>
+
+    <div class="row" id="bar-pick-row" style="display:none;">
+      <label>BAR</label>
+      <select id="bar-pick"><option value="">(no bar)</option></select>
+    </div>
+
+    <div class="row">
+      <label>SCAN OR SEARCH ITEM</label>
+      <div class="recent-chips" id="recent-items-chips" style="display:none;"></div>
+      <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
+      <div class="checkbox-row">
+        <input type="checkbox" id="rapid-mode">
+        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, auto-save qty=1</label>
+      </div>
+      <input id="search-input" type="text" placeholder="or type barcode / name (or use HID scanner)..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div id="search-results" class="item-results" style="display:none;"></div>
+      <div id="picked-item" class="selected-item" style="display:none;"></div>
+    </div>
+
+    <div class="row">
+      <label>QTY (TAKEN: bottles · RETURN: grams)</label>
+      <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
+    </div>
+
+    <div class="row">
+      <label>NOTES (optional)</label>
+      <input id="notes-input" type="text" autocomplete="off">
+    </div>
+
+    <button class="btn btn-success" id="save-btn">💾 SAVE TRANSACTION</button>
+    <div id="save-status"></div>
+
+    <!-- BLE attach (Capacitor-only; hidden in plain Safari) -->
+    <div class="ble-card" id="ble-card" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div>
+          <b style="color:#7dd3fc;">SCALE</b>
+          <span id="ble-state" class="muted">disconnected</span>
+        </div>
+        <button class="btn btn-secondary" id="ble-toggle" style="width:auto;padding:8px 14px;margin:0;">CONNECT</button>
+      </div>
+      <div class="ble-weight" id="ble-weight" style="display:none;">— g</div>
+      <div class="small muted" style="margin-top:6px;">Only available inside the BARINV app. Safari users skip this section.</div>
+    </div>
+
+    <div class="row">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <label style="margin:0;">RECENT</label>
+        <div>
+          <button class="btn-secondary" id="recent-undo" style="font-size:10px;padding:6px 10px;border-radius:4px;cursor:pointer;">↶ UNDO LAST</button>
+          <button class="btn-secondary" id="recent-viewall" style="font-size:10px;padding:6px 10px;border-radius:4px;cursor:pointer;margin-left:4px;">VIEW ALL</button>
+        </div>
+      </div>
+      <div id="recent" class="recent">No saves yet.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button id="sync-btn" class="footer-status">↑ SYNC <span class="queue-count">(<span id="queue-count">0</span>)</span></button>
+    <button id="reload-cache-btn">↺ RELOAD</button>
+    <button id="logout-btn-2">← LOGOUT</button>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 4: REVIEW (last 20 + queue) ============================ -->
+<div class="screen" id="screen-review">
+  <div class="wrap">
+    <h1>Transaction review</h1>
+    <h2 id="review-meta">last 20 saves · queue separately</h2>
+
+    <div class="row">
+      <label>QUEUED (not yet synced)</label>
+      <div id="review-queued" class="recent">—</div>
+    </div>
+
+    <div class="row">
+      <label>SYNCED (last 20)</label>
+      <div id="review-synced" class="recent">—</div>
+    </div>
+
+    <button class="btn btn-secondary" id="review-back">← Back</button>
+    <button class="btn" id="review-sync">↑ SYNC QUEUE</button>
+    <button class="btn btn-secondary" id="review-export">⬇ DOWNLOAD QUEUE BACKUP (.json)</button>
+    <button class="btn btn-danger" id="review-clear">⚠ CLEAR SYNCED HISTORY (test mode)</button>
+    <div id="review-status"></div>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 5: BUILDER ============================ -->
+<div class="screen" id="screen-builder">
+  <div class="wrap">
+    <h1>Token Builder</h1>
+    <h2>Generate a barback link + QR from the cached venue.</h2>
+    <div id="builder-status"></div>
+
+    <div class="row">
+      <label>SESSION NICKNAME (shown in audit log)</label>
+      <input id="b-nick" type="text" placeholder="e.g. Sat May 13 — Main Bar" autocomplete="off">
+    </div>
+    <div class="row">
+      <label>VENUE</label>
+      <select id="b-venue"></select>
+    </div>
+    <div class="row">
+      <label>NIGHT</label>
+      <select id="b-night"></select>
+    </div>
+    <div class="row">
+      <label>BAR (optional — lock barback to one bar)</label>
+      <select id="b-bar"><option value="">(any bar in venue)</option></select>
+    </div>
+    <div class="row">
+      <label>STAFF (optional — restrict to these staff)</label>
+      <select id="b-staff" multiple size="5"></select>
+    </div>
+    <div class="row">
+      <label>EXPIRES AT (local time)</label>
+      <input id="b-expires" type="datetime-local">
+      <div class="small muted" style="margin-top:4px;">
+        Quick:
+        <a href="#" data-exp="2h" class="exp-quick" style="color:#3b82f6;">+2h</a> ·
+        <a href="#" data-exp="6h" class="exp-quick" style="color:#3b82f6;">+6h</a> ·
+        <a href="#" data-exp="end" class="exp-quick" style="color:#3b82f6;">end of night</a> ·
+        <a href="#" data-exp="24h" class="exp-quick" style="color:#3b82f6;">+24h</a>
+      </div>
+    </div>
+    <div class="row">
+      <label>ISSUER (your name)</label>
+      <input id="b-issuer" type="text" placeholder="manager nickname" autocomplete="off">
+    </div>
+
+    <button class="btn btn-success" id="b-build">BUILD LINK + QR</button>
+
+    <div class="row" id="b-output-row" style="display:none;">
+      <label>SHAREABLE LINK</label>
+      <pre class="token-out" id="b-output"></pre>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-secondary" id="b-copy">📋 COPY</button>
+        <button class="btn" id="b-open">→ OPEN HERE</button>
+      </div>
+      <div class="center" style="margin-top:14px;">
+        <label>QR CODE</label>
+        <div id="qr-out" style="min-height:80px;"></div>
+        <div class="small muted" style="margin-top:6px;">
+          Show this to the barback — they scan with their phone camera.
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-secondary" id="b-back">← Back to token entry</button>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 6: SETUP (TEST PIN) ============================ -->
+<div class="screen" id="screen-setup">
+  <div class="wrap">
+    <h1>Test PIN Setup</h1>
+    <h2>Phase 2 uses a single shared test PIN. Set it here.</h2>
+    <div class="row">
+      <label>CURRENT TEST PIN (what barbacks type)</label>
+      <input id="setup-pin-current" type="text" readonly>
+    </div>
+    <div class="row">
+      <label>NEW PIN (4–6 digits)</label>
+      <input id="setup-pin-new" type="tel" inputmode="numeric" maxlength="6" pattern="[0-9]*" class="pin-input">
+    </div>
+    <button class="btn btn-success" id="setup-save">SAVE PIN</button>
+    <button class="btn btn-secondary" id="setup-back">← Back</button>
+    <div id="setup-status"></div>
+    <div class="row small" style="margin-top:30px;">
+      <b>Phase 3 plan:</b> per-staff PIN hashes verified by a Supabase
+      Edge Function (<code>barback-login</code>) returning a scoped JWT.
+      The PIN never travels in plain text, and brute force is rate-limited
+      server-side.
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SCANNER MODAL ============================ -->
+<div class="scanner-box" id="scanner-box">
+  <div class="closebar">
+    <div class="left">📷 SCAN BARCODE<span class="rapid-tag" id="scanner-rapid-tag" style="display:none;">RAPID</span></div>
+    <button id="scanner-close">CLOSE</button>
+  </div>
+  <video id="scanner-video" autoplay playsinline muted></video>
+  <div class="scanner-toast" id="scanner-toast">—</div>
+  <div class="hint" id="scanner-hint">Hold the barcode steady within the frame. Camera permission is required.</div>
+</div>
+
+<!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
+<div class="ok-overlay" id="ok-overlay">
+  <div class="card">
+    <div id="ok-overlay-msg">✓ SAVED</div>
+    <div class="sub" id="ok-overlay-sub">—</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 2 — TEST-MODE GATE
+// ════════════════════════════════════════════════════════════════════
+const TEST_MODE_BARBACK = true;
+if (!TEST_MODE_BARBACK) {
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#888">Barback web link disabled. Set TEST_MODE_BARBACK = true to enable.</div>';
+  throw new Error('TEST_MODE_BARBACK disabled');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 7 — local cache reset (deployment rollback helper)
+// ────────────────────────────────────────────────────────────────────
+//  Visiting `barback.html?reset=1` (or `?reset=full`) clears every
+//  local-storage key this app owns and unregisters any service worker
+//  registration, then reloads to a clean state. Used by the rollback
+//  playbook when a barback device is stuck on a stale PWA build or a
+//  poisoned outbox. Safe to run from any state.
+//
+//  Modes:
+//    ?reset=1     — clear barback localStorage keys + drop SW + reload
+//    ?reset=full  — also clears the production offline cache snapshot
+//                   (use only when STARTING FRESH on a new device)
+// ════════════════════════════════════════════════════════════════════
+(function maybeResetLocalCache() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const mode = q.get('reset');
+    if (mode !== '1' && mode !== 'full') return;
+    const keys = [
+      'barinv_barback_test_pin',
+      'barinv_barback_session',
+      'barinv_barback_outbox',
+      'barinv_barback_recent_full',
+      'barinv_barback_ui_prefs',
+      'barinv_barback_stage_mode',
+      'barinv_barback_stage_log',
+      'barinv_barback_counters',
+      'barinv_barback_stale_quarantine',
+      'barinv_barback_pilot_mode',
+    ];
+    keys.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    if (mode === 'full') {
+      // Wipe ANY barinv_* keys (prod offline cache too — destructive)
+      const toClear = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('barinv_')) toClear.push(k);
+      }
+      toClear.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    }
+    // Unregister SWs (best-effort)
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker.getRegistrations().then(rs => {
+        rs.forEach(r => { try { r.unregister(); } catch (_) {} });
+      }).catch(() => {});
+    }
+    // Strip the reset param + reload to a clean state
+    const cleanUrl = window.location.pathname + window.location.hash;
+    document.body.innerHTML = '<div style="padding:40px;text-align:center;color:#4ade80;font-family:-apple-system,system-ui,sans-serif;">' +
+      '<h1 style="font-size:18px;letter-spacing:0.08em;">✓ Local cache cleared</h1>' +
+      '<p style="color:#888;font-size:13px;">Mode: <code>' + mode + '</code></p>' +
+      '<p style="color:#888;font-size:12px;">Reloading in 2 seconds…</p></div>';
+    setTimeout(() => { window.location.replace(cleanUrl); }, 2000);
+    throw new Error('reset-in-progress');
+  } catch (e) {
+    if (e && String(e.message || '').indexOf('reset-in-progress') >= 0) throw e;
+  }
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  Storage keys / constants
+// ════════════════════════════════════════════════════════════════════
+const LS = {
+  testPin:       'barinv_barback_test_pin',
+  session:       'barinv_barback_session',
+  outbox:        'barinv_barback_outbox',
+  recentFull:    'barinv_barback_recent_full',     // last 50 entries with full data
+  uiPrefs:       'barinv_barback_ui_prefs',
+  prodVenues:    'barinv_offline_venues_v1',
+  prodCache:     (vid) => 'barinv_offline_cache_' + vid,
+  cfgCandidates: ['barinv_supabase_config', 'barinv_cfg', 'cfg', 'supabase_config'],
+};
+const DEFAULT_TEST_PIN = '1234';
+const RECENT_MAX = 50;
+const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
+const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
+const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 3 AUTH CONFIG
+// ════════════════════════════════════════════════════════════════════
+// 'auto'        — try Phase 3 if SB + Edge Function endpoint exist AND
+//                 the token carries session_id; else fall back to Phase 2.
+// 'phase3'      — require Phase 3; refuse Phase 2 test tokens.
+// 'phase2_test' — never call the Edge Function (legacy test-only mode).
+const AUTH_MODE = 'auto';
+const PHASE3_SESSION_KEEPALIVE_MS = 60_000;
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 CONFIG
+// ════════════════════════════════════════════════════════════════════
+const TELEMETRY_HEARTBEAT_MS = 60_000;   // post barback_telemetry every minute
+const STALE_OUTBOX_AGE_MS    = 7 * 24 * 60 * 60 * 1000;   // 7 days
+const RECENT_ITEM_BUTTONS    = 5;        // quick-pick chips above scan
+const PAGE_VERSION           = 'phase-5-2026-05-15';
+
+// ════════════════════════════════════════════════════════════════════
+//  Utils
+// ════════════════════════════════════════════════════════════════════
+const $ = (id) => document.getElementById(id);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function uuidv4() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random()*16)|0;
+    return (c === 'x' ? r : (r&0x3)|0x8).toString(16);
+  });
+}
+function base64UrlEncode(str) {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function base64UrlDecode(str) {
+  str = String(str).replace(/-/g,'+').replace(/_/g,'/');
+  while (str.length % 4) str += '=';
+  return decodeURIComponent(escape(atob(str)));
+}
+function showScreen(id) {
+  $$('.screen').forEach(s => s.classList.remove('active'));
+  const t = $(id);
+  if (t) t.classList.add('active');
+  window.scrollTo(0, 0);
+}
+function statusOn(id, msg, level) {
+  const el = $(id);
+  if (!el) return;
+  el.innerHTML = '<div class="status ' + (level || 'warn') + '">' + esc(msg) + '</div>';
+}
+function clearStatus(id) {
+  const el = $(id);
+  if (el) el.innerHTML = '';
+}
+function fmtTime(d) {
+  d = d ? new Date(d) : new Date();
+  const h = String(d.getHours()).padStart(2,'0');
+  const m = String(d.getMinutes()).padStart(2,'0');
+  return h + ':' + m;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Audio + vibration feedback
+// ════════════════════════════════════════════════════════════════════
+const Feedback = {
+  _ctx: null,
+  _ctxOK() {
+    try {
+      if (!this._ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) this._ctx = new AC();
+      }
+      return this._ctx;
+    } catch (_) { return null; }
+  },
+  _tone(freq, dur, gain) {
+    const ctx = this._ctxOK();
+    if (!ctx) return;
+    try {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = gain != null ? gain : 0.06;
+      o.start();
+      setTimeout(() => { try { o.stop(); } catch (_) {} }, dur);
+    } catch (_) {}
+  },
+  ok()  { this._tone(880, 80, 0.06); if (navigator.vibrate) try { navigator.vibrate(50); } catch (_) {} },
+  scan(){ this._tone(1200, 50, 0.05); if (navigator.vibrate) try { navigator.vibrate(35); } catch (_) {} },
+  warn(){ this._tone(440, 100, 0.06); if (navigator.vibrate) try { navigator.vibrate([60,40,60]); } catch (_) {} },
+  err() { this._tone(220, 200, 0.07); if (navigator.vibrate) try { navigator.vibrate([100,80,100]); } catch (_) {} },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  UI prefs (rapid mode etc.)
+// ════════════════════════════════════════════════════════════════════
+const Prefs = {
+  get() {
+    try { return JSON.parse(localStorage.getItem(LS.uiPrefs) || '{}'); }
+    catch (_) { return {}; }
+  },
+  set(p) {
+    try { localStorage.setItem(LS.uiPrefs, JSON.stringify(p)); } catch (_) {}
+  },
+  patch(k, v) {
+    const p = this.get(); p[k] = v; this.set(p);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Supabase init (reuses production config if present)
+// ════════════════════════════════════════════════════════════════════
+function loadSupabaseConfig() {
+  for (const k of LS.cfgCandidates) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && p.url && p.key) return p;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+let supabaseCfg = loadSupabaseConfig();
+let SB = null;
+function buildSupabaseClient(extraHeaders) {
+  if (!supabaseCfg || !window.supabase || !window.supabase.createClient) return null;
+  try {
+    const opts = { auth: { persistSession: false, autoRefreshToken: false } };
+    if (extraHeaders) opts.global = { headers: extraHeaders };
+    return window.supabase.createClient(supabaseCfg.url, supabaseCfg.key, opts);
+  } catch (e) { console.warn('Supabase client init failed:', e); return null; }
+}
+SB = buildSupabaseClient(null);
+function functionsBase() {
+  if (!supabaseCfg) return null;
+  if (supabaseCfg.functionsBase) return supabaseCfg.functionsBase.replace(/\/+$/, '');
+  return supabaseCfg.url.replace(/\/+$/, '') + '/functions/v1';
+}
+function phase3Reachable() {
+  return !!(SB && functionsBase());
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 3 module — talks to barback-login + manages the scoped JWT
+// ════════════════════════════════════════════════════════════════════
+const Phase3 = {
+  async login(token, staffId, pin) {
+    const fb = functionsBase();
+    if (!fb) return { ok:false, error:'no functions endpoint configured' };
+    try {
+      const resp = await fetch(fb + '/barback-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': supabaseCfg.key,
+        },
+        body: JSON.stringify({ token, staff_id: staffId, pin }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) return { ok:false, error: j.error || ('HTTP ' + resp.status), code: j.code || null };
+      if (!j.jwt) return { ok:false, error:'login response missing jwt' };
+      // Swap SB to a JWT-attached client so PostgREST sees the
+      // barback_user role + custom claims on every insert.
+      SB = buildSupabaseClient({ Authorization: 'Bearer ' + j.jwt });
+      return { ok:true, response: j };
+    } catch (e) {
+      return { ok:false, error: (e && e.message) || String(e) };
+    }
+  },
+  // Attach a previously-saved JWT to the SB client on page reload.
+  rehydrate(jwt) {
+    if (!jwt) return false;
+    SB = buildSupabaseClient({ Authorization: 'Bearer ' + jwt });
+    return !!SB;
+  },
+  // JWT exp check (epoch seconds claim). Returns ms-until-expiry, or null.
+  msUntilExpiry(jwt) {
+    if (!jwt) return null;
+    try {
+      const parts = jwt.split('.');
+      if (parts.length !== 3) return null;
+      let p = parts[1].replace(/-/g,'+').replace(/_/g,'/');
+      while (p.length % 4) p += '=';
+      const claims = JSON.parse(atob(p));
+      const exp = claims && claims.exp;
+      if (!exp) return null;
+      return exp * 1000 - Date.now();
+    } catch (_) { return null; }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Cache loader (reads production offline cache; read-only)
+// ════════════════════════════════════════════════════════════════════
+const cache = { venues:[], items:[], bars:[], nights:[], staff:[], venueId:null, source:null };
+// Two sources are supported, in priority order:
+//   1. Phase 3 server bundle attached to the session (cache.source='phase3')
+//   2. Phase 2 production offline cache in localStorage (cache.source='localStorage')
+// applyBundle(b) overwrites; loadProductionCache() falls back.
+function applyBundle(bundle, venueId) {
+  if (!bundle) return false;
+  cache.items  = bundle.items || [];
+  cache.bars   = (bundle.bars || []).filter(b => b.active !== false);
+  cache.staff  = bundle.staff || [];
+  cache.nights = bundle.nights || cache.nights || [];
+  if (venueId) cache.venueId = venueId;
+  cache.source = 'phase3';
+  return true;
+}
+function loadProductionCache() {
+  let venuesBundle = null;
+  try { venuesBundle = JSON.parse(localStorage.getItem(LS.prodVenues) || 'null'); } catch (_) {}
+  if (venuesBundle && Array.isArray(venuesBundle.venues)) {
+    cache.venues = venuesBundle.venues;
+    cache.venueId = venuesBundle.venueId || (cache.venues[0] && cache.venues[0].id) || null;
+  }
+  if (cache.venueId) {
+    let pv = null;
+    try { pv = JSON.parse(localStorage.getItem(LS.prodCache(cache.venueId)) || 'null'); } catch (_) {}
+    if (pv) {
+      cache.items  = pv.items   || [];
+      cache.bars   = (pv.bars   || []).filter(b => b.active !== false);
+      cache.nights = pv.nights  || [];
+      cache.staff  = pv.staff   || [];
+      cache.source = 'localStorage';
+    }
+  }
+  return !!(cache.venueId && cache.items.length);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  AUTH BOUNDARY — Phase 2 implementation. Phase 3 swaps these out.
+// ════════════════════════════════════════════════════════════════════
+const Auth = {
+  // Detects whether a decoded token payload was issued by Phase 3
+  // (has a session_id created server-side) vs Phase 2 (legacy local).
+  isPhase3Token(payload) {
+    return !!(payload && payload.session_id);
+  },
+  decodeToken(tokenStr) {
+    if (!tokenStr) return { ok:false, error:'empty token' };
+    try {
+      const json = base64UrlDecode(tokenStr);
+      const payload = JSON.parse(json);
+      if (!payload || payload.v !== 1) return { ok:false, error:'unknown token version' };
+      // Phase 3 tokens require session_id but use the same envelope.
+      // Phase 2 tokens require venue_id/night_id only.
+      if (!payload.venue_id || !payload.night_id) {
+        return { ok:false, error:'token missing venue_id/night_id' };
+      }
+      if (payload.expires_at) {
+        const exp = Date.parse(payload.expires_at);
+        if (isFinite(exp) && exp < Date.now()) {
+          return { ok:false, error:'token expired ' + payload.expires_at };
+        }
+      }
+      if (AUTH_MODE === 'phase3' && !this.isPhase3Token(payload)) {
+        return { ok:false, error:'AUTH_MODE=phase3 requires a manager-issued token (missing session_id)' };
+      }
+      return { ok:true, payload };
+    } catch (e) {
+      return { ok:false, error:'token parse error: ' + (e && e.message) };
+    }
+  },
+  // Which staff are allowed to sign in to this token.
+  //   Phase 3: payload.allowed_staff (may be []); a Phase 3 page
+  //            normally also calls barback-login with staff_id from
+  //            the session bundle. If allowed_staff is empty, the
+  //            login function rejects unknown ids server-side.
+  //   Phase 2: payload.staff_ids (legacy field name).
+  listStaffForToken(tokenPayload) {
+    const explicit =
+      Array.isArray(tokenPayload.allowed_staff) && tokenPayload.allowed_staff.length
+        ? tokenPayload.allowed_staff
+        : (Array.isArray(tokenPayload.staff_ids) ? tokenPayload.staff_ids : []);
+    const all = (cache.staff || []).slice();
+    if (!explicit.length) return all;
+    const set = new Set(explicit);
+    return all.filter(s => set.has(s.id));
+  },
+  // Decide which auth path to use for a given token.
+  pathFor(tokenPayload) {
+    if (AUTH_MODE === 'phase2_test') return 'phase2_test';
+    if (AUTH_MODE === 'phase3')      return 'phase3';
+    // auto:
+    if (this.isPhase3Token(tokenPayload) && phase3Reachable()) return 'phase3';
+    return 'phase2_test';
+  },
+  // Dispatching verifyPin
+  async verifyPin(tokenPayload, staffId, pin) {
+    if (!pin || pin.length < 4) return { ok:false, error:'PIN too short' };
+    const path = this.pathFor(tokenPayload);
+    if (path === 'phase3') {
+      // Reconstruct the token from the payload (we may have lost the
+      // original string on session restore).
+      const tok = (typeof state !== 'undefined' && state && state.tokenStr)
+        ? state.tokenStr
+        : base64UrlEncode(JSON.stringify(tokenPayload));
+      const r = await Phase3.login(tok, staffId, pin);
+      if (!r.ok) return { ok:false, error: r.error, code: r.code || null };
+      const resp = r.response;
+      return {
+        ok: true,
+        path: 'phase3',
+        session: {
+          token_payload: tokenPayload,
+          staff_id: resp.staff?.id || staffId,
+          staff_name: resp.staff?.name || null,
+          issued_at: new Date().toISOString(),
+          scoped_jwt: resp.jwt,
+          jwt_expires_at: resp.expires_at || null,
+          bundle: resp.bundle || null,
+          server_session: resp.session || null,
+        },
+      };
+    }
+    // Phase 2 fallback
+    const expected = (localStorage.getItem(LS.testPin) || DEFAULT_TEST_PIN).trim();
+    if (String(pin).trim() !== expected) return { ok:false, error:'wrong PIN' };
+    return {
+      ok: true,
+      path: 'phase2_test',
+      session: {
+        token_payload: tokenPayload,
+        staff_id: staffId,
+        issued_at: new Date().toISOString(),
+        scoped_jwt: null,
+      },
+    };
+  },
+  saveSession(session) {
+    try { sessionStorage.setItem(LS.session, JSON.stringify(session)); }
+    catch (_) { try { localStorage.setItem(LS.session, JSON.stringify(session)); } catch (__) {} }
+  },
+  loadSession() {
+    let raw = null;
+    try { raw = sessionStorage.getItem(LS.session); } catch (_) {}
+    if (!raw) { try { raw = localStorage.getItem(LS.session); } catch (_) {} }
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+  },
+  clearSession() {
+    try { sessionStorage.removeItem(LS.session); } catch (_) {}
+    try { localStorage.removeItem(LS.session); } catch (_) {}
+    // Drop the JWT-attached client; restore the anon one.
+    SB = buildSupabaseClient(null);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Outbox — corruption-safe + retry backoff + dedup
+// ════════════════════════════════════════════════════════════════════
+const Outbox = {
+  load() {
+    try {
+      const raw = localStorage.getItem(LS.outbox);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('outbox not array');
+      // Filter obviously corrupt rows
+      return parsed.filter(r => r && r.client_event_id && r.action && r.item_id);
+    } catch (e) {
+      // Quarantine corrupt outbox so the user doesn't silently lose anything
+      try {
+        const raw = localStorage.getItem(LS.outbox);
+        if (raw) localStorage.setItem('barinv_barback_outbox_corrupt_' + Date.now(), raw);
+      } catch (_) {}
+      try { localStorage.setItem(LS.outbox, '[]'); } catch (_) {}
+      console.warn('outbox corrupt, reset:', e && e.message);
+      return [];
+    }
+  },
+  save(arr) {
+    try { localStorage.setItem(LS.outbox, JSON.stringify(arr)); }
+    catch (e) {
+      console.error('outbox save failed:', e);
+      // Try to free space by dropping oldest if storage quota hit
+      if (arr.length > 1) {
+        try { localStorage.setItem(LS.outbox, JSON.stringify(arr.slice(-Math.floor(arr.length/2)))); }
+        catch (_) {}
+      }
+    }
+  },
+  push(rec) {
+    const cur = this.load();
+    // Dedup: never push two entries with the same client_event_id
+    if (cur.some(e => e.client_event_id === rec.client_event_id)) return cur.length;
+    cur.push({ ...rec, queued_at: Date.now(), attempts: 0, last_error: null });
+    this.save(cur);
+    return cur.length;
+  },
+  removeById(ce) {
+    const cur = this.load().filter(e => e.client_event_id !== ce);
+    this.save(cur);
+    return cur.length;
+  },
+  count() { return this.load().length; },
+  shouldRetry(entry, now) {
+    if (!entry.attempts || entry.attempts <= 0) return true;
+    if (entry.attempts >= SYNC_MAX_ATTEMPTS) return false;
+    // Exponential backoff: 5s, 15s, 45s, 2m, 6m, 18m
+    const delay = 5000 * Math.pow(3, entry.attempts - 1);
+    return (now - (entry.last_attempt_at || entry.queued_at)) >= delay;
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Recent log — full-detail list for review screen + undo
+// ════════════════════════════════════════════════════════════════════
+const Recent = {
+  load() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.recentFull) || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  },
+  save(arr) {
+    try { localStorage.setItem(LS.recentFull, JSON.stringify(arr.slice(0, RECENT_MAX))); }
+    catch (_) {}
+  },
+  add(entry) {
+    const arr = this.load();
+    arr.unshift(entry);
+    this.save(arr);
+  },
+  markStatus(ce, status) {
+    const arr = this.load();
+    const i = arr.findIndex(e => e.ce === ce);
+    if (i >= 0) { arr[i].status = status; this.save(arr); }
+  },
+  markUndone(ce) {
+    const arr = this.load();
+    const i = arr.findIndex(e => e.ce === ce);
+    if (i >= 0) { arr[i].undone = true; this.save(arr); }
+  },
+  clearSynced() {
+    const arr = this.load().filter(e => e.status === 'QUEUED');
+    this.save(arr);
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  App state
+// ════════════════════════════════════════════════════════════════════
+const state = {
+  tokenStr: null,
+  tokenPayload: null,
+  staffId: null,
+  staffName: null,
+  selectedAction: null,
+  selectedItemId: null,
+  selectedItemName: null,
+  selectedBarId: null,
+  scannerContinuous: false,
+  scannerCooldown: {},  // code → lastScannedAt
+  zxingControls: null,
+  expirationInterval: null,
+  jwtCheckInterval: null,
+  syncTimer: null,
+  hidBuf: '',
+  hidLast: 0,
+  // Phase 3 only:
+  jwt: null,              // signed access token from barback-login
+  jwtExpiresAt: null,     // ISO string
+  serverSession: null,    // the session row echoed by the login response
+  authPath: null,         // 'phase3' or 'phase2_test'
+  ble: { available:false, deviceId:null, connected:false, lastWeight:null, lastStable:false },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Token + URL helpers
+// ════════════════════════════════════════════════════════════════════
+function getQuery() {
+  const out = {};
+  const q = window.location.search.replace(/^\?/, '');
+  if (!q) return out;
+  q.split('&').forEach(pair => {
+    const [k, v] = pair.split('=');
+    if (k) out[decodeURIComponent(k)] = v == null ? '' : decodeURIComponent(v.replace(/\+/g,' '));
+  });
+  return out;
+}
+function buildTokenFromPayload(p) {
+  try { return base64UrlEncode(JSON.stringify(p)); } catch (_) { return ''; }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ROUTER
+// ════════════════════════════════════════════════════════════════════
+function boot() {
+  loadProductionCache();
+  repairStaleOutbox();            // Phase 5 — quarantine entries older than 7 days
+  refreshQueueCount();
+
+  // Wire global HID-scanner listener once.
+  installHidListener();
+
+  // Connectivity-driven sync attempts.
+  window.addEventListener('online', () => { trySyncSoon(500); });
+  setInterval(() => { trySyncSoon(0); }, 30000); // every 30s if anything pending
+
+  const q = getQuery();
+  if (q.builder === '1') return showBuilder();
+  if (q.setup === '1')   return showSetup();
+  if (q.review === '1')  return showReview();
+
+  // Restore prior session if still valid
+  const existing = Auth.loadSession();
+  if (existing && existing.token_payload) {
+    const re = Auth.decodeToken(buildTokenFromPayload(existing.token_payload));
+    if (re.ok) {
+      state.tokenPayload = existing.token_payload;
+      state.staffId      = existing.staff_id;
+      state.staffName    = existing.staff_name ||
+        ((cache.staff || []).find(x => x.id === state.staffId) || {}).name ||
+        '(unknown staff)';
+      // Phase 3: re-attach JWT + bundle
+      if (existing.scoped_jwt) {
+        const msLeft = Phase3.msUntilExpiry(existing.scoped_jwt);
+        if (msLeft == null || msLeft <= 0) {
+          Auth.clearSession();
+          showScreen('screen-token');
+          return;
+        }
+        state.jwt          = existing.scoped_jwt;
+        state.jwtExpiresAt = existing.jwt_expires_at || null;
+        state.serverSession = existing.server_session || null;
+        state.authPath     = 'phase3';
+        Phase3.rehydrate(existing.scoped_jwt);
+        if (existing.bundle) applyBundle(existing.bundle, existing.token_payload.venue_id);
+        startJwtKeepalive();
+        startTelemetryHeartbeat();   // Phase 5
+      } else {
+        state.authPath = 'phase2_test';
+      }
+      return enterMain();
+    } else {
+      Auth.clearSession();
+    }
+  }
+
+  if (q.token) return handleToken(q.token);
+  showScreen('screen-token');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Phase 3 JWT keepalive — forces re-login at expiry
+// ════════════════════════════════════════════════════════════════════
+function startJwtKeepalive() {
+  if (state.jwtCheckInterval) { clearInterval(state.jwtCheckInterval); state.jwtCheckInterval = null; }
+  if (!state.jwt) return;
+  state.jwtCheckInterval = setInterval(() => {
+    const ms = Phase3.msUntilExpiry(state.jwt);
+    if (ms == null || ms <= 0) {
+      clearInterval(state.jwtCheckInterval);
+      state.jwtCheckInterval = null;
+      Auth.clearSession();
+      state.jwt = null;
+      state.tokenPayload = null;
+      state.staffId = null;
+      state.staffName = null;
+      alert('Your barback session has expired. Please sign in again.');
+      showScreen('screen-token');
+    }
+  }, PHASE3_SESSION_KEEPALIVE_MS);
+}
+
+function handleToken(tokenStr) {
+  const idx = tokenStr.indexOf('token=');
+  if (idx >= 0) tokenStr = tokenStr.substring(idx + 6).split('&')[0];
+  tokenStr = decodeURIComponent(tokenStr || '').trim();
+  const res = Auth.decodeToken(tokenStr);
+  if (!res.ok) {
+    showScreen('screen-token');
+    const tin = $('token-input');
+    if (tin) { tin.value = tokenStr; tin.focus(); }
+    setTimeout(() => alert('Token invalid: ' + res.error), 50);
+    return;
+  }
+  state.tokenStr = tokenStr;
+  state.tokenPayload = res.payload;
+
+  const p = res.payload;
+  // Prefer token-embedded UI hints (Phase 3) over local cache (Phase 2);
+  // fall back to short-id stubs if neither is available.
+  const venue = (cache.venues || []).find(v => v.id === p.venue_id);
+  const night = (cache.nights || []).find(n => n.id === p.night_id);
+  const bar   = p.bar_id ? (cache.bars || []).find(b => b.id === p.bar_id) : null;
+  const venueLabel = (venue && venue.name) || p.venue_name || ('venue ' + p.venue_id.slice(0,8));
+  const nightLabel = p.night_label ||
+    (night ? ((night.date || '') + (night.name ? ' · ' + night.name : '')) : ('night ' + p.night_id.slice(0,8)));
+  const barLabel = (bar && bar.name) || p.bar_name ||
+    (p.bar_id ? ('bar ' + p.bar_id.slice(0,8)) : '(any bar)');
+  $('screen-pin-meta').textContent = [venueLabel, nightLabel, barLabel].join('  ·  ');
+
+  // Merge token's allowed_staff_meta into the local cache so the
+  // staff dropdown renders names even before barback-login completes.
+  if (Array.isArray(p.allowed_staff_meta) && p.allowed_staff_meta.length) {
+    const have = new Set((cache.staff || []).map(s => s.id));
+    p.allowed_staff_meta.forEach(s => {
+      if (!have.has(s.id)) cache.staff.push({ id: s.id, name: s.name });
+    });
+  }
+
+  const staffOptions = Auth.listStaffForToken(p);
+  const ssel = $('staff-select');
+  if (staffOptions.length === 0) {
+    ssel.innerHTML = '<option value="">(no eligible staff cached)</option>';
+  } else if (staffOptions.length === 1) {
+    state.staffId = staffOptions[0].id;
+    state.staffName = staffOptions[0].name;
+    ssel.innerHTML = '<option value="' + esc(staffOptions[0].id) + '">' + esc(staffOptions[0].name) + '</option>';
+    $('staff-select-row').style.display = 'none';
+  } else {
+    ssel.innerHTML = '<option value="">— pick yourself —</option>' +
+      staffOptions.map(s => '<option value="' + esc(s.id) + '">' + esc(s.name || '?') + '</option>').join('');
+    $('staff-select-row').style.display = '';
+  }
+
+  $('test-warn').style.display = p.test_mode === false ? 'none' : '';
+  showScreen('screen-pin');
+  setTimeout(() => $('pin-input').focus(), 100);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PIN screen
+// ════════════════════════════════════════════════════════════════════
+$('token-continue').addEventListener('click', () => {
+  const v = $('token-input').value.trim();
+  if (!v) { alert('Paste your access link or token first.'); return; }
+  handleToken(v);
+});
+$('token-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('token-continue').click();
+});
+$('pin-cancel').addEventListener('click', () => {
+  state.tokenPayload = null;
+  state.staffId = null;
+  state.staffName = null;
+  Auth.clearSession();
+  showScreen('screen-token');
+});
+$('pin-submit').addEventListener('click', async () => {
+  clearStatus('pin-status');
+  if (!state.tokenPayload) { statusOn('pin-status','Token lost — go back', 'err'); return; }
+  let staffId = state.staffId;
+  if (!staffId) {
+    staffId = $('staff-select').value;
+    if (!staffId) { statusOn('pin-status','Pick yourself from the list', 'err'); return; }
+    const s = (cache.staff || []).find(x => x.id === staffId);
+    state.staffId = staffId;
+    state.staffName = s ? s.name : 'unknown';
+  }
+  const pin = $('pin-input').value.trim();
+  $('pin-submit').disabled = true;
+  $('pin-submit').textContent = 'CHECKING…';
+  const res = await Auth.verifyPin(state.tokenPayload, staffId, pin);
+  $('pin-submit').disabled = false;
+  $('pin-submit').textContent = 'SIGN IN';
+  if (!res.ok) {
+    Feedback.err();
+    statusOn('pin-status', '✗ ' + res.error, 'err');
+    $('pin-input').value = '';
+    $('pin-input').focus();
+    return;
+  }
+  Feedback.ok();
+  // Capture Phase 3 fields into state + session
+  state.authPath = res.path || 'phase2_test';
+  if (res.session.scoped_jwt) {
+    state.jwt           = res.session.scoped_jwt;
+    state.jwtExpiresAt  = res.session.jwt_expires_at || null;
+    state.serverSession = res.session.server_session || null;
+    if (res.session.staff_name) state.staffName = res.session.staff_name;
+    if (res.session.bundle) applyBundle(res.session.bundle, state.tokenPayload && state.tokenPayload.venue_id);
+    startJwtKeepalive();
+  }
+  Auth.saveSession(res.session);
+  enterMain();
+});
+$('pin-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('pin-submit').click();
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  MAIN — enter
+// ════════════════════════════════════════════════════════════════════
+function enterMain() {
+  const p = state.tokenPayload;
+  const venue  = (cache.venues || []).find(v => v.id === p.venue_id);
+  const night  = (cache.nights || []).find(n => n.id === p.night_id);
+  const bar    = p.bar_id ? (cache.bars || []).find(b => b.id === p.bar_id) : null;
+  $('who-line').innerHTML = [
+    '<b>' + esc(state.staffName || 'staff') + '</b>',
+    esc(bar ? bar.name : (p.bar_id ? p.bar_id.slice(0,8) : '(any bar)')),
+    esc(night ? (night.date || night.name || '') : '(no night)'),
+  ].filter(Boolean).join(' · ');
+
+  state.selectedBarId = p.bar_id || null;
+  const allowedBars = (cache.bars || []).filter(b => b.active !== false);
+  if (!p.bar_id && allowedBars.length > 1) {
+    const sel = $('bar-pick');
+    sel.innerHTML = allowedBars.map(b =>
+      '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>').join('');
+    if (allowedBars[0]) state.selectedBarId = allowedBars[0].id;
+    sel.value = state.selectedBarId || '';
+    sel.onchange = () => { state.selectedBarId = sel.value; };
+    $('bar-pick-row').style.display = '';
+  } else {
+    $('bar-pick-row').style.display = 'none';
+  }
+
+  // Restore rapid-mode preference
+  const prefs = Prefs.get();
+  $('rapid-mode').checked = !!prefs.rapid;
+
+  // Do NOT auto-focus any field on the main screen (avoid iOS keyboard popping up).
+  $('search-input').value = '';
+  $('search-results').style.display = 'none';
+  $('picked-item').style.display = 'none';
+  $('picked-item').innerHTML = '';
+  $('qty-input').value = '1';
+  $('notes-input').value = '';
+  state.selectedItemId = null;
+  state.selectedItemName = null;
+  clearStatus('save-status');
+
+  // Action default — preserved across saves; first entry to screen leaves it blank
+  applyActionTint();
+
+  $('test-warn').style.display = p.test_mode === false ? 'none' : '';
+  startExpirationTimer();
+  refreshQueueCount();
+  renderRecentMini();
+  renderRecentItemChips();   // Phase 5
+  refreshBleCard();
+  // Phase 5: start telemetry heartbeat when running Phase 3 (signed JWT)
+  if (state.jwt && !STAGING_MODE) startTelemetryHeartbeat();
+  // Phase 6: start event-control polling (SAFE MODE / freeze / drain / refresh)
+  if (state.jwt && !STAGING_MODE) startEventControlPolling();
+  // Phase 5: optional dress-rehearsal fake injection in staging mode
+  maybeRunFakeInjection();
+
+  showScreen('screen-main');
+}
+
+function applyActionTint() {
+  const scan = $('scan-btn');
+  scan.classList.remove('tinted-taken', 'tinted-return');
+  if (state.selectedAction === 'TAKEN') scan.classList.add('tinted-taken');
+  else if (state.selectedAction === 'RETURNED') scan.classList.add('tinted-return');
+
+  $$('.action').forEach(b => {
+    b.classList.toggle('selected', b.dataset.action === state.selectedAction);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Action buttons
+// ════════════════════════════════════════════════════════════════════
+$$('.action').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.selectedAction = btn.dataset.action;
+    applyActionTint();
+    Feedback.scan();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Rapid-mode toggle
+// ════════════════════════════════════════════════════════════════════
+$('rapid-mode').addEventListener('change', (e) => {
+  Prefs.patch('rapid', !!e.target.checked);
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Item search + barcode lookup
+// ════════════════════════════════════════════════════════════════════
+function lookupByBarcode(raw) {
+  if (!raw) return null;
+  const c = String(raw).trim().toLowerCase();
+  return (cache.items || []).find(it => {
+    const cands = [it.barcode, it.code, it.sku].filter(Boolean).map(x => String(x).toLowerCase());
+    return cands.includes(c);
+  }) || null;
+}
+function setPickedItem(it) {
+  state.selectedItemId = it.id;
+  state.selectedItemName = it.name;
+  $('picked-item').style.display = 'block';
+  $('picked-item').innerHTML = '✓ <b>' + esc(it.name || '?') + '</b>' +
+    (it.size ? ' · ' + esc(it.size) : '') +
+    (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
+  $('search-results').style.display = 'none';
+  $('search-input').value = '';
+}
+function searchItems(q) {
+  q = String(q || '').trim().toLowerCase();
+  if (!q) { $('search-results').style.display = 'none'; return; }
+  const exact = lookupByBarcode(q);
+  if (exact) { setPickedItem(exact); return; }
+  const matches = (cache.items || []).filter(it => {
+    const n = String(it.name || '').toLowerCase();
+    const s = String(it.sku || '').toLowerCase();
+    return n.indexOf(q) >= 0 || s.indexOf(q) >= 0;
+  }).slice(0, 40);
+  if (!matches.length) {
+    $('search-results').innerHTML = '<div class="item-row" style="color:#666">(no matches in ' + (cache.items || []).length + ' cached items)</div>';
+  } else {
+    $('search-results').innerHTML = matches.map(it =>
+      '<div class="item-row" data-id="' + esc(it.id) + '">' +
+        esc(it.name || '?') + (it.size ? ' · ' + esc(it.size) : '') +
+        (it.sku ? '<span class="sku">' + esc(it.sku) + '</span>' : '') +
+      '</div>'
+    ).join('');
+    Array.from($('search-results').querySelectorAll('.item-row')).forEach(row => {
+      row.addEventListener('click', () => {
+        const it = (cache.items || []).find(x => x.id === row.dataset.id);
+        if (it) setPickedItem(it);
+      });
+    });
+  }
+  $('search-results').style.display = 'block';
+}
+let _searchTimer = null;
+$('search-input').addEventListener('input', () => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => searchItems($('search-input').value), 80);
+});
+$('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    // Treat Enter in search box as "pick first match"
+    const v = $('search-input').value.trim();
+    if (!v) return;
+    const it = lookupByBarcode(v);
+    if (it) { setPickedItem(it); }
+    else {
+      const matches = (cache.items || []).filter(x =>
+        String(x.name || '').toLowerCase().indexOf(v.toLowerCase()) >= 0
+      );
+      if (matches.length === 1) setPickedItem(matches[0]);
+    }
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Camera scanner — lazy-load ZXing-browser + continuous mode
+// ════════════════════════════════════════════════════════════════════
+// Local-first vendor loader. Tries www/vendor/<file> first; on 404/fail,
+// falls back to the matching pinned CDN URL. See www/vendor/README.md.
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = false;
+    s.onload = () => resolve(src);
+    s.onerror = () => reject(new Error('load failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function ensureZXing() {
+  if (window.ZXingBrowser) return window.ZXingBrowser;
+  try { await loadScript('vendor/zxing-browser-0.1.5.min.js'); }
+  catch (_) {
+    try { await loadScript('https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js'); }
+    catch (e) { throw new Error('ZXing-browser unreachable (local + CDN both failed)'); }
+  }
+  if (!window.ZXingBrowser) throw new Error('ZXing loaded but window.ZXingBrowser missing');
+  return window.ZXingBrowser;
+}
+
+async function openScanner() {
+  if (!state.selectedAction) {
+    Feedback.warn();
+    alert('Pick TAKEN or RETURN first.');
+    return;
+  }
+  const continuous = !!$('rapid-mode').checked;
+  state.scannerContinuous = continuous;
+  state.scannerCooldown = {};
+  $('scanner-box').classList.add('active');
+  $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
+  $('scanner-toast').style.display = 'none';
+  $('scanner-hint').textContent = continuous
+    ? 'Continuous mode: scan multiple bottles, each saves as qty=1 with the current action.'
+    : 'Hold the barcode steady within the frame.';
+
+  let zxing;
+  try { zxing = await ensureZXing(); }
+  catch (e) {
+    closeScanner();
+    alert('Barcode scanner library unreachable. Type the barcode manually.\n\n' + (e.message || ''));
+    return;
+  }
+  const reader = new zxing.BrowserMultiFormatReader();
+  state.zxingControls = await reader.decodeFromVideoDevice(undefined, $('scanner-video'),
+    (result, err, controls) => {
+      if (!result || !result.getText) return;
+      const code = result.getText();
+      const now = Date.now();
+      const last = state.scannerCooldown[code] || 0;
+      if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
+      state.scannerCooldown[code] = now;
+      Feedback.scan();
+      onBarcodeScanned(code, controls);
+    }
+  );
+}
+
+async function onBarcodeScanned(code, controls) {
+  const it = lookupByBarcode(code);
+  if (!it) {
+    showScannerToast('? Unknown barcode: ' + code, 'warn');
+    if (!state.scannerContinuous) {
+      // One-shot: drop into manual search with code prefilled
+      if (controls && controls.stop) controls.stop();
+      closeScanner();
+      $('search-input').value = code;
+      searchItems(code);
+    }
+    return;
+  }
+
+  if (state.scannerContinuous) {
+    // Auto-save qty=1, stay in scanner.
+    const saveRes = await saveCore({
+      item_id: it.id,
+      item_name: it.name,
+      qty: 1,
+      action: state.selectedAction,
+      bar_id: state.selectedBarId,
+      notes: '',
+    });
+    showScannerToast(
+      (saveRes.synced ? '✓ ' : '⏳ ') + it.name + (saveRes.synced ? ' · saved' : ' · queued'),
+      saveRes.synced ? 'ok' : 'warn'
+    );
+    refreshQueueCount();
+    renderRecentMini();
+  } else {
+    // One-shot: close scanner, set picked item, leave SAVE for user tap
+    if (controls && controls.stop) controls.stop();
+    closeScanner();
+    setPickedItem(it);
+    statusOn('save-status', '✓ Scanned: ' + it.name, 'ok');
+  }
+}
+
+function showScannerToast(msg, level) {
+  const t = $('scanner-toast');
+  t.className = 'scanner-toast' + (level && level !== 'ok' ? ' ' + level : '');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.display = 'none'; }, 1400);
+}
+
+function closeScanner() {
+  $('scanner-box').classList.remove('active');
+  try { if (state.zxingControls && state.zxingControls.stop) state.zxingControls.stop(); } catch (_) {}
+  state.zxingControls = null;
+  state.scannerContinuous = false;
+}
+$('scan-btn').addEventListener('click', openScanner);
+$('scanner-close').addEventListener('click', closeScanner);
+
+// ════════════════════════════════════════════════════════════════════
+//  External HID scanner support (Bluetooth-keyboard-class)
+// ════════════════════════════════════════════════════════════════════
+function installHidListener() {
+  window.addEventListener('keydown', (e) => {
+    if (!$('screen-main').classList.contains('active')) return;
+    const target = e.target;
+    const isText = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+    // Only listen when no text input is focused — typing manually shouldn't trigger the HID handler
+    if (isText) return;
+    const now = Date.now();
+    if (now - state.hidLast > HID_INTER_KEY_MS) state.hidBuf = '';
+    state.hidLast = now;
+    if (e.key === 'Enter') {
+      if (state.hidBuf.length >= 4) {
+        const code = state.hidBuf;
+        state.hidBuf = '';
+        e.preventDefault();
+        // Synthesise a barcode scan
+        const it = lookupByBarcode(code);
+        if (it) {
+          if (state.selectedAction) {
+            // If continuous-style speed is desired via HID, auto-save
+            saveCore({
+              item_id: it.id, item_name: it.name, qty: 1,
+              action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
+            }).then((r) => {
+              statusOn('save-status', (r.synced ? '✓ HID save: ' : '⏳ HID queued: ') + it.name, r.synced ? 'ok' : 'warn');
+              refreshQueueCount(); renderRecentMini();
+            });
+          } else {
+            setPickedItem(it);
+            statusOn('save-status', '✓ HID scan: ' + it.name + ' — pick TAKEN / RETURN to save', 'info');
+          }
+        } else {
+          $('search-input').value = code;
+          searchItems(code);
+          statusOn('save-status', '⚠ HID barcode ' + code + ' not in cached items', 'warn');
+        }
+      } else {
+        state.hidBuf = '';
+      }
+    } else if (e.key && e.key.length === 1) {
+      state.hidBuf += e.key;
+    }
+  }, true);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Save core — used by manual SAVE button, rapid scan, HID, and undo
+// ════════════════════════════════════════════════════════════════════
+async function saveCore(payload) {
+  const p = state.tokenPayload;
+  if (!p) return { synced:false, error:'no session' };
+  const ce = uuidv4();
+  const userNotes = payload.notes || '';
+
+  // ── Phase 5: staging mode short-circuit ────────────────────────
+  // In staging mode, the save NEVER touches Supabase. It lands in a
+  // local-only log so the manager can dress-rehearse barback flows
+  // (UI, rapid mode, double-save guard, recent items) without
+  // polluting the production events table.
+  if (STAGING_MODE) {
+    StageLog.push({
+      ce, item_id: payload.item_id, item_name: payload.item_name,
+      action: payload.action, qty: payload.qty, bar_id: payload.bar_id,
+      notes: userNotes, reversal_of: payload.reversal_of || null,
+    });
+    Recent.add({
+      ce, at: Date.now(),
+      night_id: p.night_id, bar_id: payload.bar_id || null,
+      item_id: payload.item_id, item_name: payload.item_name,
+      action: payload.action, qty: payload.qty,
+      notes: '[STAGE] ' + userNotes,
+      status: 'SYNCED',     // visually green so the test feels real
+      reversal_of: payload.reversal_of || null,
+      staged: true,
+    });
+    Telemetry.bump('saved');
+    renderRecentItemChips();
+    return { synced:true, error:null, ce, staged:true };
+  }
+
+  // Phase 3: we have a signed JWT → write proper columns directly.
+  // Phase 2: stuff identity into notes/submitted_by for legacy schema.
+  const phase3 = !!state.jwt;
+
+  const tags = [];
+  if (!phase3) {
+    // Legacy tag-in-notes for Phase 2 schema compatibility
+    tags.push('[source=barback_web_link]', '[staff_id=' + (state.staffId || '?') + ']');
+    if (p.issuer)   tags.push('[issuer=' + p.issuer + ']');
+    if (p.nickname) tags.push('[session=' + p.nickname + ']');
+  }
+  if (payload.reversal_of) tags.push('[reversal_of=' + payload.reversal_of + ']');
+  const notes = [tags.join(' '), userNotes].filter(Boolean).join(' ').trim();
+
+  const record = {
+    night_id: p.night_id,
+    bar_id:   payload.bar_id || null,
+    station_id: null,
+    item_id:  payload.item_id,
+    qty:      payload.qty,
+    action:   payload.action,
+    notes:    notes,
+    submitted_by: '[barback_web] ' + (state.staffName || 'unknown') +
+                  (state.staffId ? ' (' + String(state.staffId).slice(0, 8) + ')' : '') +
+                  (payload.reversal_of ? ' [undo]' : ''),
+    status:   'PENDING',
+    client_event_id: ce,
+  };
+  if (phase3) {
+    // Phase 6: pilot tagging. LIVE_PILOT_MODE is set further down (after
+    // STAGING_MODE) but const is in TDZ at module-load — by the time
+    // saveCore runs, the const is initialized. STAGING wins over pilot.
+    record.source     = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE && !STAGING_MODE)
+                          ? 'barback_live_pilot'
+                          : 'barback_web_link';
+    record.staff_id   = state.staffId;
+    record.session_id = (state.tokenPayload && state.tokenPayload.session_id) ||
+                        (state.serverSession && state.serverSession.session_id) || null;
+  }
+
+  let synced = false, err = null;
+  if (SB && navigator.onLine) {
+    try {
+      const { error } = await SB.from('events').insert(record);
+      if (!error) synced = true;
+      else if (error.code === '23505') synced = true;
+      else err = error;
+    } catch (e) { err = e; }
+  } else {
+    err = { message: SB ? 'offline' : 'no Supabase config' };
+  }
+
+  // Revoke / auth-error detection — Phase 3 only.
+  // If a Phase 3 insert is rejected with a 401/403 or PostgREST RLS
+  // violation, the session is no longer valid (revoked or expired).
+  // Force a logout so the barback re-authenticates instead of silently
+  // queueing rows that will never sync.
+  if (phase3 && !synced && err) {
+    const code = err.code || '';
+    const status = err.status || (err.context && err.context.status) || null;
+    const msg = (err.message || '').toLowerCase();
+    const looksRevoked =
+      code === '42501' ||                                 // PostgREST insufficient_privilege
+      status === 401 || status === 403 ||
+      msg.indexOf('row-level security') >= 0 ||
+      msg.indexOf('jwt expired') >= 0 ||
+      msg.indexOf('invalid jwt') >= 0;
+    if (looksRevoked) {
+      console.warn('Phase 3 save denied — forcing logout', err);
+      // Direct forced-logout (no confirm() — session is already invalid).
+      Auth.clearSession();
+      state.tokenPayload = null;
+      state.staffId = null;
+      state.staffName = null;
+      state.jwt = null;
+      state.serverSession = null;
+      if (state.expirationInterval) { clearInterval(state.expirationInterval); state.expirationInterval = null; }
+      $('expiration-strip').style.display = 'none';
+      setTimeout(() => {
+        alert('Your barback session is no longer valid (revoked or expired). Please sign in again.');
+        showScreen('screen-token');
+      }, 0);
+      return { synced:false, error: { message:'session revoked' }, ce };
+    }
+  }
+
+  // Recent entry
+  Recent.add({
+    ce: ce,
+    at: Date.now(),
+    night_id: p.night_id,
+    bar_id: payload.bar_id || null,
+    item_id: payload.item_id,
+    item_name: payload.item_name,
+    action: payload.action,
+    qty: payload.qty,
+    notes: notes,
+    status: synced ? 'SYNCED' : 'QUEUED',
+    reversal_of: payload.reversal_of || null,
+  });
+
+  if (!synced) Outbox.push(record);
+  // Phase 5: telemetry counters (cumulative across reloads)
+  Telemetry.bump(synced ? 'saved' : 'failed');
+  // If we just synced, schedule a telemetry heartbeat so the manager
+  // dashboard sees the activity within the next few seconds.
+  if (synced && state.jwt) Telemetry.post().catch(() => {});
+  renderRecentItemChips();
+  return { synced, error: err, ce };
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Save button (manual flow)
+// ════════════════════════════════════════════════════════════════════
+$('save-btn').addEventListener('click', async () => {
+  clearStatus('save-status');
+  if (!state.tokenPayload) { statusOn('save-status','Session lost — log in again','err'); return; }
+  if (!state.selectedAction) { showOverlay('PICK ACTION', 'TAKEN or RETURN', 'err'); Feedback.warn(); return; }
+  if (!state.selectedItemId) { showOverlay('PICK ITEM', 'Scan or search first', 'err'); Feedback.warn(); return; }
+  const qty = parseFloat($('qty-input').value);
+  if (!isFinite(qty) || qty < 0) { showOverlay('BAD QTY', 'Enter a valid number', 'err'); Feedback.warn(); return; }
+
+  // Phase 4: double-save guard. Same (item, action, qty) within 1.5 s
+  // is almost always a double-tap on a noisy phone. Reject silently
+  // and short the loop — the previous save already produced its overlay.
+  if (isDuplicateSave(state.selectedAction, state.selectedItemId, qty)) {
+    Feedback.warn();
+    statusOn('save-status', '⚠ Duplicate save suppressed (same item + qty within 1.5 s)', 'warn');
+    return;
+  }
+
+  $('save-btn').disabled = true;
+  $('save-btn').textContent = '⏳ SAVING…';
+
+  const r = await saveCore({
+    item_id: state.selectedItemId,
+    item_name: state.selectedItemName,
+    qty: qty,
+    action: state.selectedAction,
+    bar_id: state.selectedBarId,
+    notes: ($('notes-input').value || '').trim(),
+  });
+
+  $('save-btn').disabled = false;
+  $('save-btn').textContent = '💾 SAVE TRANSACTION';
+
+  if (r.synced) {
+    Feedback.ok();
+    showOverlay('✓ SAVED', state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty, 'ok');
+  } else {
+    Feedback.warn();
+    showOverlay('⏳ QUEUED', 'Offline — will sync. ' + (r.error && r.error.message ? r.error.message : ''), 'warn');
+  }
+
+  // POST-SAVE: preserve action/bar/staff/session. Reset only item + qty + notes.
+  state.selectedItemId = null;
+  state.selectedItemName = null;
+  $('picked-item').style.display = 'none';
+  $('picked-item').innerHTML = '';
+  $('qty-input').value = '1';
+  $('notes-input').value = '';
+  refreshQueueCount();
+  renderRecentMini();
+
+  // Auto-rescan if rapid-mode is on
+  if ($('rapid-mode').checked) {
+    setTimeout(() => openScanner(), 200);
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Success / error overlay (large, dark-venue-friendly)
+// ════════════════════════════════════════════════════════════════════
+function showOverlay(title, sub, kind) {
+  const ov = $('ok-overlay');
+  ov.classList.remove('err-overlay');
+  if (kind === 'err' || kind === 'warn') ov.classList.add('err-overlay');
+  $('ok-overlay-msg').textContent = title;
+  $('ok-overlay-sub').textContent = sub || '';
+  ov.classList.add('active');
+  clearTimeout(ov._timer);
+  ov._timer = setTimeout(() => { ov.classList.remove('active'); }, 1400);
+}
+$('ok-overlay').addEventListener('click', () => $('ok-overlay').classList.remove('active'));
+
+// ════════════════════════════════════════════════════════════════════
+//  Recent (mini panel inside main screen)
+// ════════════════════════════════════════════════════════════════════
+function renderRecentMini() {
+  const arr = Recent.load().slice(0, 8);
+  const el = $('recent');
+  if (!arr.length) { el.innerHTML = '<div class="muted small">No saves yet.</div>'; return; }
+  el.innerHTML = arr.map(r => {
+    const badge = r.undone ? 'undone'
+                : (r.status === 'SYNCED' ? 'synced'
+                : (r.status === 'ERROR' ? 'error' : 'queued'));
+    const actClass = r.action === 'TAKEN' ? 'act-T' : 'act-R';
+    return '<div class="row-r">' +
+      '<span class="ts">' + fmtTime(r.at) + '</span>' +
+      '<span class="badge ' + badge + '">' + badge.toUpperCase() + '</span>' +
+      '<span class="body' + (r.undone ? ' undone' : '') + '">' +
+        '<span class="' + actClass + '">' + esc(r.action || '?') + '</span> · ' +
+        esc(r.item_name || '?') + ' · ' + esc(String(r.qty)) +
+      '</span></div>';
+  }).join('');
+}
+$('recent-undo').addEventListener('click', undoLast);
+$('recent-viewall').addEventListener('click', () => showReview());
+
+// ════════════════════════════════════════════════════════════════════
+//  Undo last (test mode)
+// ════════════════════════════════════════════════════════════════════
+async function undoLast() {
+  const arr = Recent.load();
+  const idx = arr.findIndex(e => !e.undone);
+  if (idx < 0) { alert('Nothing to undo.'); return; }
+  const last = arr[idx];
+  if (!confirm('Undo ' + last.action + ' · ' + last.item_name + ' · qty ' + last.qty + '?\n\n' +
+               'In TEST MODE only. In production, undo requires manager approval.')) return;
+
+  if (last.status === 'QUEUED') {
+    // Just yank it from the outbox before it syncs
+    Outbox.removeById(last.ce);
+    Recent.markUndone(last.ce);
+    Feedback.ok();
+    statusOn('save-status', '↶ Removed from queue: ' + last.item_name, 'info');
+  } else {
+    // Already synced — insert a reverse-direction event
+    const reverseAction = last.action === 'TAKEN' ? 'RETURNED' : 'TAKEN';
+    const r = await saveCore({
+      item_id: last.item_id,
+      item_name: last.item_name + ' [REVERSAL]',
+      qty: last.qty,
+      action: reverseAction,
+      bar_id: last.bar_id,
+      notes: 'undo of ' + last.ce,
+      reversal_of: last.ce,
+    });
+    Recent.markUndone(last.ce);
+    Feedback.ok();
+    statusOn('save-status', '↶ Reversal posted (' + (r.synced ? 'synced' : 'queued') + '): ' + last.item_name, 'info');
+  }
+  refreshQueueCount();
+  renderRecentMini();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Sync — exponential backoff, per-entry attempt tracking
+// ════════════════════════════════════════════════════════════════════
+async function syncOutbox(opts) {
+  opts = opts || {};
+  if (!SB) { return { ok:false, msg:'No Supabase configured', total:0 }; }
+  if (!navigator.onLine) { return { ok:false, msg:'Offline', total:0 }; }
+  const outbox = Outbox.load();
+  if (!outbox.length) return { ok:true, msg:'Queue empty', total:0 };
+  const now = Date.now();
+  const target = opts.force ? outbox : outbox.filter(e => Outbox.shouldRetry(e, now));
+  if (!target.length) return { ok:true, msg:'All entries waiting on backoff', total:0 };
+
+  let ok = 0, failed = 0, revoked = false;
+  for (let i = 0; i < target.length; i++) {
+    const ev = target[i];
+    if (opts.progress) opts.progress(i + 1, target.length);
+    const { queued_at, attempts, last_error, last_attempt_at, ...rec } = ev;
+    try {
+      const { error } = await SB.from('events').insert(rec);
+      if (!error || error.code === '23505') {
+        Outbox.removeById(ev.client_event_id);
+        Recent.markStatus(ev.client_event_id, 'SYNCED');
+        ok++;
+      } else {
+        // Phase 3: detect revoke / auth failure and bail out of the loop —
+        // every subsequent insert would fail the same way.
+        const code = error.code || '';
+        const msg  = (error.message || '').toLowerCase();
+        if (state.jwt && (code === '42501' ||
+            msg.indexOf('row-level security') >= 0 ||
+            msg.indexOf('jwt expired') >= 0 ||
+            msg.indexOf('invalid jwt') >= 0)) {
+          revoked = true;
+          break;
+        }
+        bumpAttempt(ev.client_event_id, error.message || JSON.stringify(error));
+        failed++;
+      }
+    } catch (e) {
+      bumpAttempt(ev.client_event_id, (e && e.message) || String(e));
+      failed++;
+    }
+  }
+  refreshQueueCount();
+  renderRecentMini();
+  if (revoked) {
+    // Force a forced-logout, just like the saveCore path
+    Auth.clearSession();
+    state.tokenPayload = null; state.staffId = null; state.staffName = null;
+    state.jwt = null; state.serverSession = null;
+    if (state.expirationInterval) { clearInterval(state.expirationInterval); state.expirationInterval = null; }
+    if (state.jwtCheckInterval)   { clearInterval(state.jwtCheckInterval);   state.jwtCheckInterval = null; }
+    $('expiration-strip').style.display = 'none';
+    setTimeout(() => {
+      alert('Sync failed — your barback session was revoked or expired. Please sign in again.');
+      showScreen('screen-token');
+    }, 0);
+    return { ok:false, msg:'session revoked — sign in again', total: ok };
+  }
+  return { ok: failed === 0, msg: (failed === 0 ? '✓ Synced ' + ok : 'Synced ' + ok + ' / failed ' + failed), total: ok + failed };
+}
+function bumpAttempt(ce, errMsg) {
+  const arr = Outbox.load();
+  const i = arr.findIndex(e => e.client_event_id === ce);
+  if (i < 0) return;
+  arr[i].attempts = (arr[i].attempts || 0) + 1;
+  arr[i].last_attempt_at = Date.now();
+  arr[i].last_error = errMsg;
+  if (arr[i].attempts >= SYNC_MAX_ATTEMPTS) {
+    Recent.markStatus(ce, 'ERROR');
+  }
+  Outbox.save(arr);
+}
+function trySyncSoon(ms) {
+  clearTimeout(state.syncTimer);
+  state.syncTimer = setTimeout(() => {
+    if (Outbox.count() > 0 && navigator.onLine) syncOutbox().catch(() => {});
+  }, ms || 0);
+}
+$('sync-btn').addEventListener('click', async () => {
+  $('sync-btn').textContent = '… SYNCING';
+  const r = await syncOutbox({
+    force: true,
+    progress: (a, b) => { $('sync-btn').textContent = '… SYNC ' + a + '/' + b; }
+  });
+  $('sync-btn').innerHTML = '↑ SYNC <span class="queue-count">(<span id="queue-count">' + Outbox.count() + '</span>)</span>';
+  statusOn('save-status', r.msg, r.ok ? 'ok' : 'warn');
+});
+
+// Footer
+$('reload-cache-btn').addEventListener('click', () => {
+  loadProductionCache();
+  statusOn('save-status','Reloaded: ' + (cache.items || []).length + ' items · ' + (cache.bars || []).length + ' bars', 'info');
+});
+function refreshQueueCount() {
+  const n = Outbox.count();
+  const el = $('queue-count');
+  if (el) el.textContent = String(n);
+  const btn = $('sync-btn');
+  if (btn) {
+    btn.classList.toggle('green', n === 0);
+    btn.classList.toggle('footer-status', n > 0);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Logout — returns to token-entry screen (NEVER index.html)
+// ════════════════════════════════════════════════════════════════════
+function logout() {
+  if (!confirm('Logout?')) return;
+  Auth.clearSession();
+  state.tokenPayload = null;
+  state.staffId = null;
+  state.staffName = null;
+  state.selectedAction = null;
+  state.selectedItemId = null;
+  state.selectedItemName = null;
+  state.selectedBarId = null;
+  state.jwt = null;
+  state.jwtExpiresAt = null;
+  state.serverSession = null;
+  state.authPath = null;
+  if (state.expirationInterval) { clearInterval(state.expirationInterval); state.expirationInterval = null; }
+  if (state.jwtCheckInterval)   { clearInterval(state.jwtCheckInterval);   state.jwtCheckInterval = null; }
+  if (_telemetryTimer)          { clearInterval(_telemetryTimer);          _telemetryTimer = null; }
+  $('expiration-strip').style.display = 'none';
+  showScreen('screen-token');
+}
+$('logout-btn').addEventListener('click', logout);
+$('logout-btn-2').addEventListener('click', logout);
+
+// ════════════════════════════════════════════════════════════════════
+//  Session expiration countdown
+// ════════════════════════════════════════════════════════════════════
+function startExpirationTimer() {
+  if (state.expirationInterval) { clearInterval(state.expirationInterval); state.expirationInterval = null; }
+  const ts = state.tokenPayload && state.tokenPayload.expires_at;
+  const expiresAt = ts ? Date.parse(ts) : NaN;
+  const strip = $('expiration-strip');
+  if (!isFinite(expiresAt)) { strip.style.display = 'none'; return; }
+  strip.style.display = '';
+  function tick() {
+    const ms = expiresAt - Date.now();
+    if (ms <= 0) {
+      clearInterval(state.expirationInterval);
+      state.expirationInterval = null;
+      Auth.clearSession();
+      Feedback.err();
+      alert('Session expired. Please sign in again with your manager\'s link.');
+      logout();
+      return;
+    }
+    const totalMin = Math.floor(ms / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    let text;
+    if (h > 0) text = '⏱ Expires in ' + h + 'h ' + m + 'm';
+    else if (m > 0) text = '⏱ Expires in ' + m + 'm';
+    else text = '⚠ Expires in ' + Math.max(0, Math.floor(ms/1000)) + 's';
+    strip.textContent = text;
+    strip.classList.toggle('warning', ms < 30*60*1000 && ms >= 5*60*1000);
+    strip.classList.toggle('danger',  ms < 5*60*1000);
+  }
+  tick();
+  state.expirationInterval = setInterval(tick, 15000);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  BLE scale attach — Capacitor-only, gracefully hidden in Safari
+// ════════════════════════════════════════════════════════════════════
+function bleAvailable() {
+  return !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe);
+}
+function refreshBleCard() {
+  state.ble.available = bleAvailable();
+  const card = $('ble-card');
+  if (!state.ble.available) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  card.classList.toggle('connected', state.ble.connected);
+  $('ble-state').textContent = state.ble.connected ? 'connected' : 'disconnected';
+  $('ble-toggle').textContent = state.ble.connected ? 'DISCONNECT' : 'CONNECT';
+  $('ble-weight').style.display = state.ble.connected ? '' : 'none';
+}
+$('ble-toggle').addEventListener('click', async () => {
+  if (!state.ble.available) return;
+  if (state.ble.connected) { await bleDisconnect(); return; }
+  try { await bleConnect(); }
+  catch (e) {
+    statusOn('save-status', 'BLE error: ' + (e && e.message || e), 'err');
+  }
+});
+async function bleConnect() {
+  const Plugins = window.Capacitor.Plugins;
+  const BleClient = Plugins.BluetoothLe;
+  await BleClient.initialize();
+  const device = await BleClient.requestDevice({
+    services: ['ba51e001-0000-1000-8000-00805f9b34fb'],
+    namePrefix: 'BARINV',
+  });
+  await BleClient.connect({ deviceId: device.deviceId });
+  state.ble.deviceId = device.deviceId;
+  state.ble.connected = true;
+  refreshBleCard();
+  await BleClient.startNotifications({
+    deviceId: device.deviceId,
+    service: 'ba51e001-0000-1000-8000-00805f9b34fb',
+    characteristic: 'ba51e002-0000-1000-8000-00805f9b34fb',
+  });
+  if (Plugins.BluetoothLe.addListener) {
+    Plugins.BluetoothLe.addListener(
+      'notification|' + device.deviceId +
+      '|ba51e001-0000-1000-8000-00805f9b34fb|ba51e002-0000-1000-8000-00805f9b34fb',
+      (ev) => onBleNotify(ev)
+    );
+  }
+}
+async function bleDisconnect() {
+  try {
+    const BleClient = window.Capacitor.Plugins.BluetoothLe;
+    if (state.ble.deviceId) await BleClient.disconnect({ deviceId: state.ble.deviceId });
+  } catch (_) {}
+  state.ble.connected = false;
+  state.ble.deviceId = null;
+  refreshBleCard();
+}
+function onBleNotify(ev) {
+  // Payload from firmware is "%ld.%ld|%d" (ascii). Decode any of:
+  //  - string in ev.value
+  //  - base64 in ev.value
+  //  - DataView in ev.value
+  //  - { numbers:[...] }
+  let txt = '';
+  try {
+    const v = ev && ev.value;
+    if (v == null) return;
+    if (typeof v === 'string') {
+      // Heuristic: base64 if all charset is [A-Za-z0-9+/=]
+      if (/^[A-Za-z0-9+/=]+$/.test(v.trim()) && v.length % 4 === 0) {
+        try { txt = atob(v); } catch (_) { txt = v; }
+      } else {
+        txt = v;
+      }
+    } else if (v && v.byteLength != null && typeof v.getUint8 === 'function') {
+      const bytes = [];
+      for (let i = 0; i < v.byteLength; i++) bytes.push(v.getUint8(i));
+      txt = String.fromCharCode.apply(null, bytes);
+    } else if (v && Array.isArray(v.numbers)) {
+      txt = String.fromCharCode.apply(null, v.numbers);
+    }
+  } catch (_) {}
+  if (!txt) return;
+  const parts = txt.split('|');
+  const grams = parseFloat(parts[0]);
+  const stableFlag = parseInt(parts[1], 10);
+  if (!isFinite(grams)) return;
+  state.ble.lastWeight = grams;
+  state.ble.lastStable = stableFlag === 1;
+  const w = $('ble-weight');
+  w.textContent = grams.toFixed(1) + ' g' + (state.ble.lastStable ? ' ✓' : ' …');
+  w.classList.toggle('unstable', !state.ble.lastStable);
+  // Auto-suggest qty when RETURN is selected and weight is stable
+  if (state.selectedAction === 'RETURNED' && state.ble.lastStable && state.selectedItemId) {
+    $('qty-input').value = grams.toFixed(1);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  REVIEW screen — last 20 + queue
+// ════════════════════════════════════════════════════════════════════
+function showReview() {
+  loadProductionCache();
+  renderReview();
+  showScreen('screen-review');
+}
+function renderReview() {
+  const queued = Outbox.load();
+  const recent = Recent.load().slice(0, 20);
+  $('review-meta').textContent =
+    'last ' + recent.length + ' saves · ' + queued.length + ' queued · ' +
+    (SB ? (navigator.onLine ? 'online' : 'OFFLINE') : 'no Supabase configured');
+
+  $('review-queued').innerHTML = queued.length === 0
+    ? '<div class="muted small">empty</div>'
+    : queued.map(q => {
+        const it = (cache.items || []).find(x => x.id === q.item_id);
+        return '<div class="row-r">' +
+          '<span class="ts">' + fmtTime(q.queued_at) + '</span>' +
+          '<span class="badge queued">QUEUED</span>' +
+          '<span class="body">' +
+            '<span class="' + (q.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(q.action) + '</span> · ' +
+            esc(it ? it.name : q.item_id.slice(0,8)) + ' · ' + esc(String(q.qty)) +
+            (q.attempts ? ' <span class="muted">(' + q.attempts + ' tries)</span>' : '') +
+            (q.last_error ? ' <span class="muted">' + esc(String(q.last_error).slice(0,40)) + '</span>' : '') +
+          '</span></div>';
+      }).join('');
+
+  $('review-synced').innerHTML = recent.length === 0
+    ? '<div class="muted small">no recent saves</div>'
+    : recent.map(r => {
+        const badge = r.undone ? 'undone'
+                    : (r.status === 'SYNCED' ? 'synced'
+                    : (r.status === 'ERROR' ? 'error' : 'queued'));
+        return '<div class="row-r">' +
+          '<span class="ts">' + fmtTime(r.at) + '</span>' +
+          '<span class="badge ' + badge + '">' + badge.toUpperCase() + '</span>' +
+          '<span class="body' + (r.undone ? ' undone' : '') + '">' +
+            '<span class="' + (r.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(r.action || '?') + '</span> · ' +
+            esc(r.item_name || '?') + ' · ' + esc(String(r.qty)) +
+            (r.reversal_of ? ' <span class="muted">[reversal]</span>' : '') +
+          '</span></div>';
+      }).join('');
+}
+$('review-back').addEventListener('click', () => {
+  if (state.tokenPayload) showScreen('screen-main');
+  else showScreen('screen-token');
+});
+$('review-sync').addEventListener('click', async () => {
+  $('review-sync').textContent = '… SYNCING';
+  const r = await syncOutbox({ force: true });
+  $('review-sync').textContent = '↑ SYNC QUEUE';
+  statusOn('review-status', r.msg, r.ok ? 'ok' : 'warn');
+  renderReview();
+});
+$('review-clear').addEventListener('click', () => {
+  if (!confirm('Clear synced history (test mode)?\n\nQueued items will be PRESERVED. Only the local synced history list is wiped.')) return;
+  Recent.clearSynced();
+  statusOn('review-status','Synced history cleared','ok');
+  renderReview();
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Public base URL (PLAN-QR-2026-06-03 Web-Barback)
+// ════════════════════════════════════════════════════════════════════
+// Canonical public HTTPS base for any QR that a barback will scan
+// with a personal phone. NEVER use window.location.origin for those
+// URLs — under Capacitor iOS that origin is capacitor://localhost or
+// http://localhost, which a barback's iPhone Camera cannot open.
+// Override via localStorage.barinv_public_base_url; override is
+// honored only if it parses as http/https and its host is not
+// 'localhost' / '127.0.0.1'. Trailing slashes are trimmed.
+function getBarinvPublicBaseUrl() {
+  var DEFAULT_BASE = 'https://danielbh1900.github.io/barinv-pro';
+  try {
+    var raw = null;
+    try { raw = localStorage.getItem('barinv_public_base_url'); } catch (_) {}
+    if (typeof raw === 'string' && raw.length) {
+      var trimmed = raw.trim().replace(/\/+$/, '');
+      if (/^https?:\/\//i.test(trimmed)) {
+        try {
+          var u = new URL(trimmed);
+          var host = (u.host || '').toLowerCase();
+          var protoOk = (u.protocol === 'http:' || u.protocol === 'https:');
+          var hostOk = !!host
+                     && host !== 'localhost'
+                     && host.indexOf('localhost:') !== 0
+                     && host !== '127.0.0.1'
+                     && host.indexOf('127.0.0.1:') !== 0;
+          if (protoOk && hostOk) return trimmed;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return DEFAULT_BASE;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  BUILDER — token + QR + nickname
+// ════════════════════════════════════════════════════════════════════
+async function ensureQRLib() {
+  if (window.qrcode && typeof window.qrcode === 'function') return window.qrcode;
+  try { await loadScript('vendor/qrcode-generator-1.4.4.min.js'); }
+  catch (_) {
+    try { await loadScript('https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js'); }
+    catch (e) { throw new Error('QR library unreachable (local + CDN both failed)'); }
+  }
+  if (!window.qrcode) throw new Error('QR loaded but window.qrcode missing');
+  return window.qrcode;
+}
+function showBuilder() {
+  if (!loadProductionCache()) {
+    statusOn('builder-status', 'No production cache found. Open BARINV app on the same device once to populate venue / items / bars / nights.', 'warn');
+  }
+  $('b-venue').innerHTML = (cache.venues || []).map(v =>
+    '<option value="' + esc(v.id) + '">' + esc(v.name || '?') + '</option>').join('');
+  if (cache.venueId) $('b-venue').value = cache.venueId;
+  const sortedNights = (cache.nights || []).slice().sort((a,b) => String(b.date || '').localeCompare(String(a.date || '')));
+  $('b-night').innerHTML = sortedNights.map(n =>
+    '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>').join('');
+  $('b-bar').innerHTML = '<option value="">(any bar in venue)</option>' +
+    (cache.bars || []).map(b => '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>').join('');
+  $('b-staff').innerHTML = (cache.staff || []).map(s =>
+    '<option value="' + esc(s.id) + '">' + esc(s.name || '?') + '</option>').join('');
+  setExpiresQuick('end');
+  $('b-issuer').value = localStorage.getItem('barinv_barback_builder_issuer') || '';
+  $('b-nick').value   = localStorage.getItem('barinv_barback_builder_nick')   || '';
+  $('b-output-row').style.display = 'none';
+  showScreen('screen-builder');
+}
+function setExpiresQuick(kind) {
+  const d = new Date();
+  if (kind === '2h')  d.setHours(d.getHours() + 2);
+  else if (kind === '6h')  d.setHours(d.getHours() + 6);
+  else if (kind === '24h') d.setHours(d.getHours() + 24);
+  else { // 'end' — 03:59 tomorrow (post-closing typical for a nightclub shift)
+    d.setHours(3, 59, 0, 0);
+    if (d <= new Date()) d.setDate(d.getDate() + 1);
+  }
+  const pad = (n) => String(n).padStart(2,'0');
+  $('b-expires').value =
+    d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
+    pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+document.querySelectorAll('.exp-quick').forEach(a => {
+  a.addEventListener('click', (e) => { e.preventDefault(); setExpiresQuick(a.dataset.exp); });
+});
+$('b-back').addEventListener('click', () => { window.location.href = 'barback.html'; });
+$('b-build').addEventListener('click', async () => {
+  const venueId = $('b-venue').value;
+  const nightId = $('b-night').value;
+  const barId   = $('b-bar').value || null;
+  const issuer  = $('b-issuer').value.trim();
+  const nick    = $('b-nick').value.trim();
+  const expRaw  = $('b-expires').value;
+  if (!venueId || !nightId) { statusOn('builder-status','Pick venue + night first','err'); return; }
+  const staffIds = Array.from($('b-staff').selectedOptions).map(o => o.value);
+  let expIso = null;
+  if (expRaw) { try { expIso = new Date(expRaw).toISOString(); } catch (_) {} }
+  const payload = {
+    v: 1, venue_id: venueId, night_id: nightId, bar_id: barId,
+    staff_ids: staffIds, expires_at: expIso,
+    issuer: issuer || null, nickname: nick || null,
+    test_mode: true,
+  };
+  if (issuer) localStorage.setItem('barinv_barback_builder_issuer', issuer);
+  if (nick)   localStorage.setItem('barinv_barback_builder_nick', nick);
+  const tok = base64UrlEncode(JSON.stringify(payload));
+  // PLAN-QR-2026-06-03 Web-Barback: always use the canonical public
+  // HTTPS base so the barback's personal phone (iPhone Camera, Android
+  // Camera, etc.) can open the URL — regardless of whether this
+  // builder runs inside Capacitor iOS, mobile Safari, or a desktop
+  // browser.
+  const url = getBarinvPublicBaseUrl() + '/barback.html?token=' + encodeURIComponent(tok);
+  $('b-output').textContent = url;
+  $('b-output-row').style.display = '';
+  statusOn('builder-status','✓ Built. Share the link or QR below.','ok');
+  try {
+    const qr = await ensureQRLib();
+    const q = qr(0, 'M');
+    q.addData(url);
+    q.make();
+    $('qr-out').innerHTML = q.createSvgTag(4, 8);
+  } catch (e) {
+    $('qr-out').innerHTML = '<div class="small muted" style="color:#666;padding:18px;">QR library unreachable (offline?). Copy the link instead.</div>';
+  }
+});
+$('b-copy').addEventListener('click', async () => {
+  const v = $('b-output').textContent;
+  try { await navigator.clipboard.writeText(v); statusOn('builder-status','✓ Copied to clipboard','ok'); }
+  catch (e) { statusOn('builder-status','Copy failed: ' + (e.message || e), 'err'); }
+});
+$('b-open').addEventListener('click', () => { window.location.href = $('b-output').textContent; });
+
+// ════════════════════════════════════════════════════════════════════
+//  SETUP screen
+// ════════════════════════════════════════════════════════════════════
+function showSetup() {
+  $('setup-pin-current').value = localStorage.getItem(LS.testPin) || DEFAULT_TEST_PIN;
+  $('setup-pin-new').value = '';
+  showScreen('screen-setup');
+}
+$('setup-back').addEventListener('click', () => { window.location.href = 'barback.html'; });
+$('setup-save').addEventListener('click', () => {
+  const v = $('setup-pin-new').value.trim();
+  if (!/^[0-9]{4,6}$/.test(v)) { statusOn('setup-status','PIN must be 4–6 digits', 'err'); return; }
+  localStorage.setItem(LS.testPin, v);
+  $('setup-pin-current').value = v;
+  $('setup-pin-new').value = '';
+  statusOn('setup-status','✓ Test PIN updated. Share with barbacks.', 'ok');
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 — staging mode
+// ────────────────────────────────────────────────────────────────────
+// `?stage=1` (or localStorage.barinv_barback_stage_mode = 'on') puts
+// the page into venue-safe staging: NO Supabase writes, every save
+// goes to a local-only log, no telemetry posted, no JWT validity
+// check forces a logout. Used for dress-rehearsals + UI tuning before
+// a real event without polluting the production events table.
+// ════════════════════════════════════════════════════════════════════
+const STAGING_MODE = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('stage') === '1') {
+      localStorage.setItem('barinv_barback_stage_mode', 'on');
+      return true;
+    }
+    return localStorage.getItem('barinv_barback_stage_mode') === 'on';
+  } catch (_) { return false; }
+})();
+window.__BARBACK_STAGING = STAGING_MODE;
+if (STAGING_MODE) {
+  // Replace the test banner with a STAGING banner.
+  setTimeout(() => {
+    const t = $('test-warn');
+    if (t) {
+      t.textContent = '⚙ STAGING MODE — saves are LOCAL ONLY, never sync to production';
+      t.style.background = 'linear-gradient(90deg,#1d4ed8,#0c4a6e)';
+    }
+  }, 0);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 6 — LIVE_PILOT_MODE
+// ────────────────────────────────────────────────────────────────────
+//  Distinct from TEST_MODE_BARBACK (the page kill-switch) and from
+//  STAGING_MODE (which never writes to the events table). LIVE_PILOT_MODE
+//  is a REAL-PRODUCTION mode with heightened observability:
+//
+//    • Every saved event is tagged source=barback_live_pilot (vs. the
+//      normal barback_web_link), making pilot rows trivially filterable
+//      in the events table and the close-night package.
+//    • Telemetry heartbeat halved (30s instead of 60s) so the manager
+//      monitor sees device state changes within ~30s.
+//    • Outbox stale-quarantine cut-off raised to 30 days (vs. the
+//      normal 7) so pilot audit depth is preserved through post-event
+//      review.
+//    • Verbose diagnostic logging to console (every save attempt,
+//      every sync attempt, every heartbeat result, every control poll).
+//    • Operational warning shown if the device leaves the network for
+//      more than 30 seconds while the queue has unsaved items.
+//    • Polls the per-night barback_event_control row every 30s so the
+//      manager can drive emergency-event recovery: SAFE MODE, disable
+//      rapid scan, force queue drain, force a page reload.
+//
+//  STAGING_MODE always wins — if both flags are on, the page behaves
+//  as STAGING (no production writes).
+// ════════════════════════════════════════════════════════════════════
+const LIVE_PILOT_MODE = (() => {
+  try {
+    if (STAGING_MODE) return false;     // staging trumps pilot
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('pilot') === '1') {
+      localStorage.setItem('barinv_barback_pilot_mode', 'on');
+      return true;
+    }
+    if (q.get('pilot') === '0') {
+      localStorage.removeItem('barinv_barback_pilot_mode');
+      return false;
+    }
+    return localStorage.getItem('barinv_barback_pilot_mode') === 'on';
+  } catch (_) { return false; }
+})();
+window.__BARBACK_PILOT = LIVE_PILOT_MODE;
+
+// Pilot-mode tuning knobs (only consulted when LIVE_PILOT_MODE is true).
+const PILOT_TELEMETRY_HEARTBEAT_MS  = 30_000;
+const PILOT_STALE_OUTBOX_AGE_MS     = 30 * 24 * 60 * 60 * 1000;   // 30 days
+const PILOT_EVENT_CONTROL_POLL_MS   = 30_000;
+const PILOT_OFFLINE_WARN_AFTER_MS   = 30_000;
+
+function plog(kind, ...args) {
+  if (!LIVE_PILOT_MODE) return;
+  try {
+    const tag = '[pilot:' + kind + ']';
+    if (kind === 'error' || kind === 'warn') console.warn(tag, ...args);
+    else console.log(tag, ...args);
+  } catch (_) {}
+}
+
+if (LIVE_PILOT_MODE) {
+  setTimeout(() => {
+    const t = $('test-warn');
+    if (t) {
+      t.textContent = '🎯 LIVE PILOT — production writes, heightened telemetry, source=barback_live_pilot';
+      t.style.background = 'linear-gradient(90deg,#b45309,#7c2d12)';
+      t.style.color = '#fef3c7';
+    }
+  }, 0);
+  plog('boot', 'LIVE_PILOT_MODE active, page_version=' + PAGE_VERSION);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 6 — Event control poll (SAFE MODE / freeze / drain / refresh)
+// ────────────────────────────────────────────────────────────────────
+//  Reads public.barback_event_control for this session's (venue, night)
+//  every PILOT_EVENT_CONTROL_POLL_MS while a Phase 3 JWT is attached.
+//  Soft control surface: the manager toggles flags, the client reacts.
+//  No row found = all flags off (safe default).
+// ════════════════════════════════════════════════════════════════════
+const EventControl = {
+  current: {
+    safe_mode:            false,
+    rapid_scan_disabled:  false,
+    sessions_frozen:      false,
+    force_queue_drain_at: null,
+    force_refresh_at:     null,
+    note:                 null,
+  },
+  _lastDrainAt:   null,
+  _lastRefreshAt: null,
+  async fetch() {
+    if (!SB || !state.jwt) return;
+    if (STAGING_MODE) return;             // pilot drives this; staging is offline
+    const venueId =
+      (state.tokenPayload && state.tokenPayload.venue_id) ||
+      (state.serverSession && state.serverSession.venue_id);
+    const nightId =
+      (state.tokenPayload && state.tokenPayload.night_id) ||
+      (state.serverSession && state.serverSession.night_id);
+    if (!venueId || !nightId) return;
+    try {
+      const { data, error } = await SB
+        .from('barback_event_control')
+        .select('*')
+        .eq('venue_id', venueId)
+        .eq('night_id', nightId)
+        .maybeSingle();
+      if (error) {
+        // RLS denial in non-pilot sessions is expected and harmless.
+        plog('warn', 'event_control fetch error', error.message || error.code);
+        return;
+      }
+      const row = data || {};
+      this.current = {
+        safe_mode:            !!row.safe_mode,
+        rapid_scan_disabled:  !!row.rapid_scan_disabled,
+        sessions_frozen:      !!row.sessions_frozen,
+        force_queue_drain_at: row.force_queue_drain_at || null,
+        force_refresh_at:     row.force_refresh_at || null,
+        note:                 row.note || null,
+      };
+      plog('control', this.current);
+      this.apply();
+    } catch (e) { plog('warn', 'event_control fetch threw', e && e.message); }
+  },
+  apply() {
+    const c = this.current;
+    // 1. SAFE MODE banner
+    try {
+      let safe = document.getElementById('pilot-safe-banner');
+      if (c.safe_mode) {
+        if (!safe) {
+          safe = document.createElement('div');
+          safe.id = 'pilot-safe-banner';
+          safe.style.cssText = 'background:linear-gradient(90deg,#b91c1c,#7c2d12);' +
+            'color:#fff;padding:10px 14px;font-weight:800;letter-spacing:0.1em;' +
+            'text-align:center;font-size:12px;position:sticky;top:0;z-index:102;';
+          document.body.insertBefore(safe, document.body.firstChild);
+        }
+        safe.textContent = '🛑 SAFE MODE — manager has paused new operations' +
+          (c.note ? ' · ' + c.note : '');
+      } else if (safe) { safe.remove(); }
+    } catch (_) {}
+
+    // 2. Disable rapid scan globally
+    try {
+      const rapid = document.getElementById('rapid-mode-toggle') ||
+                    document.querySelector('[data-rapid-mode]');
+      if (rapid) {
+        rapid.disabled = !!c.rapid_scan_disabled;
+        if (c.rapid_scan_disabled) rapid.setAttribute('title', 'Rapid scan disabled by manager');
+        else rapid.removeAttribute('title');
+      }
+      // If the user is already inside rapid mode and it gets disabled,
+      // exit gracefully. Look for a state flag if one exists.
+      if (c.rapid_scan_disabled && window.state && state.rapidMode) {
+        try { if (typeof exitRapidMode === 'function') exitRapidMode(); }
+        catch (_) {}
+      }
+    } catch (_) {}
+
+    // 3. Force queue drain — when the timestamp advances, trigger one sync.
+    try {
+      const t = c.force_queue_drain_at;
+      if (t && t !== this._lastDrainAt) {
+        this._lastDrainAt = t;
+        plog('control', 'force queue drain triggered');
+        if (typeof syncOutbox === 'function' && navigator.onLine) {
+          syncOutbox({ force: true }).catch(() => {});
+        }
+      }
+    } catch (_) {}
+
+    // 4. Force refresh — reload the page.
+    try {
+      const t = c.force_refresh_at;
+      if (t && t !== this._lastRefreshAt) {
+        // First poll after page load: don't reload (we just loaded).
+        if (this._lastRefreshAt === null) {
+          this._lastRefreshAt = t;
+        } else {
+          this._lastRefreshAt = t;
+          plog('control', 'force refresh triggered — reloading');
+          setTimeout(() => { try { location.reload(); } catch (_) {} }, 250);
+        }
+      }
+    } catch (_) {}
+  },
+};
+let _eventControlTimer = null;
+function startEventControlPolling() {
+  if (_eventControlTimer) clearInterval(_eventControlTimer);
+  if (STAGING_MODE) return;
+  // Poll cadence: pilot mode uses the faster setting; non-pilot polls
+  // at half the rate (manager can still hit emergency revoke-all).
+  const ms = LIVE_PILOT_MODE ? PILOT_EVENT_CONTROL_POLL_MS : (PILOT_EVENT_CONTROL_POLL_MS * 2);
+  _eventControlTimer = setInterval(() => { EventControl.fetch().catch(() => {}); }, ms);
+  EventControl.fetch().catch(() => {});
+}
+
+const StageLog = {
+  KEY: 'barinv_barback_stage_log',
+  load() {
+    try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); }
+    catch (_) { return []; }
+  },
+  push(rec) {
+    const arr = this.load();
+    arr.push({ ...rec, staged_at: Date.now() });
+    try { localStorage.setItem(this.KEY, JSON.stringify(arr.slice(-500))); }
+    catch (_) {}
+  },
+  count() { return this.load().length; },
+  clear() { try { localStorage.removeItem(this.KEY); } catch (_) {} },
+};
+// Stress test / fake event generator. Triggered via ?stage=1&fake=N
+function maybeRunFakeInjection() {
+  if (!STAGING_MODE) return;
+  const q = new URLSearchParams(window.location.search);
+  const n = parseInt(q.get('fake') || '0', 10);
+  if (!isFinite(n) || n <= 0) return;
+  const items = (cache.items || []);
+  if (!items.length) return;
+  setTimeout(() => {
+    let injected = 0;
+    for (let i = 0; i < n; i++) {
+      const it = items[Math.floor(Math.random() * items.length)];
+      const action = Math.random() < 0.7 ? 'TAKEN' : 'RETURNED';
+      const qty = action === 'TAKEN' ? 1 : Math.round(Math.random() * 600 + 80);
+      // Route through saveCore so the recent panel + UI behave realistically.
+      saveCore({
+        item_id: it.id, item_name: it.name, qty,
+        action, bar_id: state.selectedBarId, notes: 'fake-injection',
+      }).catch(() => {});
+      injected++;
+    }
+    setTimeout(() => {
+      statusOn('save-status', '⚙ Injected ' + injected + ' fake events (staging only)', 'info');
+      renderRecentMini();
+      refreshQueueCount();
+    }, 50);
+  }, 800);   // give the page time to render first
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 — Telemetry
+// ────────────────────────────────────────────────────────────────────
+// Lightweight heartbeat that lets the manager DIAGNOSTICS tab see
+// per-device live status without server-push infrastructure. Sends
+// only when a Phase 3 JWT is attached (the RLS policy on
+// barback_telemetry only allows the barback_user role to write its
+// own row).
+// ════════════════════════════════════════════════════════════════════
+const Telemetry = {
+  COUNT_KEY: 'barinv_barback_counters',
+  loadCounters() {
+    try {
+      return JSON.parse(localStorage.getItem(this.COUNT_KEY) || '{"saved":0,"failed":0}');
+    } catch (_) { return { saved:0, failed:0 }; }
+  },
+  saveCounters(c) {
+    try { localStorage.setItem(this.COUNT_KEY, JSON.stringify(c)); } catch (_) {}
+  },
+  bump(kind) {
+    const c = this.loadCounters();
+    if (kind === 'saved') { c.saved = (c.saved|0) + 1; c.last_save_at = Date.now(); }
+    else if (kind === 'failed') c.failed = (c.failed|0) + 1;
+    this.saveCounters(c);
+  },
+  async post() {
+    if (STAGING_MODE) return;
+    if (!state.jwt) return;
+    if (!SB) return;
+    const sessionId =
+      (state.tokenPayload && state.tokenPayload.session_id) ||
+      (state.serverSession && state.serverSession.session_id);
+    if (!sessionId) return;
+    const c = this.loadCounters();
+    // Best-effort enrichment — all gated on feature presence
+    let battery = null;
+    try {
+      if (navigator.getBattery) {
+        const b = await navigator.getBattery();
+        battery = (b && typeof b.level === 'number') ? b.level : null;
+      }
+    } catch (_) {}
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    const network = conn ? (conn.effectiveType || conn.type || null) : null;
+    const row = {
+      session_id:   sessionId,
+      staff_id:     state.staffId || null,
+      reported_at:  new Date().toISOString(),
+      online:       !!navigator.onLine,
+      queue_count:  Outbox.count(),
+      total_saved:  c.saved | 0,
+      total_failed: c.failed | 0,
+      last_save_at: c.last_save_at ? new Date(c.last_save_at).toISOString() : null,
+      page_version: PAGE_VERSION,
+      user_agent:   String(navigator.userAgent || '').slice(0, 240),
+      battery_level: battery,
+      network_type:  network,
+    };
+    try {
+      const { error } = await SB.from('barback_telemetry').upsert(row, { onConflict: 'session_id' });
+      if (error) console.warn('[telemetry] upsert error', error.message);
+    } catch (e) { console.warn('[telemetry] exception', e); }
+  },
+};
+let _telemetryTimer = null;
+function startTelemetryHeartbeat() {
+  if (_telemetryTimer) clearInterval(_telemetryTimer);
+  if (STAGING_MODE) return;
+  // Phase 6: pilot mode halves the heartbeat interval for tighter
+  // observability during the live event.
+  const ms = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE)
+    ? PILOT_TELEMETRY_HEARTBEAT_MS
+    : TELEMETRY_HEARTBEAT_MS;
+  _telemetryTimer = setInterval(() => {
+    Telemetry.post().then(() => plog('hb', 'ok')).catch(() => plog('hb', 'fail'));
+  }, ms);
+  // Send an immediate heartbeat on start
+  Telemetry.post().catch(() => {});
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 — Boot-time outbox repair + recent-items quick buttons
+// ════════════════════════════════════════════════════════════════════
+function repairStaleOutbox() {
+  const out = Outbox.load();
+  // Phase 6: in pilot mode keep audit depth — quarantine cutoff 30d.
+  const ageMs = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE)
+    ? PILOT_STALE_OUTBOX_AGE_MS
+    : STALE_OUTBOX_AGE_MS;
+  const cutoff = Date.now() - ageMs;
+  const fresh = out.filter(e => (e.queued_at || 0) >= cutoff);
+  const stale = out.length - fresh.length;
+  if (stale > 0) {
+    // Park stale entries under a quarantine key for later inspection
+    try {
+      const stash = (JSON.parse(localStorage.getItem('barinv_barback_stale_quarantine') || '[]') || []);
+      stash.push({ at: Date.now(), entries: out.filter(e => (e.queued_at || 0) < cutoff) });
+      localStorage.setItem('barinv_barback_stale_quarantine', JSON.stringify(stash.slice(-3)));
+    } catch (_) {}
+    Outbox.save(fresh);
+    console.warn('[outbox-repair] quarantined', stale, 'stale entries (>7 days old)');
+  }
+}
+function renderRecentItemChips() {
+  const host = $('recent-items-chips');
+  if (!host) return;
+  const arr = Recent.load();
+  const seen = new Set();
+  const chips = [];
+  for (const r of arr) {
+    if (!r.item_id || seen.has(r.item_id)) continue;
+    seen.add(r.item_id);
+    chips.push({ id: r.item_id, name: r.item_name });
+    if (chips.length >= RECENT_ITEM_BUTTONS) break;
+  }
+  if (!chips.length) { host.style.display = 'none'; return; }
+  host.style.display = '';
+  host.innerHTML = chips.map(c =>
+    '<button type="button" class="chip" data-item-id="' + esc(c.id) + '">' + esc(c.name || '?') + '</button>'
+  ).join('');
+  host.querySelectorAll('.chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const it = (cache.items || []).find(x => x.id === btn.dataset.itemId);
+      if (it) { setPickedItem(it); Feedback.scan(); }
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 4 — operational hardening hooks
+// ════════════════════════════════════════════════════════════════════
+
+// 1. Persistent online/offline banner.
+function refreshNetBanner() {
+  const el = $('net-banner');
+  if (!el) return;
+  el.style.display = navigator.onLine ? 'none' : '';
+}
+window.addEventListener('online',  refreshNetBanner);
+window.addEventListener('offline', refreshNetBanner);
+
+// 2. Tab visibility — when the page comes back to foreground (after
+//    backgrounding on iOS), refresh banner, kick a sync attempt, and
+//    re-validate the Phase 3 JWT.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  refreshNetBanner();
+  // Phase 3 — check JWT freshness on resume
+  if (state.jwt) {
+    const ms = Phase3.msUntilExpiry(state.jwt);
+    if (ms == null || ms <= 0) {
+      // Expired in background — force re-login
+      Auth.clearSession();
+      state.jwt = null; state.tokenPayload = null;
+      state.staffId = null; state.staffName = null;
+      alert('Your barback session expired while the app was in the background. Please sign in again.');
+      showScreen('screen-token');
+      return;
+    }
+  }
+  // Drain anything queued while we were asleep
+  if (Outbox.count() > 0 && navigator.onLine) trySyncSoon(500);
+  // Phase 5: immediate telemetry heartbeat so the manager dashboard
+  // reflects the device coming back online within a second or two.
+  if (state.jwt && !STAGING_MODE) Telemetry.post().catch(() => {});
+  // Phase 6: immediate event-control refresh on foreground.
+  if (state.jwt && !STAGING_MODE) EventControl.fetch().catch(() => {});
+});
+
+// Phase 5: pageshow handles bfcache restores (iOS Safari often
+// "freezes" tabs without re-running scripts; bfcache restore fires
+// pageshow with event.persisted=true).
+window.addEventListener('pageshow', (ev) => {
+  if (ev.persisted) {
+    refreshNetBanner();
+    if (Outbox.count() > 0 && navigator.onLine) trySyncSoon(500);
+    if (state.jwt && !STAGING_MODE) {
+      const ms = Phase3.msUntilExpiry(state.jwt);
+      if (ms != null && ms <= 0) {
+        Auth.clearSession();
+        state.jwt = null; state.tokenPayload = null;
+        alert('Session expired while the tab was suspended. Please sign in again.');
+        showScreen('screen-token');
+        return;
+      }
+      Telemetry.post().catch(() => {});
+      // Phase 6: poll event control on bfcache resume
+      EventControl.fetch().catch(() => {});
+    }
+  }
+});
+
+// 3. Double-save guard — suppress accidental duplicate saves of the
+//    SAME (item, action, qty) within a short window. The barback
+//    might double-tap SAVE in a noisy venue; we don't want two rows.
+const _recentSaveFingerprints = new Map();   // fp → ts
+function saveFingerprint(action, itemId, qty) {
+  return action + '|' + itemId + '|' + Number(qty).toFixed(2);
+}
+function isDuplicateSave(action, itemId, qty) {
+  const fp = saveFingerprint(action, itemId, qty);
+  const last = _recentSaveFingerprints.get(fp);
+  const now = Date.now();
+  if (last && now - last < 1500) return true;
+  _recentSaveFingerprints.set(fp, now);
+  // Bound the map size — garbage-collect entries older than 5 s
+  if (_recentSaveFingerprints.size > 30) {
+    const cutoff = now - 5000;
+    for (const [k, t] of _recentSaveFingerprints) {
+      if (t < cutoff) _recentSaveFingerprints.delete(k);
+    }
+  }
+  return false;
+}
+
+// 4. Queue backup export — manager / barback support tool. Writes a
+//    JSON file containing the outbox + recent log + session metadata
+//    so a stuck device can be diagnosed by importing on a manager
+//    laptop. Sensitive fields (PINs) are NOT in any of these blobs.
+function exportQueueBackup() {
+  const blob = {
+    exported_at: new Date().toISOString(),
+    page_version: 'phase-4-2026-05-15',
+    auth_path: state.authPath || null,
+    session: state.tokenPayload || null,
+    server_session: state.serverSession || null,
+    staff_id: state.staffId, staff_name: state.staffName,
+    outbox: Outbox.load(),
+    recent: Recent.load(),
+    queue_health: queueHealth(),
+  };
+  const text = JSON.stringify(blob, null, 2);
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = url;
+  a.download = 'barinv-barback-queue-' + stamp + '.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+function queueHealth() {
+  const out = Outbox.load();
+  const seen = new Set();
+  let dup = 0, missing = 0;
+  for (const e of out) {
+    if (!e.client_event_id || !e.action || !e.item_id) missing++;
+    if (seen.has(e.client_event_id)) dup++;
+    seen.add(e.client_event_id);
+  }
+  return {
+    count: out.length,
+    duplicates: dup,
+    missing_fields: missing,
+    oldest_queued_at: out.length ? Math.min(...out.map(e => e.queued_at || Infinity)) : null,
+    newest_queued_at: out.length ? Math.max(...out.map(e => e.queued_at || 0)) : null,
+  };
+}
+$('review-export')?.addEventListener('click', exportQueueBackup);
+
+// 5. PWA — register service worker for offline shell caching
+if ('serviceWorker' in navigator) {
+  // Defer until after first paint
+  setTimeout(() => {
+    navigator.serviceWorker.register('barback_sw.js', { scope: './' })
+      .then(reg => { console.log('[barback] sw registered, scope:', reg.scope); })
+      .catch(err => { console.warn('[barback] sw register failed:', err); });
+  }, 0);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Boot
+// ════════════════════════════════════════════════════════════════════
+refreshNetBanner();
+boot();
+</script>
+
+</body>
+</html>

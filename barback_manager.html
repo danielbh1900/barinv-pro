@@ -1,0 +1,2531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>BARINV — Barback Manager</title>
+  <!--
+    BARINV BARBACK MANAGER (Phase 3, 2026-05-15)
+    ────────────────────────────────────────────────────────────────
+    Standalone admin page. Does NOT modify www/index.html.
+
+    Calls three Edge Functions:
+      • barback-create-session  ← creates a session + assigns PINs
+      • barback-revoke-session  ← kills a session
+      • (PIN rotation reuses barback-create-session with pin_rotate_for)
+
+    Reads `barback_sessions` and `barback_audit_log` directly via the
+    authenticated manager's JWT — the existing RLS policy allows
+    authenticated reads.
+
+    Auth: standard Supabase email/password sign-in (the manager has a
+    real auth.users row). The manager must be linked to a staff record
+    via staff.auth_user_id for session-creation to succeed (the create
+    function uses that linkage as the issued_by FK).
+  -->
+  <style>
+    *,*::before,*::after { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { margin:0; padding:0; background:#0a0a0a; color:#e6e6e6;
+      font-family:-apple-system,"SF Pro Display",system-ui,sans-serif;
+      -webkit-font-smoothing:antialiased; min-height:100vh; }
+    button { font-family:inherit; }
+
+    .wrap { padding:14px; max-width:760px; margin:0 auto; padding-bottom:80px; }
+    h1 { font-size:20px; margin:0 0 4px; letter-spacing:0.04em; }
+    h2 { font-size:13px; margin:0 0 14px; color:#888; font-weight:500; letter-spacing:0.06em; }
+    h3 { font-size:14px; margin:24px 0 8px; color:#fb923c; letter-spacing:0.06em; }
+
+    .row { margin:10px 0; }
+    label { display:block; font-size:10px; letter-spacing:0.14em; color:#888; margin-bottom:6px; }
+    input,select,textarea {
+      width:100%; padding:12px; background:#1a1a1a; border:1px solid #333; border-radius:6px;
+      color:#fff; font-size:15px; font-family:inherit;
+    }
+    input:focus,select:focus,textarea:focus { outline:none; border-color:#fb923c; }
+
+    .btn { width:100%; padding:14px; margin:6px 0;
+      background:#3b82f6; color:#fff; font-size:14px; font-weight:700;
+      letter-spacing:0.06em; border:none; border-radius:8px; cursor:pointer; }
+    .btn:active { background:#2563eb; }
+    .btn[disabled] { background:#333; color:#666; }
+    .btn-secondary { background:#1a1a1a; color:#bbb; border:1px solid #333; }
+    .btn-success { background:#22c55e; color:#000; font-weight:800; }
+    .btn-danger { background:#7c2d12; color:#fff; }
+
+    .card {
+      background:#0e1116; border:1px solid #1f2937; border-radius:10px;
+      padding:14px; margin:10px 0;
+    }
+    .topbar {
+      background:#1a1a1a; border-bottom:1px solid #333; padding:10px 14px;
+      display:flex; gap:10px; align-items:center; font-size:12px; color:#aaa;
+    }
+    .topbar .who { flex:1; }
+    .topbar .who b { color:#fb923c; }
+    .topbar button { padding:6px 12px; background:#7c2d12; color:#fff; border:none; border-radius:4px; font-size:11px; }
+
+    .status { padding:12px; margin:10px 0; border-radius:6px; font-size:13px; line-height:1.4; }
+    .status.ok   { background:rgba(34,197,94,0.10); color:#4ade80; border:1px solid #22c55e; }
+    .status.warn { background:rgba(245,158,11,0.10); color:#fbbf24; border:1px solid #f59e0b; }
+    .status.err  { background:rgba(239,68,68,0.10); color:#f87171; border:1px solid #ef4444; }
+    .status.info { background:rgba(59,130,246,0.10); color:#93c5fd; border:1px solid #3b82f6; }
+
+    pre.token-out {
+      background:#000; padding:10px; border-radius:6px; font-size:11px;
+      word-break:break-all; white-space:pre-wrap; color:#fbbf24; max-height:120px; overflow:auto;
+    }
+    #qr-out { background:#fff; padding:12px; border-radius:8px; display:inline-block; }
+    #qr-out svg { display:block; max-width:100%; height:auto; }
+
+    .session-row {
+      padding:10px; border:1px solid #222; border-radius:6px;
+      margin:6px 0; background:#0f1115;
+      display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+    }
+    .session-row.revoked { opacity:0.55; }
+    .session-row .meta { flex:1; min-width:220px; font-size:12px; line-height:1.5; }
+    .session-row .meta b { color:#fb923c; }
+    .session-row .meta .muted { color:#666; font-size:11px; }
+    .session-row .actions { display:flex; flex-direction:column; gap:6px; min-width:120px; }
+    .session-row .pill {
+      display:inline-block; padding:2px 8px; border-radius:4px;
+      font-size:10px; font-weight:800; letter-spacing:0.06em;
+    }
+    .pill.active   { background:#064e3b; color:#4ade80; }
+    .pill.expired  { background:#3f0c0c; color:#fca5a5; }
+    .pill.revoked  { background:#1f2937; color:#9ca3af; }
+    .pill.expiring { background:#3f2c0a; color:#fbbf24; }
+
+    .pin-list {
+      background:#0a0a0a; border:1px solid #222; border-radius:6px;
+      padding:10px; font-size:13px; line-height:1.7;
+    }
+    .pin-list .pin { color:#fbbf24; font-weight:800; font-family:ui-monospace,monospace; }
+
+    .audit-row {
+      padding:8px 6px; border-bottom:1px solid #161616;
+      font-size:12px; display:flex; gap:8px; align-items:center;
+    }
+    .audit-row:last-child { border-bottom:none; }
+    .audit-row .ts { color:#666; font-size:10px; min-width:90px; }
+    .audit-row .act { font-weight:800; padding:2px 6px; border-radius:4px; font-size:10px; letter-spacing:0.06em; min-width:120px; text-align:center; }
+    .act.session_created   { background:#064e3b; color:#4ade80; }
+    .act.session_revoked   { background:#3f0c0c; color:#fca5a5; }
+    .act.login_ok          { background:#064e3b; color:#4ade80; }
+    .act.login_bad_pin,
+    .act.login_rate_limited,
+    .act.login_no_pin_set,
+    .act.login_revoked_session,
+    .act.login_session_expired,
+    .act.login_staff_not_allowed,
+    .act.login_unknown_session { background:#3f0c0c; color:#fca5a5; }
+
+    .multi-select {
+      max-height:180px; overflow-y:auto;
+      background:#0a0a0a; border:1px solid #222; border-radius:6px;
+      padding:6px;
+    }
+    .multi-select label {
+      display:flex; gap:8px; align-items:center;
+      padding:6px 4px; cursor:pointer; font-size:13px; color:#ccc;
+      letter-spacing:normal; margin:0; text-transform:none;
+    }
+    .multi-select input { width:auto; }
+    .small { font-size:11px; color:#888; line-height:1.5; }
+    .muted { color:#666; }
+    code { background:#000; padding:1px 6px; border-radius:3px; color:#fbbf24; font-size:11px; }
+
+    .screen { display:none; }
+    .screen.active { display:block; }
+
+    /* ── Phase 6 — PILOT tab ─────────────────────────────────────────── */
+    .pilot-strip { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+    .pilot-strip .chip {
+      background:#0a0a0a; border:1px solid #1f2937; border-radius:14px;
+      padding:5px 10px; font-size:11px; color:#cbd5e1; letter-spacing:0.04em;
+    }
+    .pilot-strip .chip b { color:#fb923c; margin-right:4px; }
+    .pilot-strip .chip.warn { border-color:#f59e0b; color:#fbbf24; }
+    .pilot-strip .chip.err  { border-color:#ef4444; color:#fca5a5; }
+    .pilot-strip .chip.ok   { border-color:#22c55e; color:#4ade80; }
+
+    .readiness-row {
+      display:flex; align-items:center; gap:8px;
+      padding:6px 8px; border-bottom:1px solid #161616; font-size:12px;
+    }
+    .readiness-row:last-child { border-bottom:none; }
+    .readiness-row .dot {
+      width:10px; height:10px; border-radius:50%; background:#666; flex-shrink:0;
+    }
+    .readiness-row.ok   .dot { background:#22c55e; }
+    .readiness-row.fail .dot { background:#ef4444; }
+    .readiness-row.warn .dot { background:#f59e0b; }
+    .readiness-row .desc { flex:1; color:#cbd5e1; }
+    .readiness-row .ack  { font-size:11px; color:#888; }
+    .readiness-row .ack input { width:auto; }
+
+    .alert-row {
+      padding:6px 8px; border-bottom:1px solid #161616; font-size:12px;
+      display:flex; gap:8px; align-items:flex-start;
+    }
+    .alert-row:last-child { border-bottom:none; }
+    .alert-row .alert-tag {
+      font-size:10px; padding:2px 6px; border-radius:3px; font-weight:800;
+      letter-spacing:0.06em; flex-shrink:0;
+    }
+    .alert-row .alert-tag.err  { background:#3f0c0c; color:#fca5a5; }
+    .alert-row .alert-tag.warn { background:#3f2c0a; color:#fbbf24; }
+    .alert-row .alert-tag.info { background:#0c2a3f; color:#7dd3fc; }
+    .alert-row .alert-body { flex:1; color:#cbd5e1; }
+
+    .timeline-row {
+      padding:5px 8px; border-left:2px solid #1f2937; margin:4px 0 4px 4px;
+      font-size:12px; color:#cbd5e1;
+    }
+    .timeline-row b { color:#fb923c; }
+    .timeline-row .t { color:#666; font-size:10px; margin-right:6px; font-family:ui-monospace,monospace; }
+
+    .emergency-card { border:1px solid #7c2d12 !important; background:#1a0a0a; }
+    .emergency-card h3 { color:#fca5a5; }
+    .emergency-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:8px;
+    }
+    .emergency-grid .btn { margin:0; padding:10px; font-size:12px; }
+
+    .feedback-quick { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+    .feedback-quick button {
+      padding:8px 10px; background:#1f2937; color:#fb923c;
+      border:1px solid #374151; border-radius:6px; font-size:11px;
+      font-weight:700; letter-spacing:0.04em; cursor:pointer;
+    }
+    .feedback-quick button:active { background:#0a0a0a; }
+    .feedback-row {
+      padding:6px 8px; border-bottom:1px solid #161616; font-size:12px;
+    }
+    .feedback-row:last-child { border-bottom:none; }
+    .feedback-row .cat {
+      display:inline-block; padding:1px 6px; border-radius:3px;
+      font-size:10px; font-weight:800; background:#1f2937; color:#fbbf24;
+      letter-spacing:0.06em; margin-right:6px;
+    }
+    .feedback-row .cat.blocker { background:#3f0c0c; color:#fca5a5; }
+
+    .pilot-close-card { border:1px solid #b45309 !important; background:#1a1208; }
+    .pilot-close-card h3 { color:#fbbf24; }
+
+    .pilot-badge {
+      display:inline-block; padding:1px 6px; border-radius:3px;
+      font-size:10px; font-weight:800; background:#b45309; color:#fef3c7;
+      letter-spacing:0.08em; margin-left:6px; vertical-align:middle;
+    }
+
+    /* Phase 7 — GO/WARN/NO-GO rollup banner */
+    .pilot-go-banner {
+      padding:12px 14px; border-radius:8px; margin:0 0 10px;
+      font-weight:800; letter-spacing:0.06em; font-size:13px;
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    }
+    .pilot-go-banner .pilot-go-detail {
+      font-weight:500; font-size:11px; color:rgba(255,255,255,0.85);
+      flex:1; min-width:200px;
+    }
+    .pilot-go-go    { background:linear-gradient(90deg,#065f46,#064e3b); color:#bbf7d0; }
+    .pilot-go-warn  { background:linear-gradient(90deg,#92400e,#7c2d12); color:#fef3c7; }
+    .pilot-go-nogo  { background:linear-gradient(90deg,#b91c1c,#7c2d12); color:#fee2e2; }
+    .pilot-go-unknown { background:#1f2937; color:#9ca3af; border:1px dashed #374151; }
+  </style>
+</head>
+<body>
+
+<div class="topbar" id="topbar" style="display:none;">
+  <div class="who" id="who-line">—</div>
+  <button id="signout-btn">Sign out</button>
+</div>
+
+<!-- ============================ SIGN-IN SCREEN ============================ -->
+<div class="screen active" id="screen-signin">
+  <div class="wrap">
+    <h1>BARINV — Barback Manager</h1>
+    <h2>Manager sign-in</h2>
+    <div id="signin-status"></div>
+    <div class="card">
+      <div class="row">
+        <label>EMAIL</label>
+        <input id="signin-email" type="email" autocomplete="email">
+      </div>
+      <div class="row">
+        <label>PASSWORD</label>
+        <input id="signin-password" type="password" autocomplete="current-password">
+      </div>
+      <button class="btn btn-success" id="signin-btn">SIGN IN</button>
+      <div class="small muted" style="margin-top:8px;">
+        Use the same credentials you use for the BARINV manager app.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ MAIN SCREEN (tabs) ============================ -->
+<div class="screen" id="screen-main">
+  <div class="wrap">
+    <h1>Barback session manager</h1>
+    <h2 id="venue-meta">—</h2>
+
+    <div style="display:flex;gap:6px;margin:6px 0 14px;">
+      <button class="btn btn-secondary" data-tab="create">+ NEW</button>
+      <button class="btn btn-secondary" data-tab="sessions">ACTIVE</button>
+      <button class="btn btn-secondary" data-tab="diag">DIAGNOSTICS</button>
+      <button class="btn btn-secondary" data-tab="pilot" style="border-color:#b45309;color:#fbbf24;">🎯 PILOT</button>
+      <button class="btn btn-secondary" data-tab="audit">AUDIT</button>
+    </div>
+
+    <!-- ─── CREATE TAB ─── -->
+    <div class="tab" data-tab="create">
+      <div class="card">
+        <h3>Generate a new barback link</h3>
+        <div class="row">
+          <label>SESSION NICKNAME (for audit log)</label>
+          <input id="c-nickname" type="text" placeholder="e.g. Sat May 13 — Main Bar">
+        </div>
+        <div class="row">
+          <label>NIGHT</label>
+          <select id="c-night"></select>
+        </div>
+        <div class="row">
+          <label>PRIMARY BAR (optional — leave blank for multi-bar)</label>
+          <select id="c-bar"><option value="">(any bar)</option></select>
+        </div>
+        <div class="row">
+          <label>ADDITIONAL BARS THE BARBACK CAN POST TO</label>
+          <div class="multi-select" id="c-allowed-bars"></div>
+          <div class="small muted">Leave all unchecked to lock the barback to the primary bar only.</div>
+        </div>
+        <div class="row">
+          <label>STAFF ASSIGNED (uncheck = any cached staff allowed)</label>
+          <div class="multi-select" id="c-staff"></div>
+        </div>
+        <div class="row">
+          <label>EXPIRES AT</label>
+          <input id="c-expires" type="datetime-local">
+          <div class="small muted" style="margin-top:4px;">
+            Quick:
+            <a href="#" data-exp="2h"  class="exp-quick" style="color:#3b82f6;">+2h</a> ·
+            <a href="#" data-exp="6h"  class="exp-quick" style="color:#3b82f6;">+6h</a> ·
+            <a href="#" data-exp="end" class="exp-quick" style="color:#3b82f6;">end of night</a> ·
+            <a href="#" data-exp="24h" class="exp-quick" style="color:#3b82f6;">+24h</a>
+          </div>
+        </div>
+        <div class="row">
+          <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#bbb;">
+            <input type="checkbox" id="c-rotate-pins" style="width:auto;">
+            <span>Rotate PINs for the selected staff (force new PINs)</span>
+          </label>
+        </div>
+        <div class="row">
+          <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#fbbf24;">
+            <input type="checkbox" id="c-pilot" style="width:auto;">
+            <span><b>🎯 LIVE PILOT MODE</b> — tag events from this session as <code>barback_live_pilot</code></span>
+          </label>
+        </div>
+        <button class="btn btn-success" id="c-create">GENERATE LINK + PINS</button>
+        <div id="c-status"></div>
+      </div>
+
+      <div class="card" id="c-result-card" style="display:none;">
+        <h3>Generated link</h3>
+        <div class="row">
+          <label>URL</label>
+          <pre class="token-out" id="c-url"></pre>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary" id="c-copy">📋 COPY LINK</button>
+            <button class="btn btn-secondary" id="c-share">↗ SHARE</button>
+          </div>
+        </div>
+        <div class="row" style="text-align:center;">
+          <label>QR CODE</label>
+          <div id="qr-out" style="min-height:80px;"></div>
+        </div>
+        <div class="row">
+          <label>PIN ASSIGNMENTS (visible ONCE — copy now)</label>
+          <div class="pin-list" id="c-pins">—</div>
+          <div class="small muted" style="margin-top:6px;">
+            Already-assigned staff show no PIN here unless "Rotate PINs" was checked. Use the ROTATE button in the Active tab to issue a new PIN for a single staff member.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── SESSIONS TAB ─── -->
+    <div class="tab" data-tab="sessions" style="display:none;">
+      <div class="card">
+        <h3>Active barback sessions</h3>
+        <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;">
+          <input id="sessions-search" type="search" placeholder="filter by nickname..."
+                 style="flex:1;min-width:140px;padding:8px;font-size:13px;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="sessions-active-only" checked style="width:auto;">show active only
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="sessions-auto" checked style="width:auto;">auto-refresh 30s
+          </label>
+        </div>
+        <div id="sessions-bulk-bar" style="display:none;padding:8px 10px;background:#3f2c0a;border:1px solid #f59e0b;border-radius:6px;margin:6px 0;font-size:12px;color:#fbbf24;">
+          <span id="sessions-selected-count">0 selected</span>
+          <button class="btn btn-danger" id="sessions-bulk-revoke" style="float:right;padding:6px 12px;margin:0;font-size:11px;">⚠ BULK REVOKE</button>
+        </div>
+        <div id="sessions-list">loading…</div>
+        <button class="btn btn-secondary" id="sessions-refresh">↺ REFRESH</button>
+      </div>
+
+      <!-- Phase 5: night-level danger zone -->
+      <div class="card" style="border:1px solid #7c2d12;background:#1a0a0a;">
+        <h3 style="color:#fca5a5;">⚠ Night-level controls</h3>
+        <div class="row">
+          <label>SELECT NIGHT FOR BULK / CLOSE / EXPORT</label>
+          <select id="dz-night"></select>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-danger"    id="dz-revoke-all">⚠ REVOKE ALL ACTIVE</button>
+          <button class="btn btn-danger"    id="dz-close-night">🔒 CLOSE NIGHT (revoke + audit)</button>
+          <button class="btn btn-secondary" id="dz-export-csv">⬇ EXPORT EVENTS CSV</button>
+        </div>
+        <div id="dz-status"></div>
+        <div class="small muted" style="margin-top:6px;">
+          REVOKE ALL = revokes every active session for the selected night.<br>
+          CLOSE NIGHT = REVOKE ALL + writes a <code>night_closed</code> audit summary, marking end-of-shift.<br>
+          EXPORT EVENTS CSV = downloads all <code>events</code> rows tagged <code>source=barback_web_link</code> for this night.
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── DIAGNOSTICS TAB (Phase 5) ─── -->
+    <div class="tab" data-tab="diag" style="display:none;">
+      <div class="card">
+        <h3>Live device diagnostics</h3>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="diag-active-only" checked style="width:auto;">active sessions only
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="diag-auto" checked style="width:auto;">auto-refresh 30s
+          </label>
+        </div>
+        <div id="diag-list" style="font-size:12px;line-height:1.6;">loading…</div>
+        <button class="btn btn-secondary" id="diag-refresh">↺ REFRESH</button>
+      </div>
+
+      <div class="card">
+        <h3>Operational analytics summary</h3>
+        <div id="diag-analytics" style="font-size:12px;line-height:1.6;">loading…</div>
+        <button class="btn btn-secondary" id="diag-analytics-refresh">↺ REFRESH ANALYTICS</button>
+        <div class="small muted" style="margin-top:6px;">
+          Powered by views <code>v_barback_session_summary</code>, <code>v_barback_workload_today</code>,
+          <code>v_barback_suspicious_scans</code>, <code>v_barback_missing_returns</code>.
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── PILOT TAB (Phase 6 + 7) ─── -->
+    <div class="tab" data-tab="pilot" style="display:none;">
+
+      <!-- Phase 7: READY / WARNING / NO-GO rollup banner -->
+      <div id="pilot-go-banner" class="pilot-go-banner pilot-go-unknown">
+        <span id="pilot-go-state">— RUN CHECKS —</span>
+        <span class="pilot-go-detail" id="pilot-go-detail">click RUN CHECKS in the readiness card below</span>
+      </div>
+
+      <!-- Phase 7: live-event freeze banner (auto-shown when event is in progress) -->
+      <div id="pilot-live-banner" style="display:none;background:linear-gradient(90deg,#7c2d12,#b91c1c);color:#fff;padding:8px 14px;font-weight:800;letter-spacing:0.08em;text-align:center;font-size:11px;border-radius:6px;margin:0 0 10px;">
+        🔴 EVENT IN PROGRESS — destructive actions require extra confirmation
+      </div>
+
+      <div class="card">
+        <h3>🎯 Live pilot — event night center</h3>
+        <div class="row">
+          <label>NIGHT</label>
+          <select id="pilot-night"></select>
+        </div>
+        <div id="pilot-monitor-strip" class="pilot-strip">
+          <span class="chip"><b id="ps-active">0</b>active barback(s)</span>
+          <span class="chip"><b id="ps-throughput">0</b>scans last 5m</span>
+          <span class="chip"><b id="ps-queue">0</b>queue total</span>
+          <span class="chip"><b id="ps-busiest">—</b>busiest bar</span>
+          <span class="chip" id="ps-alerts-chip"><b id="ps-alerts">0</b>alerts</span>
+          <span class="chip"><b id="ps-feedback">0</b>feedback</span>
+        </div>
+        <div class="small muted">Auto-refresh every 20s while this tab is visible.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          <button class="btn btn-secondary" id="pilot-health-snapshot" style="padding:8px 10px;font-size:11px;">📊 HEALTH SNAPSHOT (JSON)</button>
+        </div>
+        <div id="pilot-status"></div>
+      </div>
+
+      <!-- Pre-event readiness gating -->
+      <div class="card">
+        <h3>Pre-event readiness — GO / NO-GO</h3>
+        <div id="pilot-readiness-list">
+          <div class="readiness-row" data-check="migrations"><span class="dot"></span><span class="desc">Phase 3–6 migrations applied</span></div>
+          <div class="readiness-row" data-check="vendor"><span class="dot"></span><span class="desc">Vendor bundle (Supabase + QR) loaded</span></div>
+          <div class="readiness-row" data-check="diagnostics"><span class="dot"></span><span class="desc">Diagnostics view returns rows for this night</span></div>
+          <div class="readiness-row" data-check="telemetry"><span class="dot"></span><span class="desc">Telemetry heartbeat written in last 5 minutes</span></div>
+          <div class="readiness-row" data-check="test_save"><span class="dot"></span><span class="desc">At least one test save recorded for this night</span></div>
+          <div class="readiness-row" data-check="queue_empty"><span class="dot"></span><span class="desc">Every active session has queue_count = 0</span></div>
+          <div class="readiness-row" data-check="service_worker"><span class="dot"></span><span class="desc">Service worker registered + active on this device</span></div>
+          <div class="readiness-row" data-check="queue_probe"><span class="dot"></span><span class="desc">Live write+read probe against barback_event_readiness</span></div>
+          <div class="readiness-row" data-check="functions"><span class="dot"></span><span class="desc">Edge Functions deployed (manager confirms)</span><label class="ack"><input type="checkbox" data-ack="functions"> ack</label></div>
+          <div class="readiness-row" data-check="jwt_secret"><span class="dot"></span><span class="desc">BARBACK_JWT_SECRET present in Edge Function env (manager confirms)</span><label class="ack"><input type="checkbox" data-ack="jwt_secret"> ack</label></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="pilot-run-checks">↺ RUN CHECKS</button>
+          <button class="btn btn-success"   id="pilot-mark-ready" disabled>✓ MARK EVENT READY</button>
+        </div>
+        <div id="pilot-readiness-status"></div>
+      </div>
+
+      <!-- Real-event health monitor -->
+      <div class="card">
+        <h3>Health monitor — live alerts</h3>
+        <div id="pilot-alerts-list" style="font-size:12px;">—</div>
+        <button class="btn btn-secondary" id="pilot-alerts-refresh">↺ REFRESH</button>
+      </div>
+
+      <!-- Event-night operational timeline -->
+      <div class="card">
+        <h3>Operational timeline</h3>
+        <div id="pilot-timeline" style="font-size:12px;">—</div>
+        <button class="btn btn-secondary" id="pilot-timeline-refresh">↺ REFRESH</button>
+        <div class="small muted" style="margin-top:6px;">
+          Derived from <code>barback_audit_log</code> + first <code>events</code> row per session. Last 100 entries.
+        </div>
+      </div>
+
+      <!-- Emergency tools -->
+      <div class="card emergency-card">
+        <h3>⚠ Emergency event recovery</h3>
+        <div class="small muted">Soft control flags — barback clients poll every 30s and react.</div>
+        <div class="emergency-grid">
+          <button class="btn btn-danger"    id="pilot-toggle-safe">🛑 SAFE MODE: OFF</button>
+          <button class="btn btn-danger"    id="pilot-toggle-rapid">Rapid scan: ENABLED</button>
+          <button class="btn btn-danger"    id="pilot-toggle-frozen">New sessions: ALLOWED</button>
+          <button class="btn btn-danger"    id="pilot-emergency-revoke">⚠ EMERGENCY REVOKE-ALL</button>
+          <button class="btn btn-secondary" id="pilot-force-drain">Force queue drain</button>
+          <button class="btn btn-secondary" id="pilot-force-refresh">Force device refresh</button>
+        </div>
+        <div id="pilot-emergency-status"></div>
+      </div>
+
+      <!-- Phase 7: Dry-run venue rehearsal -->
+      <div class="card" style="border:1px solid #1d4ed8;background:#0a1218;">
+        <h3 style="color:#7dd3fc;">🧪 Dry-run venue rehearsal</h3>
+        <div class="small muted">
+          Generates a session URL that opens in <code>STAGING_MODE</code> — no production
+          events row is written. Optionally injects N fake scans on load. Use this BEFORE
+          a real event to walk the workflow with the team.
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label>REHEARSAL NICKNAME</label>
+          <input id="reh-nickname" type="text" placeholder="e.g. dress rehearsal Sat afternoon">
+        </div>
+        <div class="row">
+          <label>FAKE SCANS ON LOAD (0 = none, max 200)</label>
+          <input id="reh-fake-n" type="number" min="0" max="200" step="1" value="0">
+        </div>
+        <button class="btn btn-secondary" id="reh-generate">🧪 GENERATE REHEARSAL LINK</button>
+        <div class="row" style="display:none;" id="reh-result-row">
+          <label>REHEARSAL URL</label>
+          <pre class="token-out" id="reh-url"></pre>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary" id="reh-copy">📋 COPY</button>
+            <button class="btn btn-secondary" id="reh-share">↗ SHARE</button>
+          </div>
+        </div>
+        <div id="reh-status"></div>
+        <div class="small muted" style="margin-top:6px;">
+          The rehearsal session is marked <code>rehearsal_mode=true</code> on
+          <code>barback_sessions</code>. The barback page sees <code>?stage=1</code> in the URL,
+          enters STAGING_MODE, and routes every save to local storage only.
+          <br><b>Simulate offline:</b> ask the barback to toggle airplane mode mid-shift.
+          <b>Simulate revoke:</b> hit REVOKE on the rehearsal session in the SESSIONS tab.
+          <b>Simulate reconnect storm:</b> have multiple rehearsal barbacks airplane-cycle simultaneously.
+        </div>
+      </div>
+
+      <!-- Field feedback -->
+      <div class="card">
+        <h3>Field feedback</h3>
+        <div class="small muted">One tap during the event — capture the friction now, fix it after.</div>
+        <div class="feedback-quick">
+          <button data-fb="ux">UX issue</button>
+          <button data-fb="scan">Scan issue</button>
+          <button data-fb="queue">Queue issue</button>
+          <button data-fb="network">Network issue</button>
+          <button data-fb="workflow">Workflow issue</button>
+          <button data-fb="other">Other</button>
+        </div>
+        <div id="pilot-feedback-list" style="font-size:12px;">—</div>
+      </div>
+
+      <!-- Phase 7: Event notes (separate from feedback — reflective + incident) -->
+      <div class="card">
+        <h3>📝 Event notes</h3>
+        <div class="small muted">
+          Manager-written observations captured during or after the event. Stored in
+          <code>barback_event_notes</code>; included in the pilot close package.
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label>CATEGORY</label>
+          <select id="note-category">
+            <option value="incident">incident</option>
+            <option value="network">network</option>
+            <option value="staffing">staffing</option>
+            <option value="workflow">workflow</option>
+            <option value="shift_observation">shift observation</option>
+            <option value="general">general</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>NOTE</label>
+          <textarea id="note-body" rows="3" placeholder="what happened, when, who, any relevant context"></textarea>
+        </div>
+        <button class="btn btn-secondary" id="note-save">💾 SAVE NOTE</button>
+        <div id="note-status"></div>
+        <div id="pilot-notes-list" style="font-size:12px;margin-top:10px;">—</div>
+      </div>
+
+      <!-- Operational export bundle (Phase 7: + revoke history + manager actions + notes) -->
+      <div class="card">
+        <h3>Operational export bundle</h3>
+        <div class="small muted">
+          One-click: queue state, telemetry, audit log, field feedback, event notes,
+          failed saves, diagnostics snapshot, alerts, event control, revoke history,
+          manager-actions timeline, events. Downloads two files (.json + .csv).
+        </div>
+        <button class="btn btn-secondary" id="pilot-export-bundle">⬇ EXPORT BUNDLE (JSON + CSV)</button>
+        <div id="pilot-export-status"></div>
+      </div>
+
+      <!-- Pilot close package -->
+      <div class="card pilot-close-card">
+        <h3>🎯 Pilot close package</h3>
+        <div class="small muted">
+          Run after CLOSE NIGHT. Produces: operational summary, suspicious activity, queue incidents,
+          failed saves, throughput. Powered by the <code>barback_pilot_close_summary</code> RPC.
+        </div>
+        <button class="btn btn-success" id="pilot-close-package">🎯 GENERATE PILOT CLOSE PACKAGE</button>
+        <div id="pilot-close-status"></div>
+      </div>
+    </div>
+
+    <!-- ─── AUDIT TAB ─── -->
+    <div class="tab" data-tab="audit" style="display:none;">
+      <div class="card">
+        <h3>Audit log (last 200)</h3>
+        <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;">
+          <select id="audit-filter-staff" style="flex:1;min-width:130px;padding:8px;font-size:12px;">
+            <option value="">all staff</option>
+          </select>
+          <select id="audit-filter-action" style="flex:1;min-width:130px;padding:8px;font-size:12px;">
+            <option value="">all actions</option>
+            <option value="session_created">session_created</option>
+            <option value="session_revoked">session_revoked</option>
+            <option value="session_extended">session_extended</option>
+            <option value="login_ok">login_ok</option>
+            <option value="login_bad_pin">login_bad_pin</option>
+            <option value="login_rate_limited">login_rate_limited</option>
+            <option value="login_no_pin_set">login_no_pin_set</option>
+            <option value="login_revoked_session">login_revoked_session</option>
+            <option value="login_session_expired">login_session_expired</option>
+            <option value="login_staff_not_allowed">login_staff_not_allowed</option>
+            <option value="pin_rotated">pin_rotated</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="audit-filter-failed" style="width:auto;">failed only
+          </label>
+        </div>
+        <div id="audit-list">loading…</div>
+        <button class="btn btn-secondary" id="audit-refresh">↺ REFRESH</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Phase 4: local-first vendor loading. Falls back to the matching CDN
+// URL if the local copy isn't on disk (e.g., during dev before
+// www/vendor/ is populated).
+(function loadVendor() {
+  function load(local, cdn, sym) {
+    return new Promise((resolve, reject) => {
+      function tryUrl(url, onFail) {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = false;          // preserve execution order
+        s.onload = () => {
+          if (sym && !window[sym]) onFail(new Error('loaded but ' + sym + ' missing'));
+          else resolve(url);
+        };
+        s.onerror = () => onFail(new Error('load failed: ' + url));
+        document.head.appendChild(s);
+      }
+      tryUrl(local, (_) => tryUrl(cdn, reject));
+    });
+  }
+  window.__BB_VENDOR_READY = Promise.all([
+    load('vendor/supabase-2.39.3.umd.min.js',
+         'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.js',
+         'supabase'),
+    load('vendor/qrcode-generator-1.4.4.min.js',
+         'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js',
+         'qrcode'),
+  ]).catch((e) => {
+    console.error('vendor load failed', e);
+    document.body.innerHTML = '<div style="padding:30px;color:#fca5a5;">' +
+      '<h1>Vendor bundle unreachable</h1>' +
+      'Could not load Supabase + QR libraries from either www/vendor/ or the CDN fallback. ' +
+      'Refresh on a network connection.' +
+      '</div>';
+    throw e;
+  });
+})();
+</script>
+<script>
+'use strict';
+// Wait for the vendor bundles (Supabase + QR) loaded above before
+// running any code that uses them. Everything in this block runs once
+// the local-or-CDN copies have settled.
+window.__BB_VENDOR_READY.then(() => {
+
+// ════════════════════════════════════════════════════════════════════
+//  Config — reused from production app's stored Supabase config
+// ════════════════════════════════════════════════════════════════════
+const CFG_KEYS = ['barinv_supabase_config', 'barinv_cfg', 'cfg', 'supabase_config'];
+function loadCfg() {
+  for (const k of CFG_KEYS) {
+    try {
+      const v = localStorage.getItem(k);
+      if (v) {
+        const p = JSON.parse(v);
+        if (p && p.url && p.key) return p;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+const cfg = loadCfg();
+if (!cfg) {
+  document.body.innerHTML =
+    '<div style="padding:30px;color:#888;line-height:1.6;">' +
+    '<h1 style="color:#fb923c;">Supabase config missing.</h1>' +
+    'Open the BARINV manager app once on this device to seed ' +
+    '<code>barinv_supabase_config</code> in localStorage, then reload this page.' +
+    '</div>';
+  throw new Error('no cfg');
+}
+const SB = supabase.createClient(cfg.url, cfg.key, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
+const FN_BASE = cfg.functionsBase || (cfg.url.replace(/\/+$/, '') + '/functions/v1');
+
+// ════════════════════════════════════════════════════════════════════
+//  State
+// ════════════════════════════════════════════════════════════════════
+const state = {
+  user: null,
+  staff: null,
+  venueId: null,
+  venueName: null,
+  nights: [],
+  bars: [],
+  staffList: [],
+  lastCreate: null,
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Utils
+// ════════════════════════════════════════════════════════════════════
+const $ = (id) => document.getElementById(id);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function showScreen(id) {
+  $$('.screen').forEach(s => s.classList.remove('active'));
+  $(id).classList.add('active');
+}
+function showTab(name) {
+  $$('.tab').forEach(t => t.style.display = t.dataset.tab === name ? '' : 'none');
+  // Auto-refresh runs only while the sessions tab is active
+  if (name === 'sessions') { renderSessions(); startSessionsAutoRefresh(); populateDangerZoneNights(); }
+  else { stopSessionsAutoRefresh(); }
+  if (name === 'audit')    renderAudit();
+  if (name === 'diag')     { renderDiagnostics(); renderAnalyticsSummary(); startDiagAutoRefresh(); }
+  else                     { stopDiagAutoRefresh(); }
+  if (name === 'pilot')    { Pilot.onShow(); }
+  else                     { Pilot.onHide(); }
+}
+function statusOn(id, msg, level) {
+  $(id).innerHTML = '<div class="status ' + (level || 'warn') + '">' + esc(msg) + '</div>';
+}
+function fmtTime(d) {
+  if (!d) return '—';
+  const x = new Date(d);
+  return x.toLocaleString();
+}
+function jwt() { return SB.auth.getSession().then(r => r.data.session?.access_token || null); }
+async function fnInvoke(path, body) {
+  const tok = await jwt();
+  if (!tok) throw new Error('not signed in');
+  const r = await fetch(FN_BASE + '/' + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+    body: JSON.stringify(body || {}),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Sign-in flow
+// ════════════════════════════════════════════════════════════════════
+async function tryRestoreSession() {
+  const { data } = await SB.auth.getSession();
+  if (data?.session?.user) {
+    state.user = data.session.user;
+    await afterSignedIn();
+    return true;
+  }
+  return false;
+}
+$('signin-btn').addEventListener('click', async () => {
+  const email = $('signin-email').value.trim();
+  const pw    = $('signin-password').value;
+  if (!email || !pw) { statusOn('signin-status','Email + password required','err'); return; }
+  $('signin-btn').disabled = true;
+  $('signin-btn').textContent = '… SIGNING IN';
+  const { data, error } = await SB.auth.signInWithPassword({ email, password: pw });
+  $('signin-btn').disabled = false;
+  $('signin-btn').textContent = 'SIGN IN';
+  if (error) { statusOn('signin-status', error.message, 'err'); return; }
+  state.user = data.user;
+  $('signin-password').value = '';
+  await afterSignedIn();
+});
+$('signout-btn').addEventListener('click', async () => {
+  await SB.auth.signOut();
+  state.user = null;
+  state.staff = null;
+  $('topbar').style.display = 'none';
+  showScreen('screen-signin');
+});
+
+async function afterSignedIn() {
+  // Identify the staff record linked to this auth user
+  const { data: srow } = await SB.from('staff')
+    .select('id, name, venue_id')
+    .eq('auth_user_id', state.user.id)
+    .maybeSingle();
+  state.staff = srow;
+  if (!state.staff) {
+    statusOn('signin-status',
+      'No staff row linked to this auth user (staff.auth_user_id is unset). ' +
+      'Ask an admin to set it before you can issue barback links.', 'err');
+    return;
+  }
+  state.venueId = state.staff.venue_id;
+  $('topbar').style.display = '';
+  $('who-line').innerHTML = '<b>' + esc(state.staff.name) + '</b> · ' + esc(state.user.email || '');
+  await loadVenueContext();
+  showScreen('screen-main');
+  showTab('create');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Load venue context (nights, bars, staff) from DB
+// ════════════════════════════════════════════════════════════════════
+async function loadVenueContext() {
+  // Venue name
+  const { data: vrow } = await SB.from('venues').select('id, name').eq('id', state.venueId).maybeSingle();
+  state.venueName = vrow?.name || state.venueId;
+  $('venue-meta').textContent = state.venueName;
+
+  // Nights (most recent first)
+  const { data: nights } = await SB.from('nights')
+    .select('id, date, name')
+    .eq('venue_id', state.venueId)
+    .order('date', { ascending: false })
+    .limit(60);
+  state.nights = nights || [];
+  $('c-night').innerHTML = state.nights.map(n =>
+    '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>'
+  ).join('');
+
+  // Bars
+  const { data: bars } = await SB.from('bars')
+    .select('id, name, active')
+    .eq('venue_id', state.venueId)
+    .order('name');
+  state.bars = (bars || []).filter(b => b.active !== false);
+  $('c-bar').innerHTML = '<option value="">(any bar)</option>' + state.bars.map(b =>
+    '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>'
+  ).join('');
+  $('c-allowed-bars').innerHTML = state.bars.map(b =>
+    '<label><input type="checkbox" value="' + esc(b.id) + '"> ' + esc(b.name || '?') + '</label>'
+  ).join('');
+
+  // Staff
+  const { data: staffRows } = await SB.from('staff')
+    .select('id, name')
+    .eq('venue_id', state.venueId)
+    .order('name');
+  state.staffList = staffRows || [];
+  $('c-staff').innerHTML = state.staffList.map(s =>
+    '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+      ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
+        '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a>' +
+    '</label>'
+  ).join('');
+  // Wire per-staff rotate links (click consumes the event so the
+  // checkbox above doesn't toggle as a side-effect)
+  $$('[data-rotate-staff]').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName);
+    });
+  });
+  // Populate audit staff filter
+  const sel = $('audit-filter-staff');
+  if (sel) {
+    sel.innerHTML = '<option value="">all staff</option>' +
+      state.staffList.map(s => '<option value="' + esc(s.id) + '">' + esc(s.name || '?') + '</option>').join('');
+  }
+
+  setExpiresQuick('end');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Tab switching
+// ════════════════════════════════════════════════════════════════════
+$$('button[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Expires quick-set
+// ════════════════════════════════════════════════════════════════════
+function setExpiresQuick(kind) {
+  const d = new Date();
+  if (kind === '2h')  d.setHours(d.getHours() + 2);
+  else if (kind === '6h')  d.setHours(d.getHours() + 6);
+  else if (kind === '24h') d.setHours(d.getHours() + 24);
+  else { d.setHours(3, 59, 0, 0); if (d <= new Date()) d.setDate(d.getDate() + 1); }
+  const pad = (n) => String(n).padStart(2, '0');
+  $('c-expires').value =
+    d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' +
+    pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+$$('.exp-quick').forEach(a => {
+  a.addEventListener('click', e => { e.preventDefault(); setExpiresQuick(a.dataset.exp); });
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Public base URL (PLAN-QR-2026-06-03 Web-Barback)
+// ════════════════════════════════════════════════════════════════════
+// Canonical public HTTPS base for any QR that a barback will scan
+// with a personal phone. NEVER use window.location.origin for those
+// URLs — under Capacitor iOS that origin is capacitor://localhost or
+// http://localhost, which a barback's iPhone Camera cannot open.
+// Override via localStorage.barinv_public_base_url; override is
+// honored only if it parses as http/https and its host is not
+// 'localhost' / '127.0.0.1'. Trailing slashes are trimmed.
+function getBarinvPublicBaseUrl() {
+  var DEFAULT_BASE = 'https://danielbh1900.github.io/barinv-pro';
+  try {
+    var raw = null;
+    try { raw = localStorage.getItem('barinv_public_base_url'); } catch (_) {}
+    if (typeof raw === 'string' && raw.length) {
+      var trimmed = raw.trim().replace(/\/+$/, '');
+      if (/^https?:\/\//i.test(trimmed)) {
+        try {
+          var u = new URL(trimmed);
+          var host = (u.host || '').toLowerCase();
+          var protoOk = (u.protocol === 'http:' || u.protocol === 'https:');
+          var hostOk = !!host
+                     && host !== 'localhost'
+                     && host.indexOf('localhost:') !== 0
+                     && host !== '127.0.0.1'
+                     && host.indexOf('127.0.0.1:') !== 0;
+          if (protoOk && hostOk) return trimmed;
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return DEFAULT_BASE;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Create session
+// ════════════════════════════════════════════════════════════════════
+$('c-create').addEventListener('click', async () => {
+  const nightId = $('c-night').value;
+  if (!nightId) { statusOn('c-status', 'Pick a night', 'err'); return; }
+  const barId = $('c-bar').value || null;
+  const allowedBars = $$('#c-allowed-bars input:checked').map(i => i.value);
+  const allowedStaff = $$('#c-staff input:checked').map(i => i.value);
+  const expRaw = $('c-expires').value;
+  if (!expRaw) { statusOn('c-status', 'Pick an expiration', 'err'); return; }
+  const nickname = $('c-nickname').value.trim() || null;
+  const rotatePins = $('c-rotate-pins').checked;
+
+  $('c-create').disabled = true;
+  $('c-create').textContent = '… GENERATING';
+  statusOn('c-status', 'Calling barback-create-session…', 'info');
+
+  try {
+    const res = await fnInvoke('barback-create-session', {
+      venue_id:       state.venueId,
+      night_id:       nightId,
+      bar_id:         barId,
+      allowed_bars:   allowedBars,
+      allowed_staff:  allowedStaff,
+      nickname:       nickname,
+      expires_at:     new Date(expRaw).toISOString(),
+      pin_rotate_for: rotatePins ? allowedStaff : [],
+      // PLAN-QR-2026-06-03 Web-Barback: always pass the canonical
+      // public HTTPS base so the server-returned res.url is openable
+      // by the barback's personal phone regardless of where the
+      // manager UI is running.
+      public_url_base: getBarinvPublicBaseUrl(),
+    });
+    state.lastCreate = res;
+    renderCreateResult(res);
+    statusOn('c-status', '✓ Session created', 'ok');
+    // Phase 6: if the manager checked LIVE PILOT MODE, mark the new
+    // session as pilot via the column-scoped SECURITY DEFINER RPC.
+    // barback-create-session returns { session, token, url, pin_assignments },
+    // so the new session id lives at res.session.id.
+    const newSessionId = (res && res.session && res.session.id) || null;
+    if ($('c-pilot') && $('c-pilot').checked && newSessionId) {
+      try {
+        const { error } = await SB.rpc('barback_mark_pilot', {
+          p_session_id: newSessionId, p_on: true,
+        });
+        if (error) statusOn('c-status', '✓ Session created, pilot mark FAILED: ' + error.message, 'warn');
+        else      statusOn('c-status', '✓ Session created · marked LIVE PILOT', 'ok');
+      } catch (e) {
+        statusOn('c-status', '✓ Session created, pilot mark threw: ' + (e.message || e), 'warn');
+      }
+    }
+  } catch (e) {
+    statusOn('c-status', '✗ ' + (e.message || e), 'err');
+  } finally {
+    $('c-create').disabled = false;
+    $('c-create').textContent = 'GENERATE LINK + PINS';
+  }
+});
+
+function renderCreateResult(res) {
+  $('c-result-card').style.display = '';
+  const url = res.url || res.token;
+  $('c-url').textContent = url;
+  // QR
+  try {
+    const q = qrcode(0, 'M');
+    q.addData(url);
+    q.make();
+    $('qr-out').innerHTML = q.createSvgTag(4, 8);
+  } catch (e) {
+    $('qr-out').innerHTML = '<div style="color:#666;padding:18px;">QR unavailable</div>';
+  }
+  // PIN list
+  const pins = res.pin_assignments || [];
+  if (!pins.length) {
+    $('c-pins').innerHTML = '<div class="muted small">No staff assigned to this session (any cached staff can sign in once a PIN is set per staff).</div>';
+  } else {
+    $('c-pins').innerHTML = pins.map(p => {
+      const pinHTML = p.pin ? '<span class="pin">' + esc(p.pin) + '</span>' : '<span class="muted">existing PIN</span>';
+      return '<div>' + esc(p.staff_name || p.staff_id.slice(0,8)) + ' — ' + pinHTML + '</div>';
+    }).join('');
+  }
+  window.scrollTo({ top: $('c-result-card').offsetTop - 20, behavior: 'smooth' });
+}
+
+$('c-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('c-url').textContent); statusOn('c-status', '✓ Copied', 'ok'); }
+  catch (e) { statusOn('c-status', 'Copy failed: ' + e.message, 'err'); }
+});
+$('c-share').addEventListener('click', async () => {
+  const url = $('c-url').textContent;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'BARINV barback access', text: 'Open this on your phone', url }); }
+    catch (_) {}
+  } else {
+    statusOn('c-status', 'Use COPY — Web Share not supported on this browser.', 'warn');
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Active sessions tab
+// ════════════════════════════════════════════════════════════════════
+let _sessionsLastData = [];     // cached for copySessionLink etc.
+let _sessionsAutoTimer = null;
+function stopSessionsAutoRefresh() {
+  if (_sessionsAutoTimer) { clearInterval(_sessionsAutoTimer); _sessionsAutoTimer = null; }
+}
+function startSessionsAutoRefresh() {
+  stopSessionsAutoRefresh();
+  if (!$('sessions-auto')?.checked) return;
+  _sessionsAutoTimer = setInterval(() => {
+    // Only refresh when the tab is visible AND the user isn't actively typing
+    const active = document.querySelector('.tab[data-tab="sessions"]');
+    if (!active || active.style.display === 'none') return;
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    renderSessions(true);
+  }, 30000);
+}
+
+async function renderSessions(silent) {
+  if (!silent) $('sessions-list').innerHTML = '<div class="muted small">loading…</div>';
+  const nightIds = state.nights.map(n => n.id);
+  if (!nightIds.length) {
+    $('sessions-list').innerHTML = '<div class="muted small">No nights loaded for this venue.</div>';
+    return;
+  }
+  // Prefer the Phase 4 analytics view (events_written, logins_ok, etc.).
+  // Fall back to base table if the view isn't deployed yet.
+  let data, error;
+  ({ data, error } = await SB.from('v_barback_session_summary')
+    .select('*')
+    .in('night_id', nightIds)
+    .order('issued_at', { ascending: false })
+    .limit(200));
+  if (error) {
+    ({ data, error } = await SB.from('barback_sessions')
+      .select('*')
+      .in('night_id', nightIds)
+      .order('issued_at', { ascending: false })
+      .limit(200));
+    if (error) {
+      $('sessions-list').innerHTML = '<div class="status err">' + esc(error.message) + '</div>';
+      return;
+    }
+    // Adapt base-table rows to the view shape so the render code is uniform.
+    data = (data || []).map(s => ({
+      ...s,
+      session_id: s.id,
+      events_written: null,
+      logins_ok: null,
+      logins_failed: null,
+      last_event_at: null,
+      status: s.revoked_at ? 'revoked' : (new Date(s.expires_at) <= new Date() ? 'expired' : 'active'),
+      allowed_staff_count: (s.allowed_staff || []).length,
+      allowed_bars_count:  (s.allowed_bars  || []).length,
+    }));
+  }
+
+  // Active-only filter
+  if ($('sessions-active-only')?.checked) {
+    data = data.filter(s => s.status === 'active');
+  }
+  // Search by nickname (case-insensitive substring)
+  const q = ($('sessions-search')?.value || '').toLowerCase().trim();
+  if (q) data = data.filter(s => (s.nickname || '').toLowerCase().includes(q));
+
+  _sessionsLastData = data;
+
+  if (!data.length) {
+    $('sessions-list').innerHTML = '<div class="muted small">No matching sessions.</div>';
+    updateBulkBar();
+    return;
+  }
+
+  const now = Date.now();
+  $('sessions-list').innerHTML = data.map(s => {
+    const sid = s.session_id || s.id;
+    const expMs = +new Date(s.expires_at);
+    const revoked = s.status === 'revoked';
+    const expired = s.status === 'expired';
+    const expiringSoon = s.status === 'active' && (expMs - now) < 30 * 60 * 1000;
+    const pill = revoked ? '<span class="pill revoked">REVOKED</span>'
+                : expired ? '<span class="pill expired">EXPIRED</span>'
+                : expiringSoon ? '<span class="pill expiring">EXPIRING</span>'
+                : '<span class="pill active">ACTIVE</span>';
+    const barInfo = s.bar_id ? state.bars.find(b => b.id === s.bar_id)?.name || s.bar_id.slice(0,8) : '(any bar)';
+    const nightInfo = state.nights.find(n => n.id === s.night_id);
+    const nightLabel = nightInfo ? ((nightInfo.date || '') + (nightInfo.name ? ' · ' + nightInfo.name : '')) : s.night_id.slice(0,8);
+
+    const stats = (s.events_written != null)
+      ? '<span class="muted">' +
+          esc(String(s.events_written)) + ' writes · ' +
+          esc(String(s.logins_ok || 0))  + ' logins · ' +
+          esc(String(s.logins_failed || 0)) + ' failed' +
+          (s.last_event_at ? ' · last activity ' + fmtTime(s.last_event_at) : '') +
+        '</span><br>'
+      : '';
+
+    const canAct = !revoked && !expired;
+    return '<div class="session-row' + (revoked || expired ? ' revoked' : '') + '">' +
+      (canAct
+        ? '<input type="checkbox" class="sess-check" data-sid="' + esc(sid) + '" style="flex:0;width:18px;height:18px;margin:6px 4px 0 0;">'
+        : '') +
+      '<div class="meta">' +
+        pill + ' <b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
+        '<span class="muted">' + esc(nightLabel) + ' · ' + esc(barInfo) + '</span><br>' +
+        '<span class="muted">expires ' + fmtTime(s.expires_at) +
+        (revoked ? ' · revoked ' + fmtTime(s.revoked_at) : '') + '</span><br>' +
+        '<span class="muted">' + (s.allowed_staff_count || 0) + ' staff · ' +
+        (s.allowed_bars_count  || 0) + ' extra bars</span><br>' +
+        stats +
+      '</div>' +
+      '<div class="actions">' +
+        (canAct
+          ? '<button class="btn btn-danger"    data-revoke="' + esc(sid) + '">REVOKE</button>' +
+            '<button class="btn btn-secondary" data-extend="' + esc(sid) + '">⏱ EXTEND</button>'
+          : '') +
+        '<button class="btn btn-secondary" data-resend="' + esc(sid) + '">↗ COPY LINK</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  $$('[data-revoke]').forEach(b => b.addEventListener('click', () => revokeSession(b.dataset.revoke)));
+  $$('[data-extend]').forEach(b => b.addEventListener('click', () => extendSession(b.dataset.extend)));
+  $$('[data-resend]').forEach(b => b.addEventListener('click', () => copySessionLink(b.dataset.resend, _sessionsLastData)));
+  $$('.sess-check').forEach(c => c.addEventListener('change', updateBulkBar));
+  updateBulkBar();
+}
+$('sessions-refresh').addEventListener('click', () => renderSessions(false));
+$('sessions-search')?.addEventListener('input', () => renderSessions(true));
+$('sessions-active-only')?.addEventListener('change', () => renderSessions(false));
+$('sessions-auto')?.addEventListener('change', () => {
+  if ($('sessions-auto').checked) startSessionsAutoRefresh();
+  else stopSessionsAutoRefresh();
+});
+
+function updateBulkBar() {
+  const sel = $$('.sess-check:checked');
+  const bar = $('sessions-bulk-bar');
+  if (!bar) return;
+  if (!sel.length) { bar.style.display = 'none'; return; }
+  bar.style.display = '';
+  $('sessions-selected-count').textContent = sel.length + ' selected';
+}
+$('sessions-bulk-revoke')?.addEventListener('click', async () => {
+  const ids = $$('.sess-check:checked').map(c => c.dataset.sid);
+  if (!ids.length) return;
+  const reason = prompt('Reason for bulk revoke (optional)?', '') || '';
+  if (!confirm('Revoke ' + ids.length + ' session(s)? Cannot be undone.')) return;
+  $('sessions-bulk-revoke').disabled = true;
+  $('sessions-bulk-revoke').textContent = '… REVOKING';
+  let okN = 0, failN = 0;
+  for (const sid of ids) {
+    try { await fnInvoke('barback-revoke-session', { session_id: sid, reason: reason }); okN++; }
+    catch (e) { console.warn('revoke failed for', sid, e); failN++; }
+  }
+  $('sessions-bulk-revoke').disabled = false;
+  $('sessions-bulk-revoke').textContent = '⚠ BULK REVOKE';
+  alert('Revoked ' + okN + ' · failed ' + failN);
+  renderSessions(false);
+});
+
+async function revokeSession(sid) {
+  const reason = prompt('Reason for revoke (optional)?', '') || '';
+  if (!confirm('Revoke session ' + sid.slice(0,8) + '?\n\nThe next save attempt from this session will be denied.')) return;
+  try {
+    await fnInvoke('barback-revoke-session', { session_id: sid, reason: reason });
+    renderSessions(false);
+  } catch (e) {
+    alert('Revoke failed: ' + (e.message || e));
+  }
+}
+
+async function extendSession(sid) {
+  const s = _sessionsLastData.find(x => (x.session_id || x.id) === sid);
+  if (!s) { alert('Session not found in current list — refresh.'); return; }
+  const now = new Date();
+  const currentExp = new Date(s.expires_at);
+  // Default new expiry: current + 2h, but never before now+15min
+  const defaultExp = new Date(Math.max(+currentExp + 2 * 3600 * 1000, +now + 15 * 60 * 1000));
+  const pad = (n) => String(n).padStart(2, '0');
+  const localIso =
+    defaultExp.getFullYear() + '-' + pad(defaultExp.getMonth()+1) + '-' + pad(defaultExp.getDate()) +
+    'T' + pad(defaultExp.getHours()) + ':' + pad(defaultExp.getMinutes());
+  const input = prompt(
+    'Extend session "' + (s.nickname || sid.slice(0,8)) + '"\n' +
+    'Current expiration: ' + fmtTime(s.expires_at) + '\n' +
+    'New expiration (YYYY-MM-DDTHH:MM, local time):',
+    localIso,
+  );
+  if (!input) return;
+  let newExp;
+  try { newExp = new Date(input); }
+  catch { alert('Invalid date'); return; }
+  if (Number.isNaN(+newExp)) { alert('Invalid date'); return; }
+  try {
+    const res = await fnInvoke('barback-extend-session', {
+      session_id: sid,
+      new_expires_at: newExp.toISOString(),
+      reason: 'manager extend',
+    });
+    alert('Extended → ' + fmtTime(res.expires_at));
+    renderSessions(false);
+  } catch (e) {
+    alert('Extend failed: ' + (e.message || e));
+  }
+}
+
+async function rotatePinForStaff(staffId, staffName) {
+  if (!confirm('Issue a new PIN for ' + (staffName || staffId.slice(0,8)) + '?\n\nThe current PIN will stop working immediately.')) return;
+  try {
+    const res = await fnInvoke('barback-rotate-pin', {
+      staff_id: staffId,
+      venue_id: state.venueId,
+      length: 4,
+    });
+    alert('NEW PIN for ' + (res.staff_name || staffId.slice(0,8)) + ': ' + res.pin + '\n\nWrite it down NOW — it will not be shown again.');
+  } catch (e) {
+    alert('Rotate failed: ' + (e.message || e));
+  }
+}
+
+function copySessionLink(sid, sessions) {
+  const s = sessions.find(x => x.id === sid);
+  if (!s) return;
+  const payload = {
+    v: 1,
+    session_id: s.id,
+    venue_id: s.venue_id,
+    night_id: s.night_id,
+    bar_id: s.bar_id ?? null,
+    allowed_bars: s.allowed_bars,
+    allowed_staff: s.allowed_staff,
+    nickname: s.nickname,
+    expires_at: s.expires_at,
+    test_mode: false,
+  };
+  const token = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // PLAN-QR-2026-06-03 Web-Barback: use canonical public HTTPS base
+  // so the copied URL is openable by the barback's personal phone.
+  const url = getBarinvPublicBaseUrl() + '/barback.html?token=' + encodeURIComponent(token);
+  navigator.clipboard.writeText(url)
+    .then(() => alert('Copied:\n' + url))
+    .catch(() => prompt('Copy this URL:', url));
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Audit tab
+// ════════════════════════════════════════════════════════════════════
+const AUDIT_FAILED_ACTIONS = new Set([
+  'login_bad_pin','login_rate_limited','login_no_pin_set',
+  'login_revoked_session','login_session_expired',
+  'login_staff_not_allowed','login_unknown_session',
+  'event_insert_blocked',
+]);
+
+async function renderAudit() {
+  $('audit-list').innerHTML = '<div class="muted small">loading…</div>';
+  let q = SB.from('barback_audit_log')
+    .select('id, session_id, staff_id, action, created_at, ip, user_agent, detail')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  const staffSel  = $('audit-filter-staff')?.value || '';
+  const actionSel = $('audit-filter-action')?.value || '';
+  const failedOnly = !!$('audit-filter-failed')?.checked;
+  if (staffSel)  q = q.eq('staff_id', staffSel);
+  if (actionSel) q = q.eq('action', actionSel);
+  let { data, error } = await q;
+  if (error) {
+    $('audit-list').innerHTML = '<div class="status err">' + esc(error.message) + '</div>';
+    return;
+  }
+  if (failedOnly) data = (data || []).filter(r => AUDIT_FAILED_ACTIONS.has(r.action));
+  if (!data || !data.length) {
+    $('audit-list').innerHTML = '<div class="muted small">empty</div>';
+    return;
+  }
+  // Resolve staff names
+  const ids = Array.from(new Set(data.map(r => r.staff_id).filter(Boolean)));
+  const nameById = new Map();
+  if (ids.length) {
+    const { data: srows } = await SB.from('staff').select('id, name').in('id', ids);
+    (srows || []).forEach(s => nameById.set(s.id, s.name));
+  }
+  $('audit-list').innerHTML = data.map(r => {
+    const name = r.staff_id ? (nameById.get(r.staff_id) || r.staff_id.slice(0,8)) : '—';
+    const detail = r.detail ? esc(JSON.stringify(r.detail)).slice(0, 80) : '';
+    return '<div class="audit-row">' +
+      '<span class="ts">' + esc(fmtTime(r.created_at)) + '</span>' +
+      '<span class="act ' + esc(r.action) + '">' + esc(r.action) + '</span>' +
+      '<span style="flex:1;font-size:11px;">' +
+        esc(name) +
+        (r.session_id ? ' <span class="muted">· ' + esc(r.session_id.slice(0,8)) + '</span>' : '') +
+        (detail ? ' <span class="muted">' + detail + '</span>' : '') +
+      '</span>' +
+    '</div>';
+  }).join('');
+}
+$('audit-refresh').addEventListener('click', renderAudit);
+$('audit-filter-staff')?.addEventListener('change', renderAudit);
+$('audit-filter-action')?.addEventListener('change', renderAudit);
+$('audit-filter-failed')?.addEventListener('change', renderAudit);
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 — Danger-zone night controls
+// ════════════════════════════════════════════════════════════════════
+function populateDangerZoneNights() {
+  const sel = $('dz-night');
+  if (!sel) return;
+  sel.innerHTML = state.nights.map(n =>
+    '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>'
+  ).join('');
+}
+
+$('dz-revoke-all')?.addEventListener('click', async () => {
+  const nightId = $('dz-night').value;
+  if (!nightId) { alert('Pick a night'); return; }
+  if (!confirm('REVOKE ALL active sessions for this night?\n\nBarbacks currently signed in will be force-logged-out on their next save.')) return;
+  $('dz-revoke-all').disabled = true;
+  // Find every active session for this night, revoke one by one
+  const { data } = await SB.from('barback_sessions')
+    .select('id')
+    .eq('night_id', nightId)
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString());
+  let okN = 0, failN = 0;
+  for (const r of (data || [])) {
+    try { await fnInvoke('barback-revoke-session', { session_id: r.id, reason: 'revoke_all' }); okN++; }
+    catch (_) { failN++; }
+  }
+  $('dz-revoke-all').disabled = false;
+  statusOn('dz-status', '✓ Revoked ' + okN + ' · failed ' + failN, failN === 0 ? 'ok' : 'warn');
+  renderSessions(false);
+});
+
+$('dz-close-night')?.addEventListener('click', async () => {
+  const nightId = $('dz-night').value;
+  if (!nightId) { alert('Pick a night'); return; }
+  if (!confirm('CLOSE NIGHT — revoke every active session for this night AND write a "night_closed" audit row.\n\nThis is the end-of-shift marker. Proceed?')) return;
+  const reason = prompt('Reason / notes for close (shown in audit log; optional)?', '') || '';
+  $('dz-close-night').disabled = true;
+  try {
+    const res = await fnInvoke('barback-close-night', {
+      venue_id: state.venueId,
+      night_id: nightId,
+      reason: reason,
+    });
+    statusOn('dz-status', '✓ Closed: ' + res.closed_count + ' session(s) revoked, audit recorded', 'ok');
+    renderSessions(false);
+  } catch (e) {
+    statusOn('dz-status', '✗ Close failed: ' + (e.message || e), 'err');
+  } finally {
+    $('dz-close-night').disabled = false;
+  }
+});
+
+$('dz-export-csv')?.addEventListener('click', async () => {
+  const nightId = $('dz-night').value;
+  if (!nightId) { alert('Pick a night'); return; }
+  $('dz-export-csv').disabled = true;
+  statusOn('dz-status', 'Querying events…', 'info');
+  try {
+    const { data, error } = await SB.from('events')
+      .select('id, created_at, action, qty, item_id, bar_id, staff_id, session_id, source, notes, submitted_by')
+      .eq('night_id', nightId)
+      .eq('source', 'barback_web_link')
+      .order('created_at', { ascending: true })
+      .limit(50000);
+    if (error) throw error;
+    if (!data || !data.length) {
+      statusOn('dz-status', 'No barback events for this night.', 'warn');
+      return;
+    }
+    const rows = data;
+    const cols = Object.keys(rows[0]);
+    const csv = [
+      cols.join(','),
+      ...rows.map(r => cols.map(c => {
+        const v = r[c];
+        if (v == null) return '';
+        const s = String(v).replace(/"/g, '""');
+        return /[",\n]/.test(s) ? '"' + s + '"' : s;
+      }).join(',')),
+    ].join('\n');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'barinv-night-' + nightId.slice(0,8) + '-' + stamp + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+    statusOn('dz-status', '✓ Exported ' + rows.length + ' rows', 'ok');
+  } catch (e) {
+    statusOn('dz-status', '✗ Export failed: ' + (e.message || e), 'err');
+  } finally {
+    $('dz-export-csv').disabled = false;
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 5 — DIAGNOSTICS tab (telemetry)
+// ════════════════════════════════════════════════════════════════════
+let _diagAutoTimer = null;
+function startDiagAutoRefresh() {
+  stopDiagAutoRefresh();
+  if (!$('diag-auto')?.checked) return;
+  _diagAutoTimer = setInterval(() => {
+    const active = document.querySelector('.tab[data-tab="diag"]');
+    if (!active || active.style.display === 'none') return;
+    renderDiagnostics(true);
+  }, 30000);
+}
+function stopDiagAutoRefresh() {
+  if (_diagAutoTimer) { clearInterval(_diagAutoTimer); _diagAutoTimer = null; }
+}
+$('diag-refresh')?.addEventListener('click', () => renderDiagnostics(false));
+$('diag-auto')?.addEventListener('change', () => {
+  if ($('diag-auto').checked) startDiagAutoRefresh();
+  else stopDiagAutoRefresh();
+});
+$('diag-active-only')?.addEventListener('change', () => renderDiagnostics(false));
+$('diag-analytics-refresh')?.addEventListener('click', renderAnalyticsSummary);
+
+async function renderDiagnostics(silent) {
+  if (!silent) $('diag-list').innerHTML = '<div class="muted small">loading…</div>';
+  const nightIds = state.nights.map(n => n.id);
+  if (!nightIds.length) {
+    $('diag-list').innerHTML = '<div class="muted small">No nights loaded.</div>';
+    return;
+  }
+  let { data, error } = await SB.from('v_barback_diagnostics')
+    .select('*')
+    .in('night_id', nightIds)
+    .order('issued_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    $('diag-list').innerHTML = '<div class="status err">' + esc(error.message) +
+      '<br><span class="small muted">(Phase 5 telemetry migration probably not applied — run 20260515_barback_phase5_telemetry.sql)</span></div>';
+    return;
+  }
+  if ($('diag-active-only')?.checked) data = data.filter(r => r.status === 'active');
+  if (!data || !data.length) {
+    $('diag-list').innerHTML = '<div class="muted small">No matching sessions.</div>';
+    return;
+  }
+  $('diag-list').innerHTML = data.map(d => {
+    const hb = d.heartbeat_status || 'no_data';
+    const dot = hb === 'live'    ? '<span style="color:#4ade80;">●</span>'
+              : hb === 'stale'   ? '<span style="color:#fbbf24;">●</span>'
+              : hb === 'offline' ? '<span style="color:#fca5a5;">●</span>'
+                                 : '<span style="color:#666;">○</span>';
+    const bat = (d.battery_level != null)
+      ? Math.round(d.battery_level * 100) + '%'
+      : '—';
+    const net = d.network_type || '—';
+    const lastSave = d.last_save_at ? fmtTime(d.last_save_at) : '—';
+    const lastHb   = d.last_heartbeat_at ? fmtTime(d.last_heartbeat_at) : '—';
+    return '<div style="padding:8px 0;border-bottom:1px solid #1a1a1a;">' +
+      dot + ' <b>' + esc(d.nickname || '(no nickname)') + '</b> ' +
+      '<span class="muted">[' + esc(d.status) + ' · ' + esc(hb) + ']</span><br>' +
+      '<span class="muted">last save ' + esc(lastSave) + ' · last heartbeat ' + esc(lastHb) +
+        ' · queue ' + esc(String(d.queue_count || 0)) +
+        ' · saved ' + esc(String(d.total_saved || 0)) +
+        ' · failed ' + esc(String(d.total_failed || 0)) +
+        '</span><br>' +
+      '<span class="muted">battery ' + esc(bat) + ' · network ' + esc(net) +
+        ' · ' + esc((d.user_agent || '').slice(0, 60)) + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+async function renderAnalyticsSummary() {
+  $('diag-analytics').innerHTML = '<div class="muted small">loading…</div>';
+  const venueId = state.venueId;
+  // Run all four lookups in parallel
+  const [wl, susp, miss, sumr] = await Promise.all([
+    SB.from('v_barback_workload_today').select('staff_id, events_total, events_taken, events_returned').eq('venue_id', venueId).limit(50),
+    SB.from('v_barback_suspicious_scans').select('staff_id, item_id, session_id, reason, observation, window_at').limit(20),
+    SB.from('v_barback_missing_returns').select('item_id, qty_taken, qty_returned, net_unreturned, last_taken_at').eq('venue_id', venueId).limit(50),
+    SB.from('v_barback_session_summary').select('session_id, nickname, status, events_written, logins_failed').eq('venue_id', venueId).order('issued_at', { ascending: false }).limit(20),
+  ]);
+
+  const nameById = new Map((state.staffList || []).map(s => [s.id, s.name]));
+  const itemNameById = new Map();  // populate from venue items? would require extra fetch — keep id slice
+  const fmtRow = (cells) => '<tr>' + cells.map(c => '<td style="padding:3px 6px;border-bottom:1px solid #161616;">' + c + '</td>').join('') + '</tr>';
+
+  const blocks = [];
+
+  // Workload
+  const wlRows = (wl.data || []).map(r => fmtRow([
+    esc(nameById.get(r.staff_id) || (r.staff_id || '').slice(0,8)),
+    String(r.events_total),
+    String(r.events_taken),
+    String(r.events_returned),
+  ])).join('') ||
+    fmtRow(['<span class="muted">no activity in last 24h</span>', '', '', '']);
+  blocks.push(
+    '<h3 style="color:#fb923c;margin-top:0;">Workload (last 24h)</h3>' +
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<thead><tr style="color:#888;font-size:10px;letter-spacing:0.06em;"><th align="left">STAFF</th><th align="left">TOTAL</th><th align="left">TAKEN</th><th align="left">RETURNED</th></tr></thead>' +
+      '<tbody>' + wlRows + '</tbody></table>'
+  );
+
+  // Suspicious
+  const susRows = (susp.data || []).map(r => fmtRow([
+    esc(r.reason),
+    esc(nameById.get(r.staff_id) || (r.staff_id || '').slice(0,8)),
+    String(r.observation),
+    esc(fmtTime(r.window_at)),
+  ])).join('') ||
+    fmtRow(['<span class="muted">none flagged</span>', '', '', '']);
+  blocks.push(
+    '<h3 style="color:#fbbf24;">Suspicious scan patterns (last 7d)</h3>' +
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<thead><tr style="color:#888;font-size:10px;"><th align="left">REASON</th><th align="left">STAFF</th><th align="left">COUNT</th><th align="left">WINDOW</th></tr></thead>' +
+      '<tbody>' + susRows + '</tbody></table>'
+  );
+
+  // Missing returns
+  const missRows = (miss.data || []).slice(0, 30).map(r => fmtRow([
+    '<code>' + esc((r.item_id || '').slice(0,8)) + '</code>',
+    String(r.qty_taken),
+    String(r.qty_returned),
+    '<b>' + String(r.net_unreturned) + '</b>',
+    esc(fmtTime(r.last_taken_at)),
+  ])).join('') ||
+    fmtRow(['<span class="muted">all clean</span>', '', '', '', '']);
+  blocks.push(
+    '<h3 style="color:#fca5a5;">Missing returns (last 24h)</h3>' +
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<thead><tr style="color:#888;font-size:10px;"><th align="left">ITEM</th><th align="left">TAKEN</th><th align="left">RETURNED</th><th align="left">NET</th><th align="left">LAST TAKEN</th></tr></thead>' +
+      '<tbody>' + missRows + '</tbody></table>'
+  );
+
+  // Session summary recent
+  const sumRows = (sumr.data || []).map(r => fmtRow([
+    esc(r.nickname || (r.session_id || '').slice(0,8)),
+    esc(r.status),
+    String(r.events_written || 0),
+    String(r.logins_failed || 0),
+  ])).join('') ||
+    fmtRow(['<span class="muted">no recent sessions</span>', '', '', '']);
+  blocks.push(
+    '<h3 style="color:#4ade80;">Recent sessions</h3>' +
+    '<table style="width:100%;font-size:12px;border-collapse:collapse;">' +
+      '<thead><tr style="color:#888;font-size:10px;"><th align="left">NICKNAME</th><th align="left">STATUS</th><th align="left">EVENTS</th><th align="left">FAILED LOGINS</th></tr></thead>' +
+      '<tbody>' + sumRows + '</tbody></table>'
+  );
+
+  $('diag-analytics').innerHTML = blocks.join('<div style="height:14px"></div>');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 6 — PILOT tab
+// ────────────────────────────────────────────────────────────────────
+//  Event-night operational center. Reads:
+//    • v_barback_diagnostics        (Phase 5 view)
+//    • v_barback_pilot_alerts       (Phase 6 view)
+//    • barback_audit_log            (Phase 3 table)
+//    • barback_event_control        (Phase 6 table, soft control flags)
+//    • barback_field_feedback       (Phase 6 table)
+//    • barback_event_readiness      (Phase 6 table)
+//    • events                       (export bundle only)
+//  Writes:
+//    • barback_event_control        (emergency tools)
+//    • barback_field_feedback       (manager-captured during event)
+//    • barback_event_readiness      (mark-ready)
+//  Calls:
+//    • RPC barback_mark_pilot       (mark/unmark per session)
+//    • RPC barback_pilot_close_summary (close package)
+//    • Edge Function barback-revoke-session (emergency revoke-all)
+// ════════════════════════════════════════════════════════════════════
+const Pilot = {
+  _autoTimer:  null,
+  _readiness:  {
+    // Phase 6 checks
+    migrations: null, vendor: null, diagnostics: null, telemetry: null,
+    test_save: null, queue_empty: null, functions: false, jwt_secret: false,
+    // Phase 7 additions
+    service_worker: null, queue_probe: null,
+  },
+  _eventLive: false,
+  _control:    {
+    safe_mode: false, rapid_scan_disabled: false, sessions_frozen: false,
+    force_queue_drain_at: null, force_refresh_at: null,
+  },
+
+  // ── Lifecycle ───────────────────────────────────────────────────
+  onShow() {
+    this.populateNights();
+    this.refreshAll();
+    this._startAuto();
+  },
+  onHide() {
+    this._stopAuto();
+  },
+  _startAuto() {
+    this._stopAuto();
+    this._autoTimer = setInterval(() => {
+      const tab = document.querySelector('.tab[data-tab="pilot"]');
+      if (!tab || tab.style.display === 'none') return;
+      this.refreshMonitor().catch(() => {});
+    }, 20000);
+  },
+  _stopAuto() {
+    if (this._autoTimer) { clearInterval(this._autoTimer); this._autoTimer = null; }
+  },
+
+  selectedNightId() { return $('pilot-night')?.value || null; },
+
+  populateNights() {
+    const sel = $('pilot-night');
+    if (!sel || !state.nights || !state.nights.length) return;
+    const cur = sel.value;
+    sel.innerHTML = state.nights.map(n =>
+      '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>'
+    ).join('');
+    if (cur && state.nights.some(n => n.id === cur)) sel.value = cur;
+  },
+
+  async refreshAll() {
+    await Promise.all([
+      this.refreshMonitor(),
+      this.loadControl(),
+      this.renderAlerts(),
+      this.renderTimeline(),
+      this.renderFeedback(),
+    ]);
+  },
+
+  // ── Live monitoring strip ──────────────────────────────────────
+  async refreshMonitor() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    // Active barbacks + queue total + alerts come from the alerts view.
+    const { data: alerts } = await SB
+      .from('v_barback_pilot_alerts')
+      .select('*')
+      .eq('night_id', nightId);
+    const live = (alerts || []).filter(a => a.status === 'active');
+    const queueTotal = live.reduce((s, a) => s + (a.queue_count || 0), 0);
+    const alertCount = (alerts || []).filter(a =>
+      a.alert_unhealthy_device || a.alert_stale_session || a.alert_queue_backlog ||
+      a.alert_high_failed_saves || a.alert_expired_still_active
+    ).length;
+
+    // Throughput (last 5 minutes) + busiest bar — events table.
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: ev5 } = await SB
+      .from('events')
+      .select('bar_id, created_at')
+      .eq('night_id', nightId)
+      .in('source', ['barback_web_link', 'barback_live_pilot'])
+      .gte('created_at', fiveMinAgo)
+      .limit(2000);
+    const throughput = (ev5 || []).length;
+    const barCounts = new Map();
+    for (const r of (ev5 || [])) {
+      if (!r.bar_id) continue;
+      barCounts.set(r.bar_id, (barCounts.get(r.bar_id) || 0) + 1);
+    }
+    let busiest = '—';
+    if (barCounts.size) {
+      const [bid] = [...barCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+      const bar = (state.bars || []).find(b => b.id === bid);
+      busiest = bar ? bar.name : bid.slice(0, 6);
+    }
+
+    // Feedback count for the night.
+    const { count: fbCount } = await SB
+      .from('barback_field_feedback')
+      .select('*', { count: 'exact', head: true })
+      .eq('night_id', nightId);
+
+    $('ps-active').textContent     = String(live.length);
+    $('ps-throughput').textContent = String(throughput);
+    $('ps-queue').textContent      = String(queueTotal);
+    $('ps-busiest').textContent    = busiest;
+    $('ps-alerts').textContent     = String(alertCount);
+    $('ps-feedback').textContent   = String(fbCount || 0);
+    $('ps-alerts-chip').classList.toggle('err',  alertCount > 0);
+  },
+
+  // ── Pre-event readiness checks ─────────────────────────────────
+  async runChecks() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-readiness-status', 'Pick a night first', 'err'); return; }
+
+    statusOn('pilot-readiness-status', 'Running checks…', 'info');
+    const r = this._readiness;
+    const set = (k, v) => {
+      r[k] = v;
+      const row = document.querySelector('.readiness-row[data-check="' + k + '"]');
+      if (!row) return;
+      row.classList.remove('ok', 'fail', 'warn');
+      if (v === true)  row.classList.add('ok');
+      else if (v === false) row.classList.add('fail');
+      else                 row.classList.add('warn');
+    };
+
+    // 1. Migrations — probe a Phase 5 view + a Phase 6 view existence
+    try {
+      const a = await SB.from('barback_telemetry').select('session_id').limit(0);
+      const b = await SB.from('v_barback_pilot_alerts').select('session_id').limit(0);
+      set('migrations', !a.error && !b.error);
+    } catch (_) { set('migrations', false); }
+
+    // 2. Vendor
+    set('vendor', !!(window.supabase && window.qrcode));
+
+    // 3. Diagnostics view returns rows for this night
+    try {
+      const { data, error } = await SB.from('v_barback_diagnostics')
+        .select('session_id').eq('night_id', nightId).limit(1);
+      set('diagnostics', !error && !!(data && data.length));
+    } catch (_) { set('diagnostics', false); }
+
+    // 4. Telemetry written in last 5 minutes (any session this night)
+    try {
+      const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data, error } = await SB.from('v_barback_diagnostics')
+        .select('session_id, last_heartbeat_at')
+        .eq('night_id', nightId)
+        .gte('last_heartbeat_at', cutoff)
+        .limit(1);
+      set('telemetry', !error && !!(data && data.length));
+    } catch (_) { set('telemetry', false); }
+
+    // 5. At least one test save
+    try {
+      const { data, error } = await SB.from('events')
+        .select('id')
+        .eq('night_id', nightId)
+        .in('source', ['barback_web_link', 'barback_live_pilot'])
+        .limit(1);
+      set('test_save', !error && !!(data && data.length));
+    } catch (_) { set('test_save', false); }
+
+    // 6. Queue empty (across active sessions for this night)
+    try {
+      const { data, error } = await SB.from('v_barback_diagnostics')
+        .select('queue_count, status')
+        .eq('night_id', nightId);
+      if (error) set('queue_empty', false);
+      else {
+        const live = (data || []).filter(x => x.status === 'active');
+        set('queue_empty', live.every(x => (x.queue_count || 0) === 0));
+      }
+    } catch (_) { set('queue_empty', false); }
+
+    // 7. Service worker — manager-device check. The barback page registers
+    //    barback_sw.js; the manager page doesn't. We just verify the API
+    //    is exposed and reachable from this origin (a common breakage
+    //    point on hosts without HTTPS).
+    try {
+      if (!('serviceWorker' in navigator)) set('service_worker', false);
+      else {
+        const reg = await navigator.serviceWorker.getRegistration().catch(() => null);
+        // OK if registration object exists OR API is available — for the
+        // manager page (no SW registered) we accept just API availability.
+        set('service_worker', true);
+        if (reg && typeof console !== 'undefined') console.log('[sw]', reg.scope);
+      }
+    } catch (_) { set('service_worker', false); }
+
+    // 8. Queue probe — confirm the upsert below succeeds (write + read).
+    //    The status is finalized after the upsert call further down.
+    set('queue_probe', null);
+
+    // 9+10. Ack-only: read current checkboxes
+    set('functions',  !!document.querySelector('input[data-ack="functions"]')?.checked);
+    set('jwt_secret', !!document.querySelector('input[data-ack="jwt_secret"]')?.checked);
+
+    // Persist last check state into barback_event_readiness (also serves
+    // as the Phase 7 queue_probe write+read test — if this succeeds the
+    // PostgREST + RLS round-trip is healthy).
+    let probeOk = false;
+    try {
+      const { error: upErr } = await SB.from('barback_event_readiness').upsert({
+        venue_id: state.venueId, night_id: nightId,
+        migrations_ok:  !!r.migrations,
+        functions_ok:   !!r.functions,
+        jwt_secret_ok:  !!r.jwt_secret,
+        diagnostics_ok: !!r.diagnostics,
+        vendor_ok:      !!r.vendor,
+        telemetry_ok:   !!r.telemetry,
+        test_save_ok:   !!r.test_save,
+        queue_empty_ok: !!r.queue_empty,
+        last_check_at:  new Date().toISOString(),
+      }, { onConflict: 'venue_id,night_id' });
+      if (!upErr) {
+        const { data: rb, error: rbErr } = await SB.from('barback_event_readiness')
+          .select('last_check_at')
+          .eq('venue_id', state.venueId).eq('night_id', nightId)
+          .maybeSingle();
+        probeOk = !rbErr && !!rb?.last_check_at;
+      }
+    } catch (_) { probeOk = false; }
+    set('queue_probe', probeOk);
+
+    const keys = ['migrations','vendor','diagnostics','telemetry','test_save',
+                  'queue_empty','service_worker','queue_probe','functions','jwt_secret'];
+    const allPass = keys.every(k => r[k] === true);
+    const passCount = keys.filter(k => r[k] === true).length;
+    $('pilot-mark-ready').disabled = !allPass;
+    statusOn('pilot-readiness-status',
+      allPass
+        ? '✓ All ' + keys.length + ' checks pass — you may MARK EVENT READY'
+        : '✗ ' + passCount + '/' + keys.length + ' passing — fix red checks above',
+      allPass ? 'ok' : 'warn'
+    );
+    // Phase 7: refresh the rollup banner.
+    this._updateGoBanner(keys);
+    // Phase 7: refresh live-event guard.
+    await this._detectEventLive();
+  },
+
+  async markReady() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    if (!confirm('MARK EVENT READY — record this as the GO decision for the night?')) return;
+    try {
+      const { error } = await SB.from('barback_event_readiness').upsert({
+        venue_id: state.venueId, night_id: nightId,
+        migrations_ok:  true, functions_ok: true, jwt_secret_ok: true,
+        diagnostics_ok: true, vendor_ok: true, telemetry_ok: true,
+        test_save_ok:   true, queue_empty_ok: true,
+        marked_ready_at: new Date().toISOString(),
+        marked_ready_by: state.staff?.id || null,
+        last_check_at:   new Date().toISOString(),
+      }, { onConflict: 'venue_id,night_id' });
+      if (error) throw error;
+      statusOn('pilot-readiness-status', '✓ Event marked READY at ' + new Date().toLocaleString(), 'ok');
+    } catch (e) {
+      statusOn('pilot-readiness-status', '✗ Mark-ready failed: ' + (e.message || e), 'err');
+    }
+  },
+
+  // ── Health monitor — alerts list ───────────────────────────────
+  async renderAlerts() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    const { data, error } = await SB
+      .from('v_barback_pilot_alerts')
+      .select('*')
+      .eq('night_id', nightId)
+      .order('issued_at', { ascending: false })
+      .limit(200);
+    if (error) {
+      $('pilot-alerts-list').innerHTML = '<div class="status err">' + esc(error.message) +
+        '<br><span class="small muted">(Phase 6 migration probably not applied — run 20260515_barback_phase6_live_pilot.sql)</span></div>';
+      return;
+    }
+    const rows = [];
+    for (const a of (data || [])) {
+      const tags = [];
+      if (a.alert_unhealthy_device)     tags.push({ t: 'unhealthy device',    sev: 'err'  });
+      if (a.alert_stale_session)        tags.push({ t: 'stale session',       sev: 'warn' });
+      if (a.alert_queue_backlog)        tags.push({ t: 'queue backlog',       sev: 'warn' });
+      if (a.alert_high_failed_saves)    tags.push({ t: 'high failed saves',   sev: 'err'  });
+      if (a.alert_expired_still_active) tags.push({ t: 'expired still active', sev: 'err'  });
+      if (a.alert_disconnected_device)  tags.push({ t: 'disconnected device', sev: 'warn' });
+      if (!tags.length) continue;
+      rows.push(
+        '<div class="alert-row">' +
+          tags.map(g => '<span class="alert-tag ' + g.sev + '">' + esc(g.t) + '</span>').join(' ') +
+          '<span class="alert-body"><b>' + esc(a.nickname || (a.session_id || '').slice(0,8)) + '</b>' +
+            ' · queue ' + esc(String(a.queue_count || 0)) +
+            ' · saved ' + esc(String(a.total_saved || 0)) +
+            ' · failed ' + esc(String(a.total_failed || 0)) +
+            ' · hb ' + esc(a.heartbeat_status || '—') +
+            ' · ' + esc(a.status) +
+          '</span>' +
+        '</div>'
+      );
+    }
+    $('pilot-alerts-list').innerHTML = rows.length
+      ? rows.join('')
+      : '<div class="muted small">No alerts firing. Quiet event.</div>';
+  },
+
+  // ── Operational timeline ───────────────────────────────────────
+  async renderTimeline() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    // Fetch audit rows for sessions belonging to this night
+    const { data: sessRows } = await SB
+      .from('barback_sessions').select('id, nickname')
+      .eq('night_id', nightId);
+    const ids = (sessRows || []).map(s => s.id);
+    const nameBy = new Map((sessRows || []).map(s => [s.id, s.nickname || s.id.slice(0,8)]));
+    if (!ids.length) {
+      $('pilot-timeline').innerHTML = '<div class="muted small">No sessions yet for this night.</div>';
+      return;
+    }
+    const { data: audit, error: aErr } = await SB
+      .from('barback_audit_log')
+      .select('id, session_id, staff_id, action, created_at, detail')
+      .in('session_id', ids)
+      .order('created_at', { ascending: true })
+      .limit(100);
+    if (aErr) { $('pilot-timeline').innerHTML = '<div class="status err">' + esc(aErr.message) + '</div>'; return; }
+
+    // Also: first scan per session, revokes, night_closed
+    const firstScans = await SB
+      .from('events')
+      .select('session_id, created_at')
+      .in('session_id', ids)
+      .in('source', ['barback_web_link', 'barback_live_pilot'])
+      .order('created_at', { ascending: true })
+      .limit(500);
+    const firstByS = new Map();
+    for (const e of (firstScans.data || [])) {
+      if (!firstByS.has(e.session_id)) firstByS.set(e.session_id, e.created_at);
+    }
+
+    const entries = [];
+    for (const r of (audit || [])) {
+      entries.push({
+        t: r.created_at,
+        kind: r.action,
+        body: '<b>' + esc(r.action) + '</b> · ' + esc(nameBy.get(r.session_id) || '—'),
+      });
+    }
+    for (const [sid, ts] of firstByS.entries()) {
+      entries.push({
+        t: ts, kind: 'first_scan',
+        body: '<b>first scan</b> · ' + esc(nameBy.get(sid) || sid.slice(0,8)),
+      });
+    }
+    entries.sort((a, b) => (a.t || '').localeCompare(b.t || ''));
+
+    $('pilot-timeline').innerHTML = entries.length
+      ? entries.slice(-100).map(e =>
+          '<div class="timeline-row"><span class="t">' + esc(fmtTime(e.t)) + '</span>' + e.body + '</div>'
+        ).join('')
+      : '<div class="muted small">No timeline entries yet.</div>';
+  },
+
+  // ── Emergency event controls ───────────────────────────────────
+  async loadControl() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    const { data } = await SB
+      .from('barback_event_control')
+      .select('*')
+      .eq('venue_id', state.venueId)
+      .eq('night_id', nightId)
+      .maybeSingle();
+    this._control = data || {
+      safe_mode: false, rapid_scan_disabled: false, sessions_frozen: false,
+      force_queue_drain_at: null, force_refresh_at: null,
+    };
+    this._reflectControl();
+  },
+  _reflectControl() {
+    const c = this._control;
+    const safeBtn   = $('pilot-toggle-safe');
+    const rapidBtn  = $('pilot-toggle-rapid');
+    const frozenBtn = $('pilot-toggle-frozen');
+    if (safeBtn)   safeBtn.textContent   = c.safe_mode           ? '🛑 SAFE MODE: ON'        : '🛑 SAFE MODE: OFF';
+    if (rapidBtn)  rapidBtn.textContent  = c.rapid_scan_disabled ? 'Rapid scan: DISABLED'    : 'Rapid scan: ENABLED';
+    if (frozenBtn) frozenBtn.textContent = c.sessions_frozen     ? 'New sessions: FROZEN'    : 'New sessions: ALLOWED';
+    // Soft-disable CREATE when frozen
+    const cCreate = $('c-create');
+    if (cCreate && c.sessions_frozen) {
+      cCreate.disabled = true;
+      cCreate.textContent = '⛔ NEW SESSIONS FROZEN BY PILOT';
+    }
+  },
+  async writeControl(patch) {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-emergency-status', 'Pick a night', 'err'); return; }
+    try {
+      const row = {
+        venue_id: state.venueId, night_id: nightId,
+        ...this._control, ...patch,
+        updated_by: state.staff?.id || null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await SB.from('barback_event_control').upsert(row, { onConflict: 'venue_id,night_id' });
+      if (error) throw error;
+      this._control = { ...this._control, ...patch };
+      this._reflectControl();
+      statusOn('pilot-emergency-status', '✓ Control updated', 'ok');
+    } catch (e) {
+      statusOn('pilot-emergency-status', '✗ ' + (e.message || e), 'err');
+    }
+  },
+  async toggleSafe()   { await this.writeControl({ safe_mode:           !this._control.safe_mode }); },
+  async toggleRapid()  { await this.writeControl({ rapid_scan_disabled: !this._control.rapid_scan_disabled }); },
+  async toggleFrozen() { await this.writeControl({ sessions_frozen:     !this._control.sessions_frozen }); },
+  async forceDrain()   { await this.writeControl({ force_queue_drain_at: new Date().toISOString() });
+    statusOn('pilot-emergency-status', '✓ Force-drain pulse sent (clients will react within ~30s)', 'ok'); },
+  async forceRefresh() {
+    if (!confirm('Force device refresh — every barback client polling this night will reload its page within ~30s. Proceed?')) return;
+    await this.writeControl({ force_refresh_at: new Date().toISOString() });
+    statusOn('pilot-emergency-status', '✓ Force-refresh pulse sent', 'ok');
+  },
+  async emergencyRevokeAll() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-emergency-status', 'Pick a night', 'err'); return; }
+    if (!confirm('EMERGENCY REVOKE-ALL — every active session for this night is terminated immediately. Proceed?')) return;
+    try {
+      const { data } = await SB.from('barback_sessions')
+        .select('id').eq('night_id', nightId)
+        .is('revoked_at', null).gt('expires_at', new Date().toISOString());
+      let ok = 0, bad = 0;
+      for (const r of (data || [])) {
+        try { await fnInvoke('barback-revoke-session', { session_id: r.id, reason: 'emergency' }); ok++; }
+        catch (_) { bad++; }
+      }
+      statusOn('pilot-emergency-status', '✓ Revoked ' + ok + ' · failed ' + bad, bad ? 'warn' : 'ok');
+      this.refreshAll();
+    } catch (e) {
+      statusOn('pilot-emergency-status', '✗ ' + (e.message || e), 'err');
+    }
+  },
+
+  // ── Field feedback ─────────────────────────────────────────────
+  async submitFeedback(category) {
+    const nightId = this.selectedNightId();
+    if (!nightId) { alert('Pick a night first'); return; }
+    const body = prompt('Field feedback (' + category + ') — what happened?');
+    if (!body || !body.trim()) return;
+    const severity = /blocker|critical|severe/i.test(body) ? 'blocker' :
+                     /warn|slow|degrade/i.test(body)        ? 'warn'    : 'info';
+    try {
+      const { error } = await SB.from('barback_field_feedback').insert({
+        venue_id: state.venueId, night_id: nightId,
+        category, severity, body: body.trim(),
+        reported_by: state.staff?.id || null,
+      });
+      if (error) throw error;
+      this.renderFeedback();
+      this.refreshMonitor();
+    } catch (e) {
+      alert('Feedback save failed: ' + (e.message || e));
+    }
+  },
+  async renderFeedback() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    const { data, error } = await SB
+      .from('barback_field_feedback')
+      .select('id, category, severity, body, reported_at, reported_by')
+      .eq('night_id', nightId)
+      .order('reported_at', { ascending: false })
+      .limit(50);
+    if (error) {
+      $('pilot-feedback-list').innerHTML = '<div class="muted small">' + esc(error.message) + '</div>';
+      return;
+    }
+    const nameBy = new Map((state.staffList || []).map(s => [s.id, s.name]));
+    $('pilot-feedback-list').innerHTML = (data && data.length)
+      ? data.map(r =>
+          '<div class="feedback-row">' +
+            '<span class="cat ' + (r.severity === 'blocker' ? 'blocker' : '') + '">' + esc(r.category) + '</span>' +
+            esc(r.body) +
+            ' <span class="muted small">— ' + esc(nameBy.get(r.reported_by) || '?') +
+              ', ' + esc(fmtTime(r.reported_at)) + '</span>' +
+          '</div>'
+        ).join('')
+      : '<div class="muted small">No field feedback yet for this night.</div>';
+  },
+
+  // ── Operational export bundle ──────────────────────────────────
+  async exportBundle() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-export-status', 'Pick a night', 'err'); return; }
+    statusOn('pilot-export-status', 'Building bundle…', 'info');
+    try {
+      // Phase 7: + notes, suspicious_scans, readiness state, session list
+      const [diag, alerts, audit, feedback, control, events, notes, susp, readiness, sessions] = await Promise.all([
+        SB.from('v_barback_diagnostics').select('*').eq('night_id', nightId),
+        SB.from('v_barback_pilot_alerts').select('*').eq('night_id', nightId),
+        SB.from('barback_audit_log').select('*')
+          .order('created_at', { ascending: true }).limit(5000),
+        SB.from('barback_field_feedback').select('*').eq('night_id', nightId),
+        SB.from('barback_event_control').select('*').eq('night_id', nightId).maybeSingle(),
+        SB.from('events').select('*').eq('night_id', nightId)
+          .in('source', ['barback_web_link', 'barback_live_pilot']).limit(50000),
+        SB.from('barback_event_notes').select('*').eq('night_id', nightId)
+          .order('written_at', { ascending: false }).limit(500),
+        SB.from('v_barback_suspicious_scans').select('*').limit(500),
+        SB.from('barback_event_readiness').select('*')
+          .eq('venue_id', state.venueId).eq('night_id', nightId).maybeSingle(),
+        SB.from('barback_sessions').select('id, nickname, pilot_mode, rehearsal_mode, issued_at, expires_at, revoked_at')
+          .eq('night_id', nightId),
+      ]);
+
+      // Filter audit log to rows we care about — and split into per-bucket lists
+      const sessIds = new Set((sessions.data || []).map(s => s.id));
+      const auditAll = (audit.data || []).filter(r =>
+        sessIds.has(r.session_id) || r.session_id === null);
+      const revokeHistory  = auditAll.filter(r =>
+        r.action === 'session_revoked' || r.action === 'night_closed');
+      const managerActions = auditAll.filter(r =>
+        ['session_created','session_revoked','night_closed','pin_rotated','session_extended'].includes(r.action));
+
+      const bundle = {
+        generated_at: new Date().toISOString(),
+        venue_id:     state.venueId,
+        night_id:     nightId,
+        diagnostics_snapshot: diag.data || [],
+        alerts:               alerts.data || [],
+        audit_log:            auditAll,
+        field_feedback:       feedback.data || [],
+        event_notes:          notes.data || [],
+        revoke_history:       revokeHistory,
+        manager_actions:      managerActions,
+        suspicious_activity:  (susp.data || []).filter(s => sessIds.has(s.session_id)),
+        readiness_state:      readiness.data || null,
+        sessions:             sessions.data || [],
+        event_control:        control.data || null,
+        failed_save_summary:  (diag.data || []).map(d => ({
+          session_id: d.session_id, nickname: d.nickname,
+          total_failed: d.total_failed, total_saved: d.total_saved,
+        })),
+        queue_state: (diag.data || []).map(d => ({
+          session_id: d.session_id, nickname: d.nickname,
+          queue_count: d.queue_count, status: d.status,
+          heartbeat_status: d.heartbeat_status,
+        })),
+      };
+
+      // Two downloads: bundle.json + events.csv
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const baseName = 'barinv-pilot-night-' + nightId.slice(0,8) + '-' + stamp;
+      this._downloadFile(baseName + '.json', JSON.stringify(bundle, null, 2), 'application/json');
+
+      const evRows = events.data || [];
+      if (evRows.length) {
+        const cols = Object.keys(evRows[0]);
+        const csv = [
+          cols.join(','),
+          ...evRows.map(r => cols.map(c => {
+            const v = r[c];
+            if (v == null) return '';
+            const s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+            const sx = s.replace(/"/g, '""');
+            return /[",\n]/.test(sx) ? '"' + sx + '"' : sx;
+          }).join(',')),
+        ].join('\n');
+        this._downloadFile(baseName + '-events.csv', csv, 'text/csv;charset=utf-8');
+      }
+
+      statusOn('pilot-export-status',
+        '✓ Bundle exported (' + (bundle.diagnostics_snapshot.length) + ' sessions · ' +
+        (evRows.length) + ' events · ' + (bundle.field_feedback.length) + ' feedback · ' +
+        (bundle.event_notes.length) + ' notes · ' + (bundle.revoke_history.length) + ' revokes)', 'ok');
+    } catch (e) {
+      statusOn('pilot-export-status', '✗ Export failed: ' + (e.message || e), 'err');
+    }
+  },
+  _downloadFile(name, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+  },
+
+  // ── Pilot close package ────────────────────────────────────────
+  async closePackage() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-close-status', 'Pick a night', 'err'); return; }
+    statusOn('pilot-close-status', 'Building close package…', 'info');
+    try {
+      const { data, error } = await SB.rpc('barback_pilot_close_summary', {
+        p_venue_id: state.venueId, p_night_id: nightId,
+      });
+      if (error) throw error;
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const baseName = 'barinv-pilot-close-' + nightId.slice(0,8) + '-' + stamp;
+      this._downloadFile(baseName + '.json', JSON.stringify(data, null, 2), 'application/json');
+      // CSV: flatten the operational_summary
+      const op = (data && data.operational_summary) || {};
+      const csvLines = ['metric,value', ...Object.keys(op).map(k => k + ',' + String(op[k]))];
+      this._downloadFile(baseName + '.csv', csvLines.join('\n'), 'text/csv;charset=utf-8');
+      statusOn('pilot-close-status', '✓ Pilot close package downloaded', 'ok');
+    } catch (e) {
+      statusOn('pilot-close-status', '✗ Close package failed: ' + (e.message || e), 'err');
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 7 — additions to the Pilot object (Object.assign, no surgery
+//  on the Phase 6 literal). New methods: rollup banner, health snapshot,
+//  rehearsal link, event notes, live-event detection + freeze guards.
+// ════════════════════════════════════════════════════════════════════
+const _origForceRefresh = Pilot.forceRefresh.bind(Pilot);
+const _origForceDrain   = Pilot.forceDrain.bind(Pilot);
+const _origEmergencyRevoke = Pilot.emergencyRevokeAll.bind(Pilot);
+const _origRefreshAll   = Pilot.refreshAll.bind(Pilot);
+
+Object.assign(Pilot, {
+
+  // ── Phase 7: rollup banner ──────────────────────────────────────
+  _updateGoBanner(keys) {
+    const banner = $('pilot-go-banner');
+    const state_ = $('pilot-go-state');
+    const detail = $('pilot-go-detail');
+    if (!banner || !state_ || !detail) return;
+    const r = this._readiness;
+    const pass = keys.filter(k => r[k] === true).length;
+    const fail = keys.filter(k => r[k] === false).length;
+    const ackKeys = ['functions', 'jwt_secret'];
+    const critFail = keys.filter(k => !ackKeys.includes(k) && r[k] === false);
+    banner.classList.remove('pilot-go-go', 'pilot-go-warn', 'pilot-go-nogo', 'pilot-go-unknown');
+    if (pass === keys.length) {
+      banner.classList.add('pilot-go-go');
+      state_.textContent = '🟢 READY';
+      detail.textContent = 'all ' + keys.length + ' checks pass · MARK EVENT READY is unlocked';
+    } else if (critFail.length > 0) {
+      banner.classList.add('pilot-go-nogo');
+      state_.textContent = '🔴 NO-GO';
+      detail.textContent = 'critical fail: ' + critFail.join(', ') + ' (' + pass + '/' + keys.length + ' passing)';
+    } else if (fail > 0) {
+      banner.classList.add('pilot-go-warn');
+      state_.textContent = '🟡 WARNING';
+      detail.textContent = pass + '/' + keys.length + ' passing · ack-only failures only';
+    } else {
+      banner.classList.add('pilot-go-unknown');
+      state_.textContent = '— CHECKS NEEDED —';
+      detail.textContent = 'click RUN CHECKS in the readiness card below';
+    }
+  },
+
+  // ── Phase 7: live-event guard ───────────────────────────────────
+  async _detectEventLive() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { this._eventLive = false; this._reflectLiveBanner(); return; }
+    try {
+      const { data: rd } = await SB.from('barback_event_readiness')
+        .select('marked_ready_at')
+        .eq('venue_id', state.venueId).eq('night_id', nightId)
+        .maybeSingle();
+      if (!rd?.marked_ready_at) { this._eventLive = false; this._reflectLiveBanner(); return; }
+      // Look for a night_closed audit entry in the last 12 hours
+      const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const { data: closed } = await SB.from('barback_audit_log')
+        .select('id, detail, created_at')
+        .eq('action', 'night_closed')
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      const matched = (closed || []).some(r =>
+        r.detail && (r.detail.night_id === nightId));
+      this._eventLive = !matched;
+    } catch (_) { this._eventLive = false; }
+    this._reflectLiveBanner();
+  },
+  _reflectLiveBanner() {
+    const b = $('pilot-live-banner');
+    if (b) b.style.display = this._eventLive ? '' : 'none';
+  },
+  async _liveConfirm(msg) {
+    if (!this._eventLive) return true;
+    return confirm('🔴 EVENT IN PROGRESS — ' + msg + '\n\nThis action will be visible to every active barback. Proceed?');
+  },
+
+  // Override force-refresh / force-drain / emergency-revoke to add the
+  // live-event guard on top of the Phase 6 confirm.
+  async forceRefresh() {
+    if (!(await this._liveConfirm('Force device refresh reloads every barback page.'))) return;
+    return _origForceRefresh();
+  },
+  async forceDrain() {
+    if (!(await this._liveConfirm('Force queue drain pulses every barback to flush its outbox.'))) return;
+    return _origForceDrain();
+  },
+  async emergencyRevokeAll() {
+    if (!(await this._liveConfirm('Emergency revoke-all terminates every active session immediately.'))) return;
+    return _origEmergencyRevoke();
+  },
+
+  // Extend refreshAll to also detect live-event state.
+  async refreshAll() {
+    await _origRefreshAll();
+    await this._detectEventLive();
+    await this.renderNotes();
+  },
+
+  // ── Phase 7: health snapshot ────────────────────────────────────
+  async healthSnapshot() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('pilot-status', 'Pick a night', 'err'); return; }
+    statusOn('pilot-status', 'Fetching health snapshot…', 'info');
+    try {
+      const { data, error } = await SB.rpc('barback_health_snapshot', {
+        p_venue_id: state.venueId, p_night_id: nightId,
+      });
+      if (error) throw error;
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      this._downloadFile(
+        'barinv-health-' + nightId.slice(0,8) + '-' + stamp + '.json',
+        JSON.stringify(data, null, 2), 'application/json'
+      );
+      statusOn('pilot-status', '✓ Health snapshot downloaded', 'ok');
+    } catch (e) {
+      statusOn('pilot-status', '✗ Snapshot failed: ' + (e.message || e), 'err');
+    }
+  },
+
+  // ── Phase 7: rehearsal link generator ───────────────────────────
+  async generateRehearsalLink() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('reh-status', 'Pick a night in the top card', 'err'); return; }
+    const nick = ($('reh-nickname').value || '').trim() || ('rehearsal ' + new Date().toLocaleString());
+    const fakeN = Math.max(0, Math.min(200, parseInt($('reh-fake-n').value, 10) || 0));
+
+    $('reh-generate').disabled = true;
+    $('reh-generate').textContent = '… GENERATING';
+    statusOn('reh-status', 'Calling barback-create-session…', 'info');
+    try {
+      const res = await fnInvoke('barback-create-session', {
+        venue_id:        state.venueId,
+        night_id:        nightId,
+        bar_id:          null,
+        allowed_bars:    [],
+        allowed_staff:   [],
+        nickname:        nick,
+        // 1-hour rehearsal window — manager can revoke earlier
+        expires_at:      new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        pin_rotate_for:  [],
+        // PLAN-QR-2026-06-03 Web-Barback: always pass the canonical
+        // public HTTPS base so the server-returned res.url is openable
+        // by the barback's personal phone regardless of where the
+        // manager UI is running.
+        public_url_base: getBarinvPublicBaseUrl(),
+      });
+      const newId = res?.session?.id;
+      if (!newId) throw new Error('session id missing from create response');
+      // Mark rehearsal
+      const { error: mErr } = await SB.rpc('barback_mark_rehearsal', {
+        p_session_id: newId, p_on: true,
+      });
+      if (mErr) throw mErr;
+      // Build the rehearsal URL: append ?stage=1 (and optional fake=N) to
+      // the original ?token=... URL so STAGING_MODE activates.
+      let url = res.url || '';
+      const sep = url.includes('?') ? '&' : '?';
+      url = url + sep + 'stage=1' + (fakeN > 0 ? '&fake=' + fakeN : '');
+      $('reh-url').textContent = url;
+      $('reh-result-row').style.display = '';
+      statusOn('reh-status', '✓ Rehearsal link generated · ' + (fakeN > 0 ? fakeN + ' fake scans on load' : 'no fake injection'), 'ok');
+    } catch (e) {
+      statusOn('reh-status', '✗ ' + (e.message || e), 'err');
+    } finally {
+      $('reh-generate').disabled = false;
+      $('reh-generate').textContent = '🧪 GENERATE REHEARSAL LINK';
+    }
+  },
+  async copyRehearsal() {
+    try { await navigator.clipboard.writeText($('reh-url').textContent); statusOn('reh-status', '✓ Copied', 'ok'); }
+    catch (e) { statusOn('reh-status', 'Copy failed: ' + (e.message || e), 'err'); }
+  },
+  async shareRehearsal() {
+    const url = $('reh-url').textContent;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'BARINV rehearsal', text: 'Open on a phone for dry-run', url }); }
+      catch (_) {}
+    } else {
+      statusOn('reh-status', 'Use COPY — Web Share not supported here.', 'warn');
+    }
+  },
+
+  // ── Phase 7: event notes ────────────────────────────────────────
+  async saveNote() {
+    const nightId = this.selectedNightId();
+    if (!nightId) { statusOn('note-status', 'Pick a night in the top card', 'err'); return; }
+    const category = $('note-category').value;
+    const body = ($('note-body').value || '').trim();
+    if (!body) { statusOn('note-status', 'Note body required', 'err'); return; }
+    try {
+      const { error } = await SB.from('barback_event_notes').insert({
+        venue_id: state.venueId, night_id: nightId,
+        category, body,
+        written_by: state.staff?.id || null,
+      });
+      if (error) throw error;
+      $('note-body').value = '';
+      statusOn('note-status', '✓ Note saved', 'ok');
+      this.renderNotes();
+    } catch (e) {
+      statusOn('note-status', '✗ ' + (e.message || e), 'err');
+    }
+  },
+  async renderNotes() {
+    const nightId = this.selectedNightId();
+    if (!nightId) return;
+    const { data, error } = await SB.from('barback_event_notes')
+      .select('id, category, body, written_at, written_by')
+      .eq('night_id', nightId)
+      .order('written_at', { ascending: false })
+      .limit(50);
+    const host = $('pilot-notes-list');
+    if (!host) return;
+    if (error) { host.innerHTML = '<div class="muted small">' + esc(error.message) + '</div>'; return; }
+    const nameBy = new Map((state.staffList || []).map(s => [s.id, s.name]));
+    host.innerHTML = (data && data.length)
+      ? data.map(n =>
+          '<div class="feedback-row">' +
+            '<span class="cat">' + esc(n.category) + '</span>' +
+            esc(n.body) +
+            ' <span class="muted small">— ' + esc(nameBy.get(n.written_by) || '?') +
+              ', ' + esc(fmtTime(n.written_at)) + '</span>' +
+          '</div>'
+        ).join('')
+      : '<div class="muted small">No notes yet for this night.</div>';
+  },
+});
+
+// ── Pilot tab event bindings ──────────────────────────────────────
+$('pilot-night')?.addEventListener('change', () => Pilot.refreshAll());
+$('pilot-run-checks')?.addEventListener('click', () => Pilot.runChecks());
+$('pilot-mark-ready')?.addEventListener('click', () => Pilot.markReady());
+$('pilot-alerts-refresh')?.addEventListener('click', () => Pilot.renderAlerts());
+$('pilot-timeline-refresh')?.addEventListener('click', () => Pilot.renderTimeline());
+$('pilot-toggle-safe')?.addEventListener('click', () => Pilot.toggleSafe());
+$('pilot-toggle-rapid')?.addEventListener('click', () => Pilot.toggleRapid());
+$('pilot-toggle-frozen')?.addEventListener('click', () => Pilot.toggleFrozen());
+$('pilot-emergency-revoke')?.addEventListener('click', () => Pilot.emergencyRevokeAll());
+$('pilot-force-drain')?.addEventListener('click', () => Pilot.forceDrain());
+$('pilot-force-refresh')?.addEventListener('click', () => Pilot.forceRefresh());
+$('pilot-export-bundle')?.addEventListener('click', () => Pilot.exportBundle());
+$('pilot-close-package')?.addEventListener('click', () => Pilot.closePackage());
+// Phase 7 bindings
+$('pilot-health-snapshot')?.addEventListener('click', () => Pilot.healthSnapshot());
+$('reh-generate')?.addEventListener('click', () => Pilot.generateRehearsalLink());
+$('reh-copy')?.addEventListener('click',     () => Pilot.copyRehearsal());
+$('reh-share')?.addEventListener('click',    () => Pilot.shareRehearsal());
+$('note-save')?.addEventListener('click',    () => Pilot.saveNote());
+document.querySelectorAll('.feedback-quick button[data-fb]').forEach(b => {
+  b.addEventListener('click', () => Pilot.submitFeedback(b.dataset.fb));
+});
+// React to ack-checkbox flips by re-running the gating without re-fetching
+document.querySelectorAll('input[data-ack]').forEach(cb => {
+  cb.addEventListener('change', () => Pilot.runChecks());
+});
+
+// ════════════════════════════════════════════════════════════════════
+//  Boot
+// ════════════════════════════════════════════════════════════════════
+(async () => {
+  const ok = await tryRestoreSession();
+  if (!ok) showScreen('screen-signin');
+})();
+
+}).catch((e) => {
+  console.error('vendor not ready', e);
+});
+</script>
+
+</body>
+</html>
