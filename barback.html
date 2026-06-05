@@ -1263,6 +1263,17 @@ function buildTokenFromPayload(p) {
 //  ROUTER
 // ════════════════════════════════════════════════════════════════════
 function boot() {
+  // PLAN-2026-06-05 — log the browser's wall-clock reading once at
+  // boot so a Web Inspector capture shows whether the iPhone's clock
+  // is in sync with UTC (or skewed). Pairs with [expiry-alert] lines
+  // to diagnose clock-skew vs real expiry. No secret printed.
+  try {
+    console.log('[clock] browser now', {
+      now_iso:      new Date().toISOString(),
+      now_epoch_ms: Date.now(),
+      ua:           String(navigator.userAgent || '').slice(0, 120),
+    });
+  } catch (_) { /* console may be unavailable */ }
   loadProductionCache();
   repairStaleOutbox();            // Phase 5 — quarantine entries older than 7 days
   refreshQueueCount();
@@ -1319,6 +1330,46 @@ function boot() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  PLAN-2026-06-05 — session-expiry diagnostic instrumentation
+// ════════════════════════════════════════════════════════════════════
+// Every user-visible "session expired" / "no longer valid" alert path
+// in this file logs a structured [expiry-alert] line BEFORE the alert
+// fires. This lets the Web Inspector show which of the 7 alert paths
+// actually triggered, what the JWT and session ms-until-expiry were
+// at that exact moment, and the iPhone's wall-clock reading (so a
+// device-clock skew vs UTC is detectable). Diagnostic only — does
+// NOT change any logout / clear-session behavior.
+//
+// SAFE LOGGING: never prints PIN, JWT bytes, token bytes, apikey,
+// service-role key, or any secret. Only:
+//   • path label (which of the alert sites fired)
+//   • two numeric ms-until-expiry signals
+//   • the browser's own ISO time + epoch ms (clock skew evidence)
+//   • presence booleans for state.jwt / state.tokenPayload
+//   • caller-supplied extra fields (also filtered for safety here)
+function expiryDebug(path, extra) {
+  try {
+    let msJwt = null;
+    try { msJwt = Phase3.msUntilExpiry(state.jwt); } catch (_) { /* parse */ }
+    let msSess = null;
+    if (state.tokenPayload && state.tokenPayload.expires_at) {
+      try { msSess = Date.parse(state.tokenPayload.expires_at) - Date.now(); }
+      catch (_) { /* parse */ }
+    }
+    console.warn('[expiry-alert]', {
+      path:                    path,
+      ms_until_jwt_expiry:     msJwt,
+      ms_until_session_expiry: msSess,
+      now_iso:                 new Date().toISOString(),
+      now_epoch_ms:            Date.now(),
+      has_jwt:                 !!state.jwt,
+      has_token_payload:       !!state.tokenPayload,
+      ...(extra || {}),
+    });
+  } catch (_) { /* console may be unavailable */ }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Phase 3 JWT keepalive — forces re-login at expiry
 // ════════════════════════════════════════════════════════════════════
 function startJwtKeepalive() {
@@ -1327,6 +1378,7 @@ function startJwtKeepalive() {
   state.jwtCheckInterval = setInterval(() => {
     const ms = Phase3.msUntilExpiry(state.jwt);
     if (ms == null || ms <= 0) {
+      expiryDebug('keepalive', { local_ms: ms, interval_ms: PHASE3_SESSION_KEEPALIVE_MS });
       clearInterval(state.jwtCheckInterval);
       state.jwtCheckInterval = null;
       Auth.clearSession();
@@ -1448,6 +1500,18 @@ $('pin-submit').addEventListener('click', async () => {
     state.serverSession = res.session.server_session || null;
     if (res.session.staff_name) state.staffName = res.session.staff_name;
     if (res.session.bundle) applyBundle(res.session.bundle, state.tokenPayload && state.tokenPayload.venue_id);
+    // PLAN-2026-06-05 — baseline log immediately after a successful PIN
+    // login. Pairs with [expiry-alert] entries later so we can compute
+    // how much (if any) clock drift accumulated between login and the
+    // alert. Never logs the JWT bytes — only ms-until-expiry + ISO time.
+    try {
+      console.log('[clock] post-login', {
+        now_iso:             new Date().toISOString(),
+        now_epoch_ms:        Date.now(),
+        ms_until_jwt_expiry: Phase3.msUntilExpiry(state.jwt),
+        jwt_expires_at_iso:  state.jwtExpiresAt || null,
+      });
+    } catch (_) { /* console may be unavailable */ }
     startJwtKeepalive();
   }
   Auth.saveSession(res.session);
@@ -2177,6 +2241,11 @@ async function saveCore(payload) {
       msg.indexOf('jwt expired') >= 0 ||
       msg.indexOf('invalid jwt') >= 0;
     if (looksRevoked) {
+      expiryDebug('save-revoked', {
+        pgrst_code: code,
+        http_status: status,
+        msg_first80: (msg || '').slice(0, 80),
+      });
       console.warn('Phase 3 save denied — forcing logout', err);
       // Direct forced-logout (no confirm() — session is already invalid).
       Auth.clearSession();
@@ -2405,6 +2474,7 @@ async function syncOutbox(opts) {
   refreshQueueCount();
   renderRecentMini();
   if (revoked) {
+    expiryDebug('sync-revoked', { synced_before_revoke: ok, failed_before_revoke: failed });
     // Force a forced-logout, just like the saveCore path
     Auth.clearSession();
     state.tokenPayload = null; state.staffId = null; state.staffName = null;
@@ -2503,6 +2573,11 @@ function startExpirationTimer() {
   function tick() {
     const ms = expiresAt - Date.now();
     if (ms <= 0) {
+      expiryDebug('session-countdown', {
+        expires_at_iso: ts,
+        expires_at_epoch_ms: expiresAt,
+        local_ms: ms,
+      });
       clearInterval(state.expirationInterval);
       state.expirationInterval = null;
       Auth.clearSession();
@@ -3266,6 +3341,7 @@ document.addEventListener('visibilitychange', () => {
   if (state.jwt) {
     const ms = Phase3.msUntilExpiry(state.jwt);
     if (ms == null || ms <= 0) {
+      expiryDebug('visibility', { local_ms: ms, visibility_state: document.visibilityState });
       // Expired in background — force re-login
       Auth.clearSession();
       state.jwt = null; state.tokenPayload = null;
@@ -3294,6 +3370,7 @@ window.addEventListener('pageshow', (ev) => {
     if (state.jwt && !STAGING_MODE) {
       const ms = Phase3.msUntilExpiry(state.jwt);
       if (ms != null && ms <= 0) {
+        expiryDebug('pageshow', { local_ms: ms, persisted: !!(ev && ev.persisted) });
         Auth.clearSession();
         state.jwt = null; state.tokenPayload = null;
         alert('Session expired while the tab was suspended. Please sign in again.');
