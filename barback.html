@@ -565,7 +565,7 @@
   </div>
   <video id="scanner-video" autoplay playsinline muted></video>
   <div class="scanner-toast" id="scanner-toast">—</div>
-  <div class="hint" id="scanner-hint">Hold the barcode steady within the frame. Camera permission is required.</div>
+  <div class="hint" id="scanner-hint">Hold the bottle barcode 10–20 cm from the lens. Fill the frame. Keep still for 1 second. Camera permission is required.</div>
 </div>
 
 <!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
@@ -1749,7 +1749,7 @@ async function openScanner() {
   $('scanner-toast').style.display = 'none';
   $('scanner-hint').textContent = continuous
     ? 'Continuous mode: scan multiple bottles, each saves as qty=1 with the current action.'
-    : 'Hold the barcode steady within the frame.';
+    : 'Hold the bottle barcode 10–20 cm from the lens. Fill the frame. Keep still for 1 second.';
 
   let zxing;
   try { zxing = await ensureZXing(); }
@@ -1758,27 +1758,94 @@ async function openScanner() {
     alert('Barcode scanner library unreachable. Type the barcode manually.\n\n' + (e.message || ''));
     return;
   }
-  const reader = new zxing.BrowserMultiFormatReader();
-  state.zxingControls = await reader.decodeFromVideoDevice(undefined, $('scanner-video'),
-    (result, err, controls) => {
-      if (!result || !result.getText) return;
-      const code = result.getText();
-      // PLAN-2026-06-04 — safe diagnostic. Logs ZXing decode every time
-      // it fires, before the dupe-window suppresses repeats. Length and
-      // last 4 chars only — never the full barcode body (some venues
-      // treat barcodes as semi-sensitive serials).
-      try {
-        const s = String(code || '');
-        console.log('[scanner] decoded', { len: s.length, last4: s.slice(-4) });
-      } catch (_) { /* console may be unavailable */ }
-      const now = Date.now();
-      const last = state.scannerCooldown[code] || 0;
-      if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
-      state.scannerCooldown[code] = now;
-      Feedback.scan();
-      onBarcodeScanned(code, controls);
+  // PLAN-2026-06-04 — Scanner performance Phase 1.
+  //
+  // 1) Restrict POSSIBLE_FORMATS to bottle-relevant 1D codes so ZXing
+  //    stops burning CPU per frame trying QR / Data Matrix / PDF417 /
+  //    Aztec / MaxiCode / Codabar / Code 39 / RSS / UPC-E. Hints API
+  //    is feature-detected — if DecodeHintType or BarcodeFormat is
+  //    missing on this ZXing-browser UMD build, we silently skip hints
+  //    and use the unconstrained reader (no regression).
+  //
+  // 2) Switch from decodeFromVideoDevice(undefined, …) — which lets
+  //    the browser pick whatever camera (often the FRONT camera on
+  //    iPhone Safari, which makes the scanner unusable for bartenders
+  //    holding bottles in front of themselves) — to decodeFromConstraints
+  //    with facingMode "environment" + ideal 1280x720. Fallback to
+  //    decodeFromVideoDevice if decodeFromConstraints isn't on this
+  //    ZXing-browser build, or if the browser rejects the constraints
+  //    (e.g. requested resolution unsupported, environment camera
+  //    unavailable on the device).
+  let hints = null;
+  try {
+    if (zxing.DecodeHintType && zxing.BarcodeFormat) {
+      hints = new Map();
+      hints.set(zxing.DecodeHintType.POSSIBLE_FORMATS, [
+        zxing.BarcodeFormat.UPC_A,
+        zxing.BarcodeFormat.EAN_13,
+        zxing.BarcodeFormat.EAN_8,
+        zxing.BarcodeFormat.ITF,
+        zxing.BarcodeFormat.CODE_128,
+      ]);
     }
-  );
+  } catch (_) { hints = null; }
+  const reader = hints
+    ? new zxing.BrowserMultiFormatReader(hints)
+    : new zxing.BrowserMultiFormatReader();
+
+  const onZxingResult = (result, err, controls) => {
+    if (!result || !result.getText) return;
+    const code = result.getText();
+    // PLAN-2026-06-04 — safe diagnostic. Logs ZXing decode every time
+    // it fires, before the dupe-window suppresses repeats. Length and
+    // last 4 chars only — never the full barcode body (some venues
+    // treat barcodes as semi-sensitive serials).
+    try {
+      const s = String(code || '');
+      console.log('[scanner] decoded', { len: s.length, last4: s.slice(-4) });
+    } catch (_) { /* console may be unavailable */ }
+    const now = Date.now();
+    const last = state.scannerCooldown[code] || 0;
+    if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
+    state.scannerCooldown[code] = now;
+    Feedback.scan();
+    onBarcodeScanned(code, controls);
+  };
+
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: { ideal: 'environment' },
+      width:      { ideal: 1280 },
+      height:     { ideal: 720 },
+    },
+  };
+
+  let controls = null;
+  if (typeof reader.decodeFromConstraints === 'function') {
+    try {
+      controls = await reader.decodeFromConstraints(constraints, $('scanner-video'), onZxingResult);
+    } catch (e) {
+      // Constraints rejected (resolution unsupported, environment
+      // camera unavailable, permission timing race). Fall through to
+      // the legacy unconstrained decoder so the bartender still gets a
+      // scanner — just on whatever the browser picks.
+      try {
+        console.warn('[scanner] decodeFromConstraints failed; falling back to decodeFromVideoDevice',
+          (e && e.message) || String(e));
+      } catch (_) { /* console may be unavailable */ }
+    }
+  }
+  if (!controls) {
+    try {
+      controls = await reader.decodeFromVideoDevice(undefined, $('scanner-video'), onZxingResult);
+    } catch (e) {
+      closeScanner();
+      alert('Camera could not start. Type the barcode manually.\n\n' + ((e && e.message) || ''));
+      return;
+    }
+  }
+  state.zxingControls = controls;
 }
 
 async function onBarcodeScanned(code, controls) {
