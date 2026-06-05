@@ -2928,13 +2928,10 @@ function renderReview() {
         staleHint +
         (q.attempts ? '<div class="muted small">(' + q.attempts + ' tries)</div>' : '') +
         (q.last_error ? '<div class="small" style="color:#fca5a5;margin-top:2px;">' + esc(String(q.last_error).slice(0,120)) + '</div>' : '') +
-        '<div style="display:flex;gap:6px;margin-top:6px;">' +
+        '<div style="margin-top:6px;">' +
           '<button class="q-edit" data-q-ce="' + esc(q.client_event_id) + '" ' +
-            'style="padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
+            'style="padding:4px 14px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
             'background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;">EDIT</button>' +
-          '<button class="q-delete" data-q-ce="' + esc(q.client_event_id) + '" ' +
-            'style="padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
-            'background:#7f1d1d;color:#fff;border:none;border-radius:4px;cursor:pointer;">DELETE</button>' +
         '</div>' +
         '<div class="q-edit-form" data-q-ce="' + esc(q.client_event_id) + '" ' +
           'style="display:none;margin-top:8px;padding:10px;background:#0f172a;border-radius:6px;"></div>' +
@@ -3014,9 +3011,8 @@ function renderReview() {
 
   // Wire per-row actions for QUEUED rows. (Synced rows are read-only by
   // design — no buttons emitted above, so no handlers to attach.)
-  Array.from(document.querySelectorAll('button.q-delete')).forEach(btn => {
-    btn.addEventListener('click', () => onQueueDelete(btn.getAttribute('data-q-ce')));
-  });
+  // Delete is now triggered from inside the EDIT panel via .qe-delete —
+  // the row-level Delete button was removed for iPhone readability.
   Array.from(document.querySelectorAll('button.q-edit')).forEach(btn => {
     btn.addEventListener('click', () => onQueueEdit(btn.getAttribute('data-q-ce')));
   });
@@ -3102,8 +3098,9 @@ function onQueueEdit(ce) {
       '<input class="qe-notes" type="text" value="' + esc(q.notes || '') + '" ' +
         'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
     '</div>' +
-    '<div style="display:flex;gap:8px;margin-top:8px;">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">' +
       '<button class="qe-save" style="padding:6px 14px;background:#22c55e;color:#000;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">SAVE EDIT</button>' +
+      '<button class="qe-delete" style="padding:6px 14px;background:#7f1d1d;color:#fff;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">DELETE QUEUED ROW</button>' +
       '<button class="qe-cancel" style="padding:6px 14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">CANCEL</button>' +
     '</div>';
   form.style.display = 'block';
@@ -3112,6 +3109,10 @@ function onQueueEdit(ce) {
     form.innerHTML = '';
   });
   form.querySelector('.qe-save').addEventListener('click', () => onQueueEditSave(ce, form));
+  // Reuse the safe per-row delete logic — confirms, removes the queued
+  // row only, marks the mirrored Recent row 'undone', refreshes counts
+  // and Review. No server call, no bulk delete, no automatic cleanup.
+  form.querySelector('.qe-delete').addEventListener('click', () => onQueueDelete(ce));
 }
 
 // Validate + apply the inline edit back to the Outbox row. NEVER
