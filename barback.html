@@ -302,7 +302,7 @@
        window.BARINV_PUBLIC_SUPABASE_CONFIG. onerror is tolerant: if the
        file is missing, the page falls back to the legacy localStorage
        chain. See barinv-public-config.js. -->
-  <script src="barinv-public-config.js" onerror="console.warn('[barinv] barinv-public-config.js missing — barbacks need localStorage seeded')"></script>
+  <script src="barinv-public-config.js?v=20260605a" onerror="console.warn('[barinv] barinv-public-config.js missing — barbacks need localStorage seeded')"></script>
 </head>
 <body>
 
@@ -2087,7 +2087,11 @@ async function eventsInsert(record) {
   }
   // Path 2: direct PostgREST fetch.
   if (!supabaseCfg || !supabaseCfg.url || !supabaseCfg.key) {
-    return { error: { message: 'no Supabase config (public-config missing)' } };
+    // PLAN-2026-06-05 — operator-facing wording. The previous
+    // "no Supabase config (public-config missing)" technical
+    // string surfaces directly in the save overlay; replace with
+    // a clear action so the bartender knows what to do next.
+    return { error: { message: 'Config not loaded — refresh page' } };
   }
   if (!state.jwt) {
     return { error: { message: 'no scoped JWT — sign in again' } };
@@ -2234,12 +2238,21 @@ async function saveCore(payload) {
     const code = err.code || '';
     const status = err.status || (err.context && err.context.status) || null;
     const msg = (err.message || '').toLowerCase();
+    // PLAN-2026-06-05 — narrow logout to TRUE JWT failures only.
+    // The previous gate force-logged-out the operator on any
+    // PostgREST 401 / 403 / 42501 / "row-level security" response,
+    // but the operator's barback session can still be valid in all
+    // those cases (RLS denial, missing GRANT, JWT-role-vs-policy
+    // mismatch — none of which mean the JWT itself is dead).
+    // Logging out on those generic 4xx replies masked real RLS /
+    // permission bugs as confusing "session expired" popups.
+    // Now: only logout when the server response explicitly names a
+    // JWT problem. Every other 4xx falls through to Outbox.push —
+    // the row queues safely and the session stays alive.
     const looksRevoked =
-      code === '42501' ||                                 // PostgREST insufficient_privilege
-      status === 401 || status === 403 ||
-      msg.indexOf('row-level security') >= 0 ||
-      msg.indexOf('jwt expired') >= 0 ||
-      msg.indexOf('invalid jwt') >= 0;
+      msg.indexOf('jwt expired')    >= 0 ||
+      msg.indexOf('invalid jwt')    >= 0 ||
+      msg.indexOf('jwt is missing') >= 0;
     if (looksRevoked) {
       expiryDebug('save-revoked', {
         pgrst_code: code,
@@ -2456,10 +2469,14 @@ async function syncOutbox(opts) {
         // every subsequent insert would fail the same way.
         const code = error.code || '';
         const msg  = (error.message || '').toLowerCase();
-        if (state.jwt && (code === '42501' ||
-            msg.indexOf('row-level security') >= 0 ||
-            msg.indexOf('jwt expired') >= 0 ||
-            msg.indexOf('invalid jwt') >= 0)) {
+        // PLAN-2026-06-05 — mirror the saveCore narrowing. Only
+        // TRUE JWT failures abort the sync loop + force logout.
+        // RLS / permission errors (code 42501, plain 401/403,
+        // "row-level security") leave the row in the queue with
+        // attempts++, exponential backoff, and session intact.
+        if (state.jwt && (msg.indexOf('jwt expired')    >= 0 ||
+                          msg.indexOf('invalid jwt')    >= 0 ||
+                          msg.indexOf('jwt is missing') >= 0)) {
           revoked = true;
           break;
         }
@@ -2713,9 +2730,16 @@ function renderReview() {
   const recent = Recent.load().slice(0, 20);
   $('review-meta').textContent =
     'last ' + recent.length + ' saves · ' + queued.length + ' queued · ' +
-    (SB || (supabaseCfg && state.jwt)
-      ? (navigator.onLine ? 'online' : 'OFFLINE')
-      : 'no Supabase configured');
+    // PLAN-2026-06-05 — distinguish the three reasons the page
+    // can't reach Supabase. The previous "no Supabase configured"
+    // wording fired whenever EITHER the public-config script hadn't
+    // loaded OR the operator hadn't completed PIN login — two very
+    // different states with very different fixes.
+    ( supabaseCfg && state.jwt && navigator.onLine ? 'online' :
+      supabaseCfg && state.jwt && !navigator.onLine ? 'OFFLINE' :
+      !supabaseCfg                                  ? 'config not loaded — refresh page' :
+      !state.jwt                                    ? 'signed out — re-enter PIN' :
+                                                      'unknown — see console' );
 
   $('review-queued').innerHTML = queued.length === 0
     ? '<div class="muted small">empty</div>'
