@@ -2187,7 +2187,18 @@ async function saveCore(payload) {
   if (payload.reversal_of) tags.push('[reversal_of=' + payload.reversal_of + ']');
   const notes = [tags.join(' '), userNotes].filter(Boolean).join(' ').trim();
 
+  // PLAN-2026-06-05 — Patch A: include venue_id in the events insert
+  // payload. The strict claim-scoped RLS policy on public.events
+  // (events_barback_insert) demands
+  //     venue_id = (auth.jwt() ->> 'venue_id')::uuid
+  // but saveCore previously never set record.venue_id at all — so the
+  // column arrived NULL, the equality evaluated to NULL (not TRUE),
+  // and every save reached PostgREST only to be rejected by RLS with
+  //     new row violates row-level security policy for table "events"
+  // venue_id is sourced from the token payload, same source of truth
+  // as night_id (the very next field). No other behavior changed.
   const record = {
+    venue_id: p.venue_id,
     night_id: p.night_id,
     bar_id:   payload.bar_id || null,
     station_id: null,
@@ -2458,6 +2469,21 @@ async function syncOutbox(opts) {
     const ev = target[i];
     if (opts.progress) opts.progress(i + 1, target.length);
     const { queued_at, attempts, last_error, last_attempt_at, ...rec } = ev;
+    // PLAN-2026-06-05 — Patch B: backfill ONLY venue_id when it's
+    // missing on a queued row. Older rows queued before Patch A do
+    // not carry venue_id; the strict RLS policy needs that field to
+    // match the JWT's venue_id claim. We use the CURRENT token
+    // payload's venue_id because the operator stays at the same
+    // venue across sessions in practice.
+    //
+    // CRITICAL: this never rewrites session_id, night_id, staff_id,
+    // bar_id, source, or any other field. Audit trail of which
+    // session originally captured the row is preserved verbatim.
+    // Rows queued under stale sessions/nights will still be rejected
+    // by the policy — that's intentional and correct.
+    if (!rec.venue_id && state.tokenPayload && state.tokenPayload.venue_id) {
+      rec.venue_id = state.tokenPayload.venue_id;
+    }
     try {
       const { error } = await eventsInsert(rec);
       if (!error || error.code === '23505') {
