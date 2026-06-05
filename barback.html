@@ -2751,6 +2751,102 @@ function showReview() {
   renderReview();
   showScreen('screen-review');
 }
+// ════════════════════════════════════════════════════════════════════
+//  PLAN-2026-06-05 — Transaction Review enhancements
+// ════════════════════════════════════════════════════════════════════
+// Adds per-row bar label, stale-session/night warning for queued rows,
+// and per-row Delete + Edit actions for QUEUED rows ONLY. Synced /
+// errored / undone rows in the Recent log are READ-ONLY by design —
+// those represent server-side state and must not be mutated locally.
+//
+// SAFETY:
+//   • Delete removes ONE queued row from the Outbox + marks the
+//     mirrored Recent row as 'undone' (preserves audit trail).
+//   • Edit allows action / qty / bar / notes changes; item_id stays
+//     immutable (re-enter to change item).
+//   • session_id / night_id / staff_id / venue_id / source /
+//     client_event_id are NEVER rewritten — audit trail of which
+//     session originally captured the row is preserved.
+//   • No DB calls. No SQL. No network. Pure localStorage mutations.
+
+// Resolve a bar_id to a display label. cache.bars carries the full
+// venue bar list (populated at PIN-login via the bundle). Falls back
+// to a short id if the row's bar isn't in cache.
+function reviewBarLabel(bid) {
+  if (!bid) return '(any bar)';
+  const found = (cache.bars || []).find(b => b.id === bid);
+  return (found && found.name) ? found.name : ('unknown (' + String(bid).slice(0, 8) + ')');
+}
+
+// Detect a queued row whose session_id / night_id differ from the
+// CURRENT JWT's. Such rows will be rejected by the events_barback_insert
+// RLS policy on sync and need delete + re-enter under the active
+// session. Returns { session: bool, night: bool }.
+function reviewQueueStaleFlags(q) {
+  const cur = (state && state.tokenPayload) || {};
+  return {
+    session: !!q.session_id && !!cur.session_id && q.session_id !== cur.session_id,
+    night:   !!q.night_id   && !!cur.night_id   && q.night_id   !== cur.night_id,
+  };
+}
+
+// PLAN-2026-06-05 REVISION — robustly normalize allowed_bars to a
+// Set of uuid strings regardless of which form it arrives in:
+//   • Array<string>          (URL-token payload — barback-create-session)
+//   • comma-separated string (JWT claim form — _shared/jwt.ts)
+//   • null / undefined       → empty Set
+//
+// The Set is used to safely scope queue-edit bar pickers. NEVER
+// coerces an empty/missing list to "all venue bars" — that broad
+// fallback was the unsafe behavior this revision closes off.
+function normalizeAllowedBars(value) {
+  const out = new Set();
+  if (!value) return out;
+  if (Array.isArray(value)) {
+    for (const v of value) {
+      if (typeof v === 'string') {
+        const t = v.trim();
+        if (t) out.add(t);
+      }
+    }
+    return out;
+  }
+  if (typeof value === 'string') {
+    for (const t of value.split(',')) {
+      const tt = t.trim();
+      if (tt) out.add(tt);
+    }
+    return out;
+  }
+  return out;
+}
+
+// Bars the operator is allowed to pick during a queued-row edit.
+//
+// SAFETY (PLAN-2026-06-05 REVISION): if the session has a non-empty
+// allowed_bars list (Array OR comma-separated string) OR a primary
+// bar_id, return ONLY those bars. If the session payload has NO
+// allowed_bars list AND NO primary bar_id, return [] — the caller
+// MUST treat empty as "lock bar editing", NOT silently broaden to
+// every active venue bar. The prior implementation returned all
+// venue bars in that case, which would let a queue-row edit silently
+// route the row to a bar the session never authorised. The RLS WITH
+// CHECK clause would still reject such a row, but we want the
+// safety enforced client-side too so the operator can see the
+// "locked" state and never gets a confusing rejection at sync time.
+function reviewSessionBars() {
+  const p = (state && state.tokenPayload) || {};
+  const cachedBars = (cache.bars || []).filter(b => b.active !== false);
+  const allowed = normalizeAllowedBars(p.allowed_bars);
+  if (p.bar_id) allowed.add(p.bar_id);
+  if (allowed.size > 0) {
+    return cachedBars.filter(b => allowed.has(b.id));
+  }
+  // No allowed list AND no primary bar — session-scope is unknown.
+  // Return empty so the caller can lock bar editing safely.
+  return [];
+}
+
 function renderReview() {
   const queued = Outbox.load();
   const recent = Recent.load().slice(0, 20);
@@ -2767,21 +2863,44 @@ function renderReview() {
       !state.jwt                                    ? 'signed out — re-enter PIN' :
                                                       'unknown — see console' );
 
+  // QUEUED rows — bar label + stale warning + Edit/Delete actions.
   $('review-queued').innerHTML = queued.length === 0
     ? '<div class="muted small">empty</div>'
     : queued.map(q => {
-        const it = (cache.items || []).find(x => x.id === q.item_id);
-        return '<div class="row-r">' +
+        const it     = (cache.items || []).find(x => x.id === q.item_id);
+        const stale  = reviewQueueStaleFlags(q);
+        const staleText = stale.session && stale.night ? 'older session/night'
+                       : stale.session                  ? 'older session'
+                       : stale.night                    ? 'older night'
+                       : '';
+        const staleHint = staleText
+          ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ ' + esc(staleText) +
+            ' — delete and re-enter</div>'
+          : '';
+        return '<div class="row-r" data-q-ce="' + esc(q.client_event_id) + '">' +
           '<span class="ts">' + fmtTime(q.queued_at) + '</span>' +
           '<span class="badge queued">QUEUED</span>' +
           '<span class="body">' +
             '<span class="' + (q.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(q.action) + '</span> · ' +
             esc(it ? it.name : q.item_id.slice(0,8)) + ' · ' + esc(String(q.qty)) +
-            (q.attempts ? ' <span class="muted">(' + q.attempts + ' tries)</span>' : '') +
-            (q.last_error ? ' <span class="muted">' + esc(String(q.last_error).slice(0,40)) + '</span>' : '') +
+            '<div class="muted small" style="margin-top:2px;">BAR: ' + esc(reviewBarLabel(q.bar_id)) + '</div>' +
+            staleHint +
+            (q.attempts ? '<div class="muted small">(' + q.attempts + ' tries)</div>' : '') +
+            (q.last_error ? '<div class="small" style="color:#fca5a5;margin-top:2px;">' + esc(String(q.last_error).slice(0,120)) + '</div>' : '') +
+            '<div style="display:flex;gap:6px;margin-top:6px;">' +
+              '<button class="q-edit" data-q-ce="' + esc(q.client_event_id) + '" ' +
+                'style="padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
+                'background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;">EDIT</button>' +
+              '<button class="q-delete" data-q-ce="' + esc(q.client_event_id) + '" ' +
+                'style="padding:4px 12px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
+                'background:#7f1d1d;color:#fff;border:none;border-radius:4px;cursor:pointer;">DELETE</button>' +
+            '</div>' +
+            '<div class="q-edit-form" data-q-ce="' + esc(q.client_event_id) + '" ' +
+              'style="display:none;margin-top:8px;padding:10px;background:#0f172a;border-radius:6px;"></div>' +
           '</span></div>';
       }).join('');
 
+  // Recent / synced history rows — bar label added; READ-ONLY (no buttons).
   $('review-synced').innerHTML = recent.length === 0
     ? '<div class="muted small">no recent saves</div>'
     : recent.map(r => {
@@ -2794,9 +2913,202 @@ function renderReview() {
           '<span class="body' + (r.undone ? ' undone' : '') + '">' +
             '<span class="' + (r.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(r.action || '?') + '</span> · ' +
             esc(r.item_name || '?') + ' · ' + esc(String(r.qty)) +
-            (r.reversal_of ? ' <span class="muted">[reversal]</span>' : '') +
+            '<div class="muted small" style="margin-top:2px;">BAR: ' + esc(reviewBarLabel(r.bar_id)) + '</div>' +
+            (r.reversal_of ? '<div class="muted small">[reversal]</div>' : '') +
           '</span></div>';
       }).join('');
+
+  // Wire per-row actions for QUEUED rows. (Synced rows are read-only by
+  // design — no buttons emitted above, so no handlers to attach.)
+  Array.from(document.querySelectorAll('button.q-delete')).forEach(btn => {
+    btn.addEventListener('click', () => onQueueDelete(btn.getAttribute('data-q-ce')));
+  });
+  Array.from(document.querySelectorAll('button.q-edit')).forEach(btn => {
+    btn.addEventListener('click', () => onQueueEdit(btn.getAttribute('data-q-ce')));
+  });
+}
+
+// QUEUED-row Delete: confirm, drop from Outbox, mark the mirrored
+// Recent log entry as 'undone' (preserves audit trail visibility),
+// refresh badges + review pane. Does NOT touch any SYNCED entry, does
+// NOT call the server, does NOT clear other queue entries.
+function onQueueDelete(ce) {
+  if (!ce) return;
+  if (!confirm('Delete this queued transaction? It will not sync later.')) return;
+  try { Outbox.removeById(ce); } catch (_) {}
+  try { Recent.markUndone(ce); } catch (_) {}
+  try { refreshQueueCount(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+  statusOn('review-status', 'Queued row deleted', 'info');
+}
+
+// QUEUED-row Edit: reveal an inline edit form pre-filled with the
+// current row's values. Cancel button restores hidden state. Save
+// button validates + applies via onQueueEditSave.
+function onQueueEdit(ce) {
+  if (!ce) return;
+  const q = Outbox.load().find(x => x.client_event_id === ce);
+  if (!q) { statusOn('review-status', 'Queued row not found', 'err'); return; }
+  // Use attribute selector via CSS.escape so the ce uuid never breaks
+  // the querySelector even if it contained unusual characters.
+  const form = document.querySelector('.q-edit-form[data-q-ce="' + (window.CSS && CSS.escape ? CSS.escape(ce) : ce) + '"]');
+  if (!form) return;
+  const bars = reviewSessionBars();
+  const it   = (cache.items || []).find(x => x.id === q.item_id);
+  form.innerHTML =
+    '<div class="muted small" style="margin-bottom:6px;">Edit queued transaction · item: ' +
+      esc(it ? (it.name + (it.size ? (' · ' + it.size) : '')) : q.item_id.slice(0,8)) + '</div>' +
+    '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:center;">' +
+      '<label class="small">Action</label>' +
+      '<select class="qe-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+        '<option value="TAKEN"'    + (q.action === 'TAKEN'    ? ' selected' : '') + '>TAKEN</option>' +
+        '<option value="RETURNED"' + (q.action === 'RETURNED' ? ' selected' : '') + '>RETURNED</option>' +
+      '</select>' +
+      '<label class="small">Qty</label>' +
+      '<input class="qe-qty" type="number" step="0.1" min="0" value="' + esc(String(q.qty)) + '" ' +
+        'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+      '<label class="small">Bar</label>' +
+      // PLAN-2026-06-05 REVISION — bar field is locked when the
+      // session has no allowed-bars scope visible on this device.
+      // When unlocked, the dropdown shows ONLY session-allowed bars
+      // and does NOT include a "(any bar)" option — the user prompt
+      // explicitly prefers requiring a bar selection when allowed
+      // bars exist. The current-not-in-session warning option is
+      // included disabled so the operator sees the situation.
+      ( bars.length === 0
+        ? ('<div class="qe-bar-locked" data-locked="1" ' +
+              'style="padding:8px;background:#0b0f1a;border:1px dashed #fbbf24;border-radius:4px;">' +
+            '<div style="color:#fbbf24;font-weight:700;letter-spacing:0.04em;font-size:11px;">⚠ BAR EDITING LOCKED</div>' +
+            '<div class="muted small" style="margin-top:4px;">' +
+              'Session has no allowed-bars scope on this device. ' +
+              'Keeping current bar: <b>' + esc(reviewBarLabel(q.bar_id)) + '</b>.' +
+            '</div>' +
+            '<div class="muted small" style="margin-top:2px;color:#888;">' +
+              '(re-scan a fresh QR or re-login to enable bar editing)' +
+            '</div>' +
+          '</div>')
+        : ('<select class="qe-bar" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+            // PLAN-2026-06-05 SAFETY — render a disabled+selected
+            // placeholder when q.bar_id is missing OR not in the
+            // session-allowed list. Otherwise the browser auto-
+            // selects the FIRST <option> and an operator who edits
+            // only qty/action/notes and taps SAVE EDIT would silently
+            // route the queued row to a bar they never chose. With a
+            // disabled selected placeholder up top, the SAVE handler's
+            // empty-barId guard fires "Pick a bar" instead.
+            (!q.bar_id
+              ? '<option value="" selected disabled>Pick a bar</option>'
+              : (!bars.some(b => b.id === q.bar_id)
+                  ? '<option value="" selected disabled style="color:#fbbf24;">⚠ current bar not in current session — pick one</option>'
+                  : '')) +
+            bars.map(b => '<option value="' + esc(b.id) + '"' + (b.id === q.bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
+          '</select>')
+      ) +
+      '<label class="small">Notes</label>' +
+      '<input class="qe-notes" type="text" value="' + esc(q.notes || '') + '" ' +
+        'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:8px;">' +
+      '<button class="qe-save" style="padding:6px 14px;background:#22c55e;color:#000;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">SAVE EDIT</button>' +
+      '<button class="qe-cancel" style="padding:6px 14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">CANCEL</button>' +
+    '</div>';
+  form.style.display = 'block';
+  form.querySelector('.qe-cancel').addEventListener('click', () => {
+    form.style.display = 'none';
+    form.innerHTML = '';
+  });
+  form.querySelector('.qe-save').addEventListener('click', () => onQueueEditSave(ce, form));
+}
+
+// Validate + apply the inline edit back to the Outbox row. NEVER
+// touches session_id / night_id / staff_id / venue_id / source /
+// client_event_id / item_id — preserves the audit identity of the
+// row. Resets retry counters so the corrected row syncs cleanly on
+// the next SYNC tap.
+function onQueueEditSave(ce, form) {
+  // PLAN-2026-06-05 REVISION — locate the queued row FIRST so the
+  // locked-bar fallback can preserve its existing bar_id verbatim
+  // without having to re-load mid-validation.
+  const arr = Outbox.load();
+  const i = arr.findIndex(x => x.client_event_id === ce);
+  if (i < 0) {
+    statusOn('review-status', 'Queued row not found in outbox', 'err');
+    return;
+  }
+  const q = arr[i];
+
+  const action = form.querySelector('.qe-action').value;
+  const qtyStr = form.querySelector('.qe-qty').value;
+  const notes  = (form.querySelector('.qe-notes').value || '').trim();
+
+  // Bar handling — locked OR explicit select. The locked branch
+  // happens when reviewSessionBars() returned [] during edit-form
+  // construction (no allowed_bars + no primary bar_id resolvable).
+  // In that case we preserve the queued row's existing bar_id and
+  // never silently broaden to an unauthorised bar.
+  const barLocked = !!form.querySelector('.qe-bar-locked');
+  const barSelect = form.querySelector('.qe-bar');
+  let barId;
+  if (barLocked) {
+    barId = q.bar_id || null;
+  } else if (barSelect) {
+    barId = barSelect.value || null;
+    if (!barId) {
+      statusOn('review-status', 'Pick a bar', 'err'); return;
+    }
+    const allowed = reviewSessionBars().some(b => b.id === barId);
+    if (!allowed) {
+      statusOn('review-status', "Selected bar is not in the current session's allowed bars", 'err');
+      return;
+    }
+  } else {
+    // Defensive fallback — neither locked div nor select present in
+    // the form. Preserve the queued row's existing bar_id.
+    barId = q.bar_id || null;
+  }
+
+  if (action !== 'TAKEN' && action !== 'RETURNED') {
+    statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
+  }
+  const qty = parseFloat(qtyStr);
+  if (!isFinite(qty) || qty <= 0) {
+    statusOn('review-status', 'Qty must be a positive number', 'err'); return;
+  }
+  if (action === 'TAKEN' && !(Number.isInteger(qty) && qty >= 1)) {
+    statusOn('review-status', 'TAKEN qty must be a positive integer (bottles)', 'err'); return;
+  }
+
+  // Patch the queued row in-place. NEVER mutate session_id, night_id,
+  // staff_id, venue_id, source, client_event_id, or item_id.
+  arr[i].action          = action;
+  arr[i].qty             = qty;
+  arr[i].bar_id          = barId;     // session-allowed (or preserved when bar editing was locked)
+  arr[i].notes           = notes;
+  arr[i].attempts        = 0;          // reset retry counter so next SYNC tries again
+  arr[i].last_error      = null;
+  arr[i].last_attempt_at = null;
+  Outbox.save(arr);
+
+  // Mirror the visible change in the local Recent log (kept aligned
+  // so the operator's display matches reality). The Recent entry for
+  // this ce is a local-only audit row; not a server-side record.
+  try {
+    const ra = Recent.load();
+    const ri = ra.findIndex(x => x.ce === ce);
+    if (ri >= 0) {
+      ra[ri].action = action;
+      ra[ri].qty    = qty;
+      ra[ri].bar_id = barId;
+      ra[ri].notes  = notes;
+      Recent.save(ra);
+    }
+  } catch (_) { /* best-effort */ }
+
+  form.style.display = 'none';
+  form.innerHTML = '';
+  try { refreshQueueCount(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+  statusOn('review-status', 'Queued row updated — tap SYNC to retry', 'ok');
 }
 $('review-back').addEventListener('click', () => {
   if (state.tokenPayload) showScreen('screen-main');
