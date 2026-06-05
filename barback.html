@@ -408,7 +408,10 @@
       <input id="notes-input" type="text" autocomplete="off">
     </div>
 
-    <button class="btn btn-success" id="save-btn">💾 SAVE TRANSACTION</button>
+    <button class="btn btn-success" id="save-btn">➕ ADD TO REVIEW</button>
+    <div class="muted small" style="margin:-4px 0 6px 0;">
+      Items pile up in the Review list. Tap <b>VIEW ALL</b> to inspect, edit, and finally <b>SUBMIT ALL TO BARINV</b>.
+    </div>
     <div id="save-status"></div>
 
     <!-- BLE attach (Capacitor-only; hidden in plain Safari) -->
@@ -447,15 +450,22 @@
 <div class="screen" id="screen-review">
   <div class="wrap">
     <h1>Transaction review</h1>
-    <h2 id="review-meta">last 20 saves · queue separately</h2>
+    <h2 id="review-meta">drafts · queued · synced</h2>
 
     <div class="row">
-      <label>QUEUED (not yet synced)</label>
+      <label>📝 REVIEW · NOT SUBMITTED YET</label>
+      <div id="review-drafts" class="recent">—</div>
+    </div>
+
+    <button class="btn btn-success" id="review-submit-all" style="margin-top:6px;" disabled>⬆ SUBMIT ALL TO BARINV</button>
+
+    <div class="row" style="margin-top:14px;">
+      <label>QUEUED · WAITING TO SYNC</label>
       <div id="review-queued" class="recent">—</div>
     </div>
 
     <div class="row">
-      <label>SYNCED (last 20)</label>
+      <label>SYNCED · SENT TO BARINV (last 20)</label>
       <div id="review-synced" class="recent">—</div>
     </div>
 
@@ -686,6 +696,7 @@ const LS = {
   session:       'barinv_barback_session',
   outbox:        'barinv_barback_outbox',
   recentFull:    'barinv_barback_recent_full',     // last 50 entries with full data
+  reviewDrafts:  'barinv_barback_review_drafts',   // Review-First local-only pre-submit drafts
   uiPrefs:       'barinv_barback_ui_prefs',
   prodVenues:    'barinv_offline_venues_v1',
   prodCache:     (vid) => 'barinv_offline_cache_' + vid,
@@ -1212,6 +1223,52 @@ const Recent = {
     const arr = this.load().filter(e => e.status === 'QUEUED');
     this.save(arr);
   },
+};
+
+// ════════════════════════════════════════════════════════════════════
+//  Drafts — Review-First local-only pre-submit list
+// ════════════════════════════════════════════════════════════════════
+// Operator builds a Review list by tapping ADD TO REVIEW on the main
+// screen. Drafts are LOCAL ONLY; no events row is created until the
+// operator taps SUBMIT ALL TO BARINV on the Transaction Review screen.
+// At submit time, each draft is copied into the existing Outbox and
+// then synced via eventsInsert under the strict claim-scoped RLS
+// (events_barback_insert). Drafts are fully editable/deletable until
+// submit; after submit, Outbox→Recent state machine takes over and
+// synced rows become read-only.
+const Drafts = {
+  load() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.reviewDrafts) || '[]');
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(r => r && r.client_event_id && r.action && r.item_id);
+    } catch (_) { return []; }
+  },
+  save(arr) {
+    try { localStorage.setItem(LS.reviewDrafts, JSON.stringify(arr)); }
+    catch (e) { console.error('drafts save failed:', e); }
+  },
+  add(rec) {
+    const cur = this.load();
+    if (cur.some(d => d.client_event_id === rec.client_event_id)) return cur.length;
+    cur.push({ ...rec, drafted_at: rec.drafted_at || Date.now() });
+    this.save(cur);
+    return cur.length;
+  },
+  removeById(ce) {
+    const cur = this.load().filter(d => d.client_event_id !== ce);
+    this.save(cur);
+    return cur.length;
+  },
+  replaceById(ce, patch) {
+    const arr = this.load();
+    const i = arr.findIndex(d => d.client_event_id === ce);
+    if (i < 0) return false;
+    arr[i] = { ...arr[i], ...patch };
+    this.save(arr);
+    return true;
+  },
+  count() { return this.load().length; },
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -1952,8 +2009,13 @@ async function onBarcodeScanned(code, controls) {
   }
 
   if (state.scannerContinuous) {
-    // Auto-save qty=1, stay in scanner.
-    const saveRes = await saveCore({
+    // PLAN-2026-06-05 — Rapid mode now ADDS TO REVIEW (qty=1), not
+    // immediate server sync. The scanned row sits in Drafts until the
+    // operator taps SUBMIT ALL TO BARINV on the Review screen, so a
+    // mis-scanned bottle can be inspected, edited, or deleted before
+    // any events row is created. Stays in the camera so the next
+    // bottle can be scanned. No eventsInsert, no Outbox push here.
+    const addRes = addToReview({
       item_id: it.id,
       item_name: it.name,
       qty: 1,
@@ -1961,11 +2023,14 @@ async function onBarcodeScanned(code, controls) {
       bar_id: state.selectedBarId,
       notes: '',
     });
+    const n = Drafts.count();
     showScannerToast(
-      (saveRes.synced ? '✓ ' : '⏳ ') + it.name + (saveRes.synced ? ' · saved' : ' · queued'),
-      saveRes.synced ? 'ok' : 'warn'
+      addRes.ok
+        ? '✓ ' + it.name + ' · Added to Review (' + n + ')'
+        : '⚠ ' + (addRes.error || 'add failed') + ': ' + it.name,
+      addRes.ok ? 'ok' : 'warn'
     );
-    refreshQueueCount();
+    try { refreshDraftCount(); } catch (_) {}
     renderRecentMini();
   } else {
     // One-shot: close scanner, set picked item, leave SAVE for user tap
@@ -2016,17 +2081,25 @@ function installHidListener() {
         const it = lookupByBarcode(code);
         if (it) {
           if (state.selectedAction) {
-            // If continuous-style speed is desired via HID, auto-save
-            saveCore({
+            // PLAN-2026-06-05 — HID continuous-speed path now ADDS TO
+            // REVIEW (qty=1) rather than calling eventsInsert. Same
+            // Review-First safety as the touch SAVE button and the
+            // rapid-mode camera scanner. addToReview is synchronous.
+            const r = addToReview({
               item_id: it.id, item_name: it.name, qty: 1,
               action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
-            }).then((r) => {
-              statusOn('save-status', (r.synced ? '✓ HID save: ' : '⏳ HID queued: ') + it.name, r.synced ? 'ok' : 'warn');
-              refreshQueueCount(); renderRecentMini();
             });
+            const n = Drafts.count();
+            statusOn('save-status',
+              r.ok
+                ? '✓ HID added to Review: ' + it.name + ' (' + n + ' draft' + (n !== 1 ? 's' : '') + ')'
+                : '⚠ HID add failed: ' + (r.error || 'unknown') + ' — ' + it.name,
+              r.ok ? 'ok' : 'warn');
+            try { refreshDraftCount(); } catch (_) {}
+            renderRecentMini();
           } else {
             setPickedItem(it);
-            statusOn('save-status', '✓ HID scan: ' + it.name + ' — pick TAKEN / RETURN to save', 'info');
+            statusOn('save-status', '✓ HID scan: ' + it.name + ' — pick TAKEN / RETURN to add to Review', 'info');
           }
         } else {
           $('search-input').value = code;
@@ -2314,6 +2387,103 @@ async function saveCore(payload) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Review-First — addToReview (manual SAVE button path)
+// ════════════════════════════════════════════════════════════════════
+// Builds the same events-shape record saveCore would have built, but
+// parks it in Drafts.load() instead of calling eventsInsert. The row
+// is editable/deletable in Transaction Review until the operator taps
+// SUBMIT ALL TO BARINV — at which point it's promoted into Outbox and
+// the audited sync path takes over. Does NOT touch Outbox, Recent, or
+// the server. STAGING_MODE still wins: in staging, the draft becomes
+// a Recent SYNCED stub via the existing StageLog path (unchanged).
+// Scanner rapid mode + HID scanner + undoLast still go through the
+// legacy saveCore (immediate-sync) path — they are deliberate
+// fast-capture or compensating actions and are out of scope for the
+// Review-First workflow per current product decision.
+function addToReview(payload) {
+  const p = state.tokenPayload;
+  if (!p) return { ok:false, error:'no session' };
+  // Defensive qty guard. Every caller path (manual SAVE button,
+  // rapid-mode scanner, HID scanner) is supposed to validate before
+  // calling, but a single hard guard here means qty=0 / NaN can never
+  // sneak into Drafts regardless of caller bugs.
+  const qtyNum = parseFloat(payload.qty);
+  if (!isFinite(qtyNum) || qtyNum <= 0) {
+    return { ok:false, error:'qty must be greater than zero' };
+  }
+  if (payload.action === 'TAKEN' && qtyNum !== Math.floor(qtyNum)) {
+    return { ok:false, error:'TAKEN qty must be a whole number' };
+  }
+  if (payload.action !== 'TAKEN' && payload.action !== 'RETURNED') {
+    return { ok:false, error:'action must be TAKEN or RETURNED' };
+  }
+  const ce = uuidv4();
+  const userNotes = payload.notes || '';
+
+  // STAGING short-circuit (parity with saveCore) — local-only stub.
+  if (STAGING_MODE) {
+    StageLog.push({
+      ce, item_id: payload.item_id, item_name: payload.item_name,
+      action: payload.action, qty: payload.qty, bar_id: payload.bar_id,
+      notes: userNotes, reversal_of: payload.reversal_of || null,
+    });
+    Recent.add({
+      ce, at: Date.now(),
+      night_id: p.night_id, bar_id: payload.bar_id || null,
+      item_id: payload.item_id, item_name: payload.item_name,
+      action: payload.action, qty: payload.qty,
+      notes: '[STAGE] ' + userNotes, status: 'SYNCED',
+      reversal_of: payload.reversal_of || null, staged: true,
+    });
+    Telemetry.bump('saved');
+    renderRecentItemChips();
+    return { ok:true, ce, staged:true };
+  }
+
+  const phase3 = !!state.jwt;
+  const tags = [];
+  if (!phase3) {
+    tags.push('[source=barback_web_link]', '[staff_id=' + (state.staffId || '?') + ']');
+    if (p.issuer)   tags.push('[issuer=' + p.issuer + ']');
+    if (p.nickname) tags.push('[session=' + p.nickname + ']');
+  }
+  if (payload.reversal_of) tags.push('[reversal_of=' + payload.reversal_of + ']');
+  const notes = [tags.join(' '), userNotes].filter(Boolean).join(' ').trim();
+
+  // Same events-shape fields saveCore uses, plus two draft-only
+  // helper fields (item_name, drafted_at) that are STRIPPED at submit
+  // time before the row enters Outbox/eventsInsert.
+  const record = {
+    venue_id: p.venue_id,
+    night_id: p.night_id,
+    bar_id:   payload.bar_id || null,
+    station_id: null,
+    item_id:  payload.item_id,
+    item_name: payload.item_name || null,        // draft UI only — stripped at submit
+    qty:      payload.qty,
+    action:   payload.action,
+    notes:    notes,
+    submitted_by: '[barback_web] ' + (state.staffName || 'unknown') +
+                  (state.staffId ? ' (' + String(state.staffId).slice(0, 8) + ')' : '') +
+                  (payload.reversal_of ? ' [undo]' : ''),
+    status:   'PENDING',
+    client_event_id: ce,
+    drafted_at: Date.now(),                       // draft UI only — stripped at submit
+  };
+  if (phase3) {
+    record.source     = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE && !STAGING_MODE)
+                          ? 'barback_live_pilot'
+                          : 'barback_web_link';
+    record.staff_id   = state.staffId;
+    record.session_id = (state.tokenPayload && state.tokenPayload.session_id) ||
+                        (state.serverSession && state.serverSession.session_id) || null;
+  }
+
+  Drafts.add(record);
+  return { ok:true, ce, draft:true };
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Save button (manual flow)
 // ════════════════════════════════════════════════════════════════════
 $('save-btn').addEventListener('click', async () => {
@@ -2322,21 +2492,32 @@ $('save-btn').addEventListener('click', async () => {
   if (!state.selectedAction) { showOverlay('PICK ACTION', 'TAKEN or RETURN', 'err'); Feedback.warn(); return; }
   if (!state.selectedItemId) { showOverlay('PICK ITEM', 'Scan or search first', 'err'); Feedback.warn(); return; }
   const qty = parseFloat($('qty-input').value);
-  if (!isFinite(qty) || qty < 0) { showOverlay('BAD QTY', 'Enter a valid number', 'err'); Feedback.warn(); return; }
+  // qty must be finite and STRICTLY positive. Zero is not a valid
+  // bottle/return — refuse it so it never reaches Drafts.
+  if (!isFinite(qty) || qty <= 0) {
+    showOverlay('BAD QTY', 'Qty must be greater than zero', 'err'); Feedback.warn(); return;
+  }
+  if (state.selectedAction === 'TAKEN' && qty !== Math.floor(qty)) {
+    showOverlay('BAD QTY', 'TAKEN qty must be a whole number (bottles)', 'err'); Feedback.warn(); return;
+  }
 
-  // Phase 4: double-save guard. Same (item, action, qty) within 1.5 s
-  // is almost always a double-tap on a noisy phone. Reject silently
-  // and short the loop — the previous save already produced its overlay.
+  // Double-tap guard: same (item, action, qty) within 1.5 s is almost
+  // always an accidental second tap. Reject silently.
   if (isDuplicateSave(state.selectedAction, state.selectedItemId, qty)) {
     Feedback.warn();
-    statusOn('save-status', '⚠ Duplicate save suppressed (same item + qty within 1.5 s)', 'warn');
+    statusOn('save-status', '⚠ Duplicate suppressed (same item + qty within 1.5 s)', 'warn');
     return;
   }
 
+  // PLAN-2026-06-05 — Review-First: SAVE button now ADDS TO REVIEW
+  // instead of immediately calling eventsInsert. Drafts pile up in
+  // Drafts.load() and the operator taps SUBMIT ALL TO BARINV on the
+  // Transaction Review screen to commit them through the audited
+  // Outbox + eventsInsert path under the strict claim-scoped RLS.
   $('save-btn').disabled = true;
-  $('save-btn').textContent = '⏳ SAVING…';
+  $('save-btn').textContent = '… ADDING';
 
-  const r = await saveCore({
+  const r = addToReview({
     item_id: state.selectedItemId,
     item_name: state.selectedItemName,
     qty: qty,
@@ -2346,17 +2527,25 @@ $('save-btn').addEventListener('click', async () => {
   });
 
   $('save-btn').disabled = false;
-  $('save-btn').textContent = '💾 SAVE TRANSACTION';
+  $('save-btn').textContent = '➕ ADD TO REVIEW';
 
-  if (r.synced) {
+  if (r.ok && r.staged) {
     Feedback.ok();
-    showOverlay('✓ SAVED', state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty, 'ok');
+    showOverlay('✓ STAGE SAVED', state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty, 'ok');
+  } else if (r.ok) {
+    Feedback.ok();
+    const n = Drafts.count();
+    showOverlay('✓ ADDED TO REVIEW',
+      'Not submitted yet · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' pending', 'ok');
+    statusOn('save-status',
+      'Added to Review · ' + n + ' draft' + (n !== 1 ? 's' : '') +
+        ' pending — tap VIEW ALL to submit', 'ok');
   } else {
     Feedback.warn();
-    showOverlay('⏳ QUEUED', 'Offline — will sync. ' + (r.error && r.error.message ? r.error.message : ''), 'warn');
+    showOverlay('⚠ NOT ADDED', (r.error || 'unknown error'), 'err');
   }
 
-  // POST-SAVE: preserve action/bar/staff/session. Reset only item + qty + notes.
+  // POST-ADD: preserve action/bar/staff/session. Reset only item + qty + notes.
   state.selectedItemId = null;
   state.selectedItemName = null;
   $('picked-item').style.display = 'none';
@@ -2364,6 +2553,7 @@ $('save-btn').addEventListener('click', async () => {
   $('qty-input').value = '1';
   $('notes-input').value = '';
   refreshQueueCount();
+  try { refreshDraftCount(); } catch (_) {}
   renderRecentMini();
 
   // Auto-rescan if rapid-mode is on
@@ -2848,6 +3038,7 @@ function reviewSessionBars() {
 }
 
 function renderReview() {
+  const drafts = Drafts.load();
   const queued = Outbox.load();
   const recent = Recent.load().slice(0, 20);
 
@@ -2900,7 +3091,8 @@ function renderReview() {
     .join(' · ');
 
   $('review-meta').innerHTML =
-    esc('last ' + recent.length + ' saves · ' + queued.length + ' queued · ' + statusWord) +
+    esc(drafts.length + ' drafts · ' + queued.length + ' queued · ' +
+        'last ' + recent.length + ' saves · ' + statusWord) +
     (barSummary
       ? '<div class="muted small" style="margin-top:4px;">' + esc(barSummary) + '</div>'
       : '');
@@ -2952,6 +3144,42 @@ function renderReview() {
       '</span></div>';
   }
 
+  // Review-First draft row. Mirrors buildQueuedRowHTML but uses a
+  // DRAFT badge (purple) and a single EDIT button — Delete lives
+  // inside the inline edit panel as DELETE DRAFT, matching the queued
+  // pattern. Stale-session warning is rendered if the draft was
+  // created under a session/night that's no longer the operator's
+  // current session — these drafts will be rejected by RLS on submit.
+  function buildDraftRowHTML(d) {
+    const it    = (cache.items || []).find(x => x.id === d.item_id);
+    const name  = (it && it.name) || d.item_name || d.item_id.slice(0,8);
+    const stale = reviewQueueStaleFlags(d);
+    const staleText = stale.session && stale.night ? 'older session/night'
+                   : stale.session                  ? 'older session'
+                   : stale.night                    ? 'older night'
+                   : '';
+    const staleHint = staleText
+      ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ ' + esc(staleText) +
+        ' — delete and re-enter</div>'
+      : '';
+    return '<div class="row-r" data-d-ce="' + esc(d.client_event_id) + '">' +
+      '<span class="ts">' + fmtTime(d.drafted_at || Date.now()) + '</span>' +
+      '<span class="badge queued" style="background:#7c3aed;">DRAFT</span>' +
+      '<span class="body">' +
+        '<span class="' + (d.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(d.action) + '</span> · ' +
+        esc(name) + ' · ' + esc(String(d.qty)) +
+        (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
+        staleHint +
+        '<div style="margin-top:6px;">' +
+          '<button class="d-edit" data-d-ce="' + esc(d.client_event_id) + '" ' +
+            'style="padding:4px 14px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
+            'background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;">EDIT</button>' +
+        '</div>' +
+        '<div class="d-edit-form" data-d-ce="' + esc(d.client_event_id) + '" ' +
+          'style="display:none;margin-top:8px;padding:10px;background:#0f172a;border-radius:6px;"></div>' +
+      '</span></div>';
+  }
+
   // Group rows by bar_id into sorted [{label, key, rows}] panels.
   function groupRowsByBar(rows, getBarId) {
     const groups = new Map();
@@ -2966,6 +3194,25 @@ function renderReview() {
       const k = _groupSortKey(a.label) - _groupSortKey(b.label);
       return k !== 0 ? k : a.label.localeCompare(b.label);
     });
+  }
+
+  // DRAFTS — bar-grouped panels of local-only pre-submit rows.
+  // Purple left-border distinguishes from queued (orange) + synced
+  // (green). Empty-state copy points the operator at ADD TO REVIEW.
+  if (drafts.length === 0) {
+    $('review-drafts').innerHTML =
+      '<div class="muted small">No drafts. Tap ADD TO REVIEW on the main screen to build a list.</div>';
+  } else {
+    const groups = groupRowsByBar(drafts, d => d.bar_id);
+    $('review-drafts').innerHTML = groups.map(g => {
+      return '<div class="bar-group" style="margin-bottom:12px;border-left:3px solid #a78bfa;padding-left:8px;">' +
+        '<div class="bar-group-header" style="font-weight:800;font-size:12px;letter-spacing:0.08em;color:#a78bfa;margin:0 0 6px 0;">' +
+          'BAR: ' + esc(g.label) +
+          ' <span style="color:#888;font-weight:500;letter-spacing:0;">· Review: ' + g.rows.length + '</span>' +
+        '</div>' +
+        g.rows.map(buildDraftRowHTML).join('') +
+      '</div>';
+    }).join('');
   }
 
   // QUEUED — bar-grouped panels with Edit/Delete inside each row.
@@ -3016,6 +3263,14 @@ function renderReview() {
   Array.from(document.querySelectorAll('button.q-edit')).forEach(btn => {
     btn.addEventListener('click', () => onQueueEdit(btn.getAttribute('data-q-ce')));
   });
+  // DRAFT rows use the same single-EDIT-button pattern. Delete lives
+  // inside the inline edit panel as DELETE DRAFT.
+  Array.from(document.querySelectorAll('button.d-edit')).forEach(btn => {
+    btn.addEventListener('click', () => onDraftEdit(btn.getAttribute('data-d-ce')));
+  });
+  // Keep the SUBMIT ALL button label/disabled state in sync with the
+  // current draft count.
+  try { refreshDraftCount(); } catch (_) {}
 }
 
 // QUEUED-row Delete: confirm, drop from Outbox, mark the mirrored
@@ -3205,6 +3460,214 @@ function onQueueEditSave(ce, form) {
   try { renderReview(); } catch (_) {}
   statusOn('review-status', 'Queued row updated — tap SYNC to retry', 'ok');
 }
+// ════════════════════════════════════════════════════════════════════
+//  Review-First — Draft delete / edit / submit-all
+// ════════════════════════════════════════════════════════════════════
+// Mirrors the queued Edit/Delete pattern but operates on Drafts.load()
+// instead of Outbox.load(). Mutations are limited to action / qty /
+// bar_id / notes — never rewrites session_id / night_id / staff_id /
+// venue_id / source / client_event_id / item_id / drafted_at, so the
+// audit identity is preserved through submit.
+function onDraftDelete(ce) {
+  if (!ce) return;
+  if (!confirm('Delete this draft? It will not be submitted.')) return;
+  try { Drafts.removeById(ce); } catch (_) {}
+  try { refreshDraftCount(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+  statusOn('review-status', 'Draft deleted', 'info');
+}
+
+function onDraftEdit(ce) {
+  if (!ce) return;
+  const d = Drafts.load().find(x => x.client_event_id === ce);
+  if (!d) { statusOn('review-status', 'Draft not found', 'err'); return; }
+  const form = document.querySelector('.d-edit-form[data-d-ce="' +
+    (window.CSS && CSS.escape ? CSS.escape(ce) : ce) + '"]');
+  if (!form) return;
+  const bars = reviewSessionBars();
+  const it   = (cache.items || []).find(x => x.id === d.item_id);
+  form.innerHTML =
+    '<div class="muted small" style="margin-bottom:6px;">Edit draft · item: ' +
+      esc(it ? (it.name + (it.size ? (' · ' + it.size) : '')) : (d.item_name || d.item_id.slice(0,8))) + '</div>' +
+    '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:center;">' +
+      '<label class="small">Action</label>' +
+      '<select class="de-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+        '<option value="TAKEN"'    + (d.action === 'TAKEN'    ? ' selected' : '') + '>TAKEN</option>' +
+        '<option value="RETURNED"' + (d.action === 'RETURNED' ? ' selected' : '') + '>RETURNED</option>' +
+      '</select>' +
+      '<label class="small">Qty</label>' +
+      '<input class="de-qty" type="number" step="0.1" min="0" value="' + esc(String(d.qty)) + '" ' +
+        'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+      '<label class="small">Bar</label>' +
+      ( bars.length === 0
+        ? ('<div class="de-bar-locked" data-locked="1" ' +
+              'style="padding:8px;background:#0b0f1a;border:1px dashed #fbbf24;border-radius:4px;">' +
+            '<div style="color:#fbbf24;font-weight:700;letter-spacing:0.04em;font-size:11px;">⚠ BAR EDITING LOCKED</div>' +
+            '<div class="muted small" style="margin-top:4px;">' +
+              'Session has no allowed-bars scope on this device. Keeping current bar: <b>' + esc(reviewBarLabel(d.bar_id)) + '</b>.' +
+            '</div>' +
+          '</div>')
+        : ('<select class="de-bar" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+            (!d.bar_id
+              ? '<option value="" selected disabled>Pick a bar</option>'
+              : (!bars.some(b => b.id === d.bar_id)
+                  ? '<option value="" selected disabled style="color:#fbbf24;">⚠ current bar not in current session — pick one</option>'
+                  : '')) +
+            bars.map(b => '<option value="' + esc(b.id) + '"' + (b.id === d.bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
+          '</select>')
+      ) +
+      '<label class="small">Notes</label>' +
+      '<input class="de-notes" type="text" value="' + esc(d.notes || '') + '" ' +
+        'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">' +
+      '<button class="de-save" style="padding:6px 14px;background:#22c55e;color:#000;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">SAVE EDIT</button>' +
+      '<button class="de-delete" style="padding:6px 14px;background:#7f1d1d;color:#fff;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">DELETE DRAFT</button>' +
+      '<button class="de-cancel" style="padding:6px 14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">CANCEL</button>' +
+    '</div>';
+  form.style.display = 'block';
+  form.querySelector('.de-cancel').addEventListener('click', () => {
+    form.style.display = 'none'; form.innerHTML = '';
+  });
+  form.querySelector('.de-save').addEventListener('click', () => onDraftEditSave(ce, form));
+  form.querySelector('.de-delete').addEventListener('click', () => onDraftDelete(ce));
+}
+
+function onDraftEditSave(ce, form) {
+  const arr = Drafts.load();
+  const i = arr.findIndex(x => x.client_event_id === ce);
+  if (i < 0) { statusOn('review-status', 'Draft not found', 'err'); return; }
+
+  const action = form.querySelector('.de-action').value;
+  const qtyStr = form.querySelector('.de-qty').value;
+  const notes  = (form.querySelector('.de-notes').value || '').trim();
+  const barLocked = !!form.querySelector('.de-bar-locked');
+  const barSelect = form.querySelector('.de-bar');
+  let bar_id = arr[i].bar_id;
+  if (!barLocked && barSelect) {
+    const v = barSelect.value;
+    if (!v) { statusOn('review-status', 'Pick a bar', 'err'); return; }
+    const allowedIds = reviewSessionBars().map(b => b.id);
+    if (allowedIds.indexOf(v) < 0) {
+      statusOn('review-status', "Selected bar is not in the current session's allowed bars", 'err');
+      return;
+    }
+    bar_id = v;
+  }
+  if (action !== 'TAKEN' && action !== 'RETURNED') {
+    statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
+  }
+  const qty = parseFloat(qtyStr);
+  if (!isFinite(qty) || qty <= 0) {
+    statusOn('review-status', 'Qty must be a positive number', 'err'); return;
+  }
+  if (action === 'TAKEN' && (qty !== Math.floor(qty))) {
+    statusOn('review-status', 'TAKEN qty must be a positive integer (bottles)', 'err'); return;
+  }
+
+  // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
+  // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
+  arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes };
+  Drafts.save(arr);
+
+  form.style.display = 'none';
+  form.innerHTML = '';
+  try { refreshDraftCount(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+  statusOn('review-status', 'Draft updated', 'ok');
+}
+
+// SUBMIT ALL TO BARINV — promotes every draft into the existing
+// Outbox (audited path), removes the draft only AFTER the Outbox copy
+// succeeds, then triggers a foreground sync that uses the same
+// eventsInsert / claim-scoped RLS / revoke-detection logic as the
+// manual SYNC button. Never clears drafts until they're safely in
+// Outbox; never clears Outbox rows that haven't synced.
+async function submitAllDraftsToBarinv() {
+  const drafts = Drafts.load();
+  if (drafts.length === 0) {
+    statusOn('review-status', 'No drafts to submit', 'info');
+    return;
+  }
+  if (!confirm('Submit all ' + drafts.length + ' reviewed transaction' +
+               (drafts.length !== 1 ? 's' : '') + ' to BARINV Events?\n\n' +
+               'After submit, synced records cannot be edited here.')) return;
+
+  // Promote drafts → Outbox one at a time so a mid-loop crash never
+  // leaves a row in both lists or in neither. STRIP the draft-only
+  // helper fields (item_name, drafted_at) so the Outbox row carries
+  // exactly the events-shape that syncOutbox already strips queue
+  // metadata from. Also seed a Recent QUEUED entry so the operator
+  // sees the row immediately in SYNCED / RECENT after sync flips its
+  // status to SYNCED (mirrors the saveCore→Recent.add path).
+  let promoted = 0;
+  for (const d of drafts) {
+    const { item_name, drafted_at, ...rec } = d;
+    try {
+      Outbox.push(rec);            // dedupes by client_event_id
+      Recent.add({
+        ce: rec.client_event_id,
+        at: Date.now(),
+        night_id: rec.night_id,
+        bar_id: rec.bar_id || null,
+        item_id: rec.item_id,
+        item_name: item_name,
+        action: rec.action,
+        qty: rec.qty,
+        notes: rec.notes,
+        status: 'QUEUED',
+        reversal_of: null,
+      });
+      Drafts.removeById(rec.client_event_id);
+      promoted++;
+    } catch (e) {
+      statusOn('review-status',
+        'Promote failed for ' + (item_name || rec.item_id.slice(0,8)) + ' — keeping in drafts',
+        'err');
+      break;
+    }
+  }
+  try { refreshDraftCount(); } catch (_) {}
+  try { refreshQueueCount(); } catch (_) {}
+  try { renderRecentMini(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+
+  if (promoted === 0) return;
+
+  // Foreground sync — same audited path the SYNC button uses.
+  const btn = $('review-submit-all');
+  if (btn) { btn.textContent = '… SUBMITTING'; btn.disabled = true; }
+  try {
+    const r = await syncOutbox({ force: true });
+    statusOn('review-status',
+      'Submitted ' + promoted + ' draft' + (promoted !== 1 ? 's' : '') + ' · ' + r.msg,
+      r.ok ? 'ok' : 'warn');
+  } catch (e) {
+    statusOn('review-status',
+      'Submit attempted, sync threw: ' + ((e && e.message) || String(e)), 'warn');
+  } finally {
+    try { renderReview(); } catch (_) {}
+    try { refreshDraftCount(); } catch (_) {}
+  }
+}
+
+// Keep the SUBMIT ALL button label + disabled state in sync with the
+// current draft count. Called from renderReview, after every draft
+// mutation, and after every addToReview.
+function refreshDraftCount() {
+  const n = Drafts.count();
+  const btn = $('review-submit-all');
+  if (!btn) return;
+  if (n > 0) {
+    btn.textContent = '⬆ SUBMIT ALL (' + n + ') TO BARINV';
+    btn.disabled = false;
+  } else {
+    btn.textContent = '⬆ SUBMIT ALL TO BARINV';
+    btn.disabled = true;
+  }
+}
+$('review-submit-all').addEventListener('click', submitAllDraftsToBarinv);
+
 $('review-back').addEventListener('click', () => {
   if (state.tokenPayload) showScreen('screen-main');
   else showScreen('screen-token');
