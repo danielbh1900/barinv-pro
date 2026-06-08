@@ -403,6 +403,26 @@
       <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
     </div>
 
+    <!-- Manual Scale MVP — optional weight + bottle state. Stored in the
+         draft as helper fields and flattened into NOTES at submit time;
+         no new DB columns are sent. Leave blank / NOT WEIGHED for the
+         normal count-only workflow. -->
+    <div class="row">
+      <label>⚖️ WEIGHT (grams · optional · manual scale)</label>
+      <input id="weight-g-input" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 642" autocomplete="off">
+    </div>
+
+    <div class="row">
+      <label>BOTTLE STATE (optional)</label>
+      <select id="bottle-state-select" style="width:100%;padding:12px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
+        <option value="NOT_WEIGHED" selected>NOT WEIGHED</option>
+        <option value="UNOPENED">UNOPENED</option>
+        <option value="PARTIAL">PARTIAL</option>
+        <option value="EMPTY">EMPTY</option>
+      </select>
+      <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
+    </div>
+
     <div class="row">
       <label>NOTES (optional)</label>
       <input id="notes-input" type="text" autocomplete="off">
@@ -1666,6 +1686,8 @@ function enterMain() {
   $('picked-item').innerHTML = '';
   $('qty-input').value = '1';
   $('notes-input').value = '';
+  if ($('weight-g-input')) $('weight-g-input').value = '';
+  if ($('bottle-state-select')) $('bottle-state-select').value = 'NOT_WEIGHED';
   state.selectedItemId = null;
   state.selectedItemName = null;
   clearStatus('save-status');
@@ -2387,6 +2409,57 @@ async function saveCore(payload) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Manual Scale MVP — weight/state helpers (notes-only; no DB columns)
+// ════════════════════════════════════════════════════════════════════
+// Fastest-safe scale capture: the operator reads grams off ANY physical
+// scale and types them in. Weight + bottle state ride along inside the
+// events `notes` string as compact tags — NO schema change, NO new
+// PostgREST columns. NOT_WEIGHED is the default and emits zero tags, so
+// the count-only workflow stays byte-identical to pre-MVP behaviour.
+const BOTTLE_STATES = ['NOT_WEIGHED', 'UNOPENED', 'PARTIAL', 'EMPTY'];
+
+// Coerce a raw weight value into a positive number, or null. Empty,
+// non-numeric, zero, and negative all collapse to null (= "no weight").
+function normalizeWeightG(raw) {
+  if (raw === '' || raw == null) return null;
+  const n = parseFloat(raw);
+  if (!isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+// Coerce a raw bottle-state value into one of BOTTLE_STATES, defaulting
+// to NOT_WEIGHED for anything unknown/empty.
+function normalizeBottleState(raw) {
+  return BOTTLE_STATES.indexOf(raw) >= 0 ? raw : 'NOT_WEIGHED';
+}
+
+// Build the compact, single-line notes enrichment. Returns '' when
+// there is nothing to record (no weight AND state is NOT_WEIGHED).
+function buildWeightNotes(weight_g, bottle_state) {
+  const w = normalizeWeightG(weight_g);
+  const state = normalizeBottleState(bottle_state);
+  if (w == null && state === 'NOT_WEIGHED') return '';
+  const tags = [];
+  if (w != null) tags.push('[WEIGHT_G=' + w + ']');
+  if (state !== 'NOT_WEIGHED') tags.push('[BOTTLE_STATE=' + state + ']');
+  tags.push('[MEASUREMENT_SOURCE=manual_scale_mvp]');
+  tags.push('[BARBACK_WEIGHT_MVP=v1]');
+  return tags.join(' ');
+}
+
+// Short human label for review rows, e.g. "Weight: 642g · PARTIAL".
+// Returns '' when there's nothing to show.
+function weightStateLabel(weight_g, bottle_state) {
+  const w = normalizeWeightG(weight_g);
+  const state = normalizeBottleState(bottle_state);
+  if (w == null && state === 'NOT_WEIGHED') return '';
+  const parts = [];
+  if (w != null) parts.push('Weight: ' + w + 'g');
+  if (state !== 'NOT_WEIGHED') parts.push(state);
+  return parts.join(' · ');
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Review-First — addToReview (manual SAVE button path)
 // ════════════════════════════════════════════════════════════════════
 // Builds the same events-shape record saveCore would have built, but
@@ -2416,6 +2489,14 @@ function addToReview(payload) {
   }
   if (payload.action !== 'TAKEN' && payload.action !== 'RETURNED') {
     return { ok:false, error:'action must be TAKEN or RETURNED' };
+  }
+  // Manual Scale MVP — PARTIAL bottles MUST carry a positive weight, or
+  // they can't support partial-inventory tracking. Defensive guard here
+  // (not just the button) so NO caller path — button, draft edit, rapid,
+  // HID, staging — can ever park a weightless PARTIAL draft.
+  if (normalizeBottleState(payload.bottle_state) === 'PARTIAL' &&
+      normalizeWeightG(payload.weight_g) == null) {
+    return { ok:false, error:'PARTIAL bottle requires weight in grams' };
   }
   const ce = uuidv4();
   const userNotes = payload.notes || '';
@@ -2470,6 +2551,17 @@ function addToReview(payload) {
     client_event_id: ce,
     drafted_at: Date.now(),                       // draft UI only — stripped at submit
   };
+  // Manual Scale MVP — draft-only helper fields. STRIPPED at submit time
+  // (see submitAllDraftsToBarinv) and flattened into notes; they NEVER
+  // reach Outbox/eventsInsert as DB columns. Default state emits nothing.
+  {
+    const w = normalizeWeightG(payload.weight_g);
+    const st = normalizeBottleState(payload.bottle_state);
+    record.weight_g = w;                          // draft UI only — stripped at submit
+    record.bottle_state = st;                     // draft UI only — stripped at submit
+    record.measurement_source =                   // draft UI only — stripped at submit
+      (w != null || st !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
+  }
   if (phase3) {
     record.source     = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE && !STAGING_MODE)
                           ? 'barback_live_pilot'
@@ -2501,6 +2593,21 @@ $('save-btn').addEventListener('click', async () => {
     showOverlay('BAD QTY', 'TAKEN qty must be a whole number (bottles)', 'err'); Feedback.warn(); return;
   }
 
+  // Manual Scale MVP — weight is OPTIONAL: a blank field keeps the
+  // count-only flow untouched. But if the operator typed something, it
+  // must be a positive number (no zero / negative / garbage).
+  const weightRaw = ($('weight-g-input').value || '').trim();
+  if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) {
+    showOverlay('BAD WEIGHT', 'Weight (grams) must be a positive number, or leave it blank', 'err');
+    Feedback.warn(); return;
+  }
+  // PARTIAL bottles MUST carry a positive weight — that's the whole
+  // point of capturing partials for reusable inventory.
+  if ($('bottle-state-select').value === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) {
+    showOverlay('WEIGH PARTIAL', 'PARTIAL bottle requires weight in grams', 'err');
+    Feedback.warn(); return;
+  }
+
   // Double-tap guard: same (item, action, qty) within 1.5 s is almost
   // always an accidental second tap. Reject silently.
   if (isDuplicateSave(state.selectedAction, state.selectedItemId, qty)) {
@@ -2524,6 +2631,8 @@ $('save-btn').addEventListener('click', async () => {
     action: state.selectedAction,
     bar_id: state.selectedBarId,
     notes: ($('notes-input').value || '').trim(),
+    weight_g: $('weight-g-input').value,
+    bottle_state: $('bottle-state-select').value,
   });
 
   $('save-btn').disabled = false;
@@ -2552,6 +2661,8 @@ $('save-btn').addEventListener('click', async () => {
   $('picked-item').innerHTML = '';
   $('qty-input').value = '1';
   $('notes-input').value = '';
+  $('weight-g-input').value = '';
+  $('bottle-state-select').value = 'NOT_WEIGHED';
   refreshQueueCount();
   try { refreshDraftCount(); } catch (_) {}
   renderRecentMini();
@@ -3168,6 +3279,8 @@ function renderReview() {
       '<span class="body">' +
         '<span class="' + (d.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(d.action) + '</span> · ' +
         esc(name) + ' · ' + esc(String(d.qty)) +
+        (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state);
+          return wl ? '<div class="small" style="color:#7dd3fc;margin-top:2px;">⚖️ ' + esc(wl) + '</div>' : ''; })() +
         (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
         staleHint +
         '<div style="margin-top:6px;">' +
@@ -3465,9 +3578,11 @@ function onQueueEditSave(ce, form) {
 // ════════════════════════════════════════════════════════════════════
 // Mirrors the queued Edit/Delete pattern but operates on Drafts.load()
 // instead of Outbox.load(). Mutations are limited to action / qty /
-// bar_id / notes — never rewrites session_id / night_id / staff_id /
-// venue_id / source / client_event_id / item_id / drafted_at, so the
-// audit identity is preserved through submit.
+// bar_id / notes plus the draft-only Manual Scale MVP helpers
+// (weight_g / bottle_state / measurement_source) — never rewrites
+// session_id / night_id / staff_id / venue_id / source /
+// client_event_id / item_id / drafted_at, so the audit identity is
+// preserved through submit.
 function onDraftDelete(ce) {
   if (!ce) return;
   if (!confirm('Delete this draft? It will not be submitted.')) return;
@@ -3519,6 +3634,16 @@ function onDraftEdit(ce) {
       '<label class="small">Notes</label>' +
       '<input class="de-notes" type="text" value="' + esc(d.notes || '') + '" ' +
         'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+      '<label class="small">Weight (g)</label>' +
+      '<input class="de-weight" type="number" inputmode="decimal" step="1" min="0" ' +
+        'value="' + esc(d.weight_g != null ? String(d.weight_g) : '') + '" ' +
+        'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+      '<label class="small">State</label>' +
+      '<select class="de-state" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+        BOTTLE_STATES.map(function(s){ return '<option value="' + s + '"' +
+          (normalizeBottleState(d.bottle_state) === s ? ' selected' : '') + '>' +
+          (s === 'NOT_WEIGHED' ? 'NOT WEIGHED' : s) + '</option>'; }).join('') +
+      '</select>' +
     '</div>' +
     '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">' +
       '<button class="de-save" style="padding:6px 14px;background:#22c55e;color:#000;font-weight:800;border:none;border-radius:4px;cursor:pointer;letter-spacing:0.04em;">SAVE EDIT</button>' +
@@ -3565,9 +3690,27 @@ function onDraftEditSave(ce, form) {
     statusOn('review-status', 'TAKEN qty must be a positive integer (bottles)', 'err'); return;
   }
 
+  // Manual Scale MVP — optional weight + state on the draft. Empty
+  // weight is allowed (count-only); a typed value must be positive.
+  const wEl = form.querySelector('.de-weight');
+  const sEl = form.querySelector('.de-state');
+  const weightRaw = wEl ? (wEl.value || '').trim() : '';
+  if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) {
+    statusOn('review-status', 'Weight (g) must be a positive number, or leave it blank', 'err'); return;
+  }
+  const weight_g = normalizeWeightG(weightRaw);
+  const bottle_state = normalizeBottleState(sEl ? sEl.value : 'NOT_WEIGHED');
+  if (bottle_state === 'PARTIAL' && weight_g == null) {
+    statusOn('review-status', 'PARTIAL bottle requires weight in grams', 'err'); return;
+  }
+  const measurement_source = (weight_g != null || bottle_state !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
+
   // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
-  arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes };
+  // weight_g / bottle_state / measurement_source are draft-only helpers
+  // (stripped + flattened into notes at submit) so editing them is safe.
+  arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes,
+             weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source };
   Drafts.save(arr);
 
   form.style.display = 'none';
@@ -3602,7 +3745,14 @@ async function submitAllDraftsToBarinv() {
   // status to SYNCED (mirrors the saveCore→Recent.add path).
   let promoted = 0;
   for (const d of drafts) {
-    const { item_name, drafted_at, ...rec } = d;
+    // STRIP every draft-only helper field so the Outbox row is a clean
+    // events-shape record. item_name/drafted_at are UI helpers;
+    // weight_g/bottle_state/measurement_source are the Manual Scale MVP
+    // helpers — they must NEVER reach PostgREST as columns. Instead they
+    // are flattened into the notes string here, just before promotion.
+    const { item_name, drafted_at, weight_g, bottle_state, measurement_source, ...rec } = d;
+    const wtNotes = buildWeightNotes(weight_g, bottle_state);
+    if (wtNotes) rec.notes = [rec.notes, wtNotes].filter(Boolean).join(' ').trim();
     try {
       Outbox.push(rec);            // dedupes by client_event_id
       Recent.add({
