@@ -1560,6 +1560,7 @@ th.sortable span { font-size:10px; }
           <div class="ph-sub">Live sales, tips, cash, card and product drill-down for active bars</div>
         </div>
         <div class="ph-actions">
+          <select id="pm-night" class="fbar" onchange="pmNightChanged()" title="Event night — sets the bar list and snapshot window"></select>
           <select id="pm-connection" class="fbar" onchange="loadPosMonitor()"><option value="">All Connections</option></select>
           <select id="pm-metric" class="fbar" onchange="loadPosMonitor()">
             <option value="sales_net">Sales</option>
@@ -1616,6 +1617,14 @@ th.sortable span { font-size:10px; }
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel-head" style="display:flex;align-items:center;gap:10px;">
+          <div class="panel-title">All Active Bars</div>
+          <div class="pos-note" id="pm-sync-status" style="margin-left:auto;"></div>
+        </div>
+        <div class="panel-body"><div id="pm-bars-table" style="overflow-x:auto;"></div></div>
       </div>
     </div>
 
@@ -3955,6 +3964,94 @@ function pmApplyPreset() {
   pmSetLocal(document.getElementById('pm-to'), new Date());
   loadPosMonitor();
 }
+
+// ── POS NIGHT SELECTOR + EVENT-NIGHT WINDOW (Vancouver) ──
+// Populate the #pm-night dropdown from the venue's nights cache. On first load
+// (no current selection) default to the most recent active night and seed the
+// snapshot window from it. Manual pm-from/pm-to overrides are preserved.
+function ensurePmNightOptions() {
+  const sel = document.getElementById('pm-night');
+  if (!sel) return;
+  const nights = SESSION.cache.nights || [];
+  const cur = sel.value;
+  sel.innerHTML = nights.map(n => `<option value="${n.id}">${escapeHtml(n.name)} (${n.date})</option>`).join('');
+  if (cur && nights.some(n => n.id === cur)) {
+    sel.value = cur;
+  } else {
+    const def = nights.find(n => n.active !== false) || nights[0];
+    if (def) { sel.value = def.id; pmSetWindowFromNight(def); }
+  }
+}
+// Minutes that `tz` is ahead of UTC at the given instant (handles DST).
+function pmTzOffsetMinutes(date, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12:false,
+    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const p = dtf.formatToParts(date).reduce((a,x) => (a[x.type] = x.value, a), {});
+  const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return (asUTC - date.getTime()) / 60000;
+}
+// UTC instant for a Vancouver wall-clock time on `dateStr` (YYYY-MM-DD) at `hour`.
+function pmVanWallToUTC(dateStr, hour) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const guess = Date.UTC(y, (m || 1) - 1, d || 1, hour, 0, 0);
+  const off = pmTzOffsetMinutes(new Date(guess), 'America/Vancouver');
+  return new Date(guess - off * 60000);
+}
+// Event night runs 6:00 PM Vancouver → 6:00 AM next day (12h window).
+function pmSetWindowFromNight(night) {
+  if (!night || !night.date) return;
+  const start = pmVanWallToUTC(night.date, 18);
+  const end = new Date(start.getTime() + 12 * 3600 * 1000);
+  pmSetLocal(document.getElementById('pm-from'), start);
+  pmSetLocal(document.getElementById('pm-to'), end);
+  const rng = document.getElementById('pm-range'); if (rng) rng.value = '';
+}
+function pmNightChanged() {
+  const sel = document.getElementById('pm-night');
+  const night = (SESSION.cache.nights || []).find(n => n.id === sel?.value);
+  if (night) pmSetWindowFromNight(night);
+  loadPosMonitor();
+}
+function pmStatusBadge(status) {
+  if (status === 'mapped_with_sales') return '<span style="color:#16a34a;font-weight:600;">● Sales</span>';
+  if (status === 'mapped_no_sales')   return '<span style="color:#d97706;font-weight:600;">No POS sales yet</span>';
+  return '<span style="color:var(--muted);">No POS mapped</span>';
+}
+function renderPmBarsTable(bars) {
+  const el = document.getElementById('pm-bars-table');
+  if (!el) return;
+  if (!bars.length) { el.innerHTML = '<div class="pos-note">No active bars for the selected night.</div>'; return; }
+  const th = 'text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;white-space:nowrap;';
+  const thL = th.replace('text-align:right', 'text-align:left');
+  const td = 'text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;';
+  const tdL = td.replace('text-align:right', 'text-align:left');
+  const head = `<tr>
+    <th style="${thL}">Bar</th><th style="${thL}">POS Source</th><th style="${thL}">Status</th>
+    <th style="${th}">Sales</th><th style="${th}">Tips</th><th style="${th}">Cash</th><th style="${th}">Card</th><th style="${th}">Tx</th></tr>`;
+  const body = bars.map(b => `<tr>
+    <td style="${tdL}">${escapeHtml(b.name)}</td>
+    <td style="${tdL}">${b.pos_source ? escapeHtml(b.pos_source) : '<span style="color:var(--muted);">—</span>'}</td>
+    <td style="${tdL}">${pmStatusBadge(b.status)}</td>
+    <td style="${td}">${fmtMoney(b.sales_net)}</td>
+    <td style="${td}">${fmtMoney(b.tips_total)}</td>
+    <td style="${td}">${fmtMoney(b.cash_total)}</td>
+    <td style="${td}">${fmtMoney(b.card_total)}</td>
+    <td style="${td}">${fmtNum(b.transactions)}</td></tr>`).join('');
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'Fira Mono',monospace;">${head}${body}</table>`;
+}
+async function pmSyncStatus() {
+  const el = document.getElementById('pm-sync-status');
+  if (!el) return;
+  try {
+    const { data } = await SB.from('pos_sync_runs').select('started_at, ended_at, status').order('started_at', { ascending:false }).limit(1);
+    if (data && data.length) {
+      const r = data[0];
+      el.textContent = `Last sync: ${r.ended_at || r.started_at || '—'} (${r.status || 'n/a'})`;
+    } else {
+      el.textContent = 'Sync status: unknown (no sync runs recorded)';
+    }
+  } catch (_) { el.textContent = 'Sync status: unknown'; }
+}
 function getPosDateRange() {
   const fromEl = document.getElementById('pm-from');
   const toEl = document.getElementById('pm-to');
@@ -3973,8 +4070,10 @@ function getPosDateRange() {
 async function loadPosMonitor() {
   try {
     await loadPosConnections();
+    ensurePmNightOptions();
     const connectionId = document.getElementById('pm-connection')?.value || '';
     const metric = document.getElementById('pm-metric')?.value || 'sales_net';
+    const nightId = document.getElementById('pm-night')?.value || '';
     const { since, until } = getPosDateRange();
 
     let q = SB.from('pos_bar_snapshots').select('bar_id, snapshot_ts, sales_net, tips_total, cash_total, card_total, transactions, bars(name)')
@@ -3986,6 +4085,7 @@ async function loadPosMonitor() {
     if (error) throw error;
     const rows = data || [];
 
+    // ── POS snapshot aggregates (existing path, kept as the sales data source) ──
     const byBar = new Map();
     rows.forEach(r => {
       const key = r.bar_id;
@@ -4000,8 +4100,54 @@ async function loadPosMonitor() {
       if (!o.last_ts || new Date(r.snapshot_ts) > new Date(o.last_ts)) o.last_ts = r.snapshot_ts;
     });
 
-    const bars = [...byBar.values()].sort((a,b) => Number(b[metric]||0) - Number(a[metric]||0));
+    // ── Base list: ALL active bars for the selected night (night_bars + bars cache) ──
+    let activeBars = [];
+    if (nightId) {
+      const { data: nbs, error: nbErr } = await SB.from('night_bars').select('bar_id').eq('night_id', nightId);
+      if (nbErr) throw nbErr;
+      const barById = new Map((SESSION.cache.bars || []).map(b => [b.id, b]));
+      const seen = new Set();
+      (nbs || []).forEach(nb => {
+        const b = barById.get(nb.bar_id);
+        if (b && b.active && !seen.has(b.id)) { seen.add(b.id); activeBars.push({ bar_id:b.id, name:b.name }); }
+      });
+    }
+
+    // ── Active POS source mappings (location → bar), for status/source column ──
+    const mapByBar = new Map();
+    try {
+      const { data: maps } = await SB.from('pos_bar_mappings').select('bar_id, pos_location_id, pos_location_name').eq('is_active', true);
+      (maps || []).forEach(m => { if (m.bar_id) mapByBar.set(m.bar_id, m); });
+    } catch (_) {}
+
+    // ── Merge: every active bar is shown; snapshot sales left-joined if present ──
+    let bars;
+    if (activeBars.length) {
+      bars = activeBars.map(ab => {
+        const s = byBar.get(ab.bar_id);
+        const m = mapByBar.get(ab.bar_id);
+        const hasSales = !!s && (Number(s.transactions || 0) > 0 || Number(s.sales_net || 0) !== 0);
+        const status = !m ? 'unmapped' : (hasSales ? 'mapped_with_sales' : 'mapped_no_sales');
+        return {
+          bar_id: ab.bar_id, name: ab.name,
+          pos_source: m ? (m.pos_location_name || m.pos_location_id || '—') : null,
+          sales_net: Number(s?.sales_net || 0), tips_total: Number(s?.tips_total || 0),
+          cash_total: Number(s?.cash_total || 0), card_total: Number(s?.card_total || 0),
+          transactions: Number(s?.transactions || 0), status
+        };
+      });
+    } else {
+      // Fallback: no night selected → original snapshot-only behavior
+      bars = [...byBar.values()].map(o => {
+        const m = mapByBar.get(o.bar_id);
+        const status = !m ? 'unmapped' : (Number(o.transactions || 0) > 0 ? 'mapped_with_sales' : 'mapped_no_sales');
+        return { ...o, pos_source: m ? (m.pos_location_name || m.pos_location_id || '—') : null, status };
+      });
+    }
+    bars.sort((a,b) => Number(b[metric] || 0) - Number(a[metric] || 0));
     window.POS_MONITOR_BARS = bars;
+    renderPmBarsTable(bars);
+    pmSyncStatus();
     const totalSales = bars.reduce((s,b)=>s+b.sales_net,0);
     const totalTips = bars.reduce((s,b)=>s+b.tips_total,0);
     const totalTx = bars.reduce((s,b)=>s+b.transactions,0);
