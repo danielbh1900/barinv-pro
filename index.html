@@ -1592,6 +1592,14 @@ th.sortable span { font-size:10px; }
 
       <div class="pos-subgrid" style="margin-bottom:16px;" id="pm-kpis"></div>
 
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-head" style="display:flex;align-items:center;gap:10px;">
+          <div class="panel-title">All Active Bars</div>
+          <div class="pos-note" id="pm-sync-status" style="margin-left:auto;"></div>
+        </div>
+        <div class="panel-body"><div id="pm-bars-table" style="overflow-x:auto;"></div></div>
+      </div>
+
       <div class="pos-grid">
         <div class="panel">
           <div class="panel-head"><div class="panel-title">Active Bars Comparison</div></div>
@@ -1617,14 +1625,6 @@ th.sortable span { font-size:10px; }
             </div>
           </div>
         </div>
-      </div>
-
-      <div class="panel" style="margin-top:16px;">
-        <div class="panel-head" style="display:flex;align-items:center;gap:10px;">
-          <div class="panel-title">All Active Bars</div>
-          <div class="pos-note" id="pm-sync-status" style="margin-left:auto;"></div>
-        </div>
-        <div class="panel-body"><div id="pm-bars-table" style="overflow-x:auto;"></div></div>
       </div>
     </div>
 
@@ -4021,6 +4021,9 @@ function renderPmBarsTable(bars) {
   const el = document.getElementById('pm-bars-table');
   if (!el) return;
   if (!bars.length) { el.innerHTML = '<div class="pos-note">No active bars for the selected night.</div>'; return; }
+  const mapped = bars.filter(b => b.status !== 'unmapped').length;
+  const unmapped = bars.length - mapped;
+  const summary = `<div class="pos-note" style="margin-bottom:10px;font-weight:600;">Showing ${bars.length} active bar${bars.length === 1 ? '' : 's'} · ${mapped} mapped · ${unmapped} unmapped</div>`;
   const th = 'text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;white-space:nowrap;';
   const thL = th.replace('text-align:right', 'text-align:left');
   const td = 'text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;';
@@ -4037,7 +4040,7 @@ function renderPmBarsTable(bars) {
     <td style="${td}">${fmtMoney(b.cash_total)}</td>
     <td style="${td}">${fmtMoney(b.card_total)}</td>
     <td style="${td}">${fmtNum(b.transactions)}</td></tr>`).join('');
-  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'Fira Mono',monospace;">${head}${body}</table>`;
+  el.innerHTML = `${summary}<table style="width:100%;border-collapse:collapse;font-size:12px;font-family:'Fira Mono',monospace;">${head}${body}</table>`;
 }
 async function pmSyncStatus() {
   const el = document.getElementById('pm-sync-status');
@@ -4100,16 +4103,25 @@ async function loadPosMonitor() {
       if (!o.last_ts || new Date(r.snapshot_ts) > new Date(o.last_ts)) o.last_ts = r.snapshot_ts;
     });
 
-    // ── Base list: ALL active bars for the selected night (night_bars + bars cache) ──
+    // ── Base list: real service bars assigned to the selected night ──
+    // night_bars is the night-level membership table but for some nights it holds the
+    // full venue template (all 57 entities incl. 30 VIP tables + internal areas). The POS
+    // Live Monitor tracks bar sales only, and POS data (mappings/snapshots/devices) attaches
+    // exclusively to bar_type='bar'. So we restrict to active bar_type='bar' rows — this never
+    // hides a POS-selling entity and drops template noise (e.g. Maala 57 → 18 real bars).
     let activeBars = [];
     if (nightId) {
-      const { data: nbs, error: nbErr } = await SB.from('night_bars').select('bar_id').eq('night_id', nightId);
+      const { data: nbs, error: nbErr } = await SB.from('night_bars')
+        .select('bar_id, bars(name, active, bar_type)')
+        .eq('night_id', nightId);
       if (nbErr) throw nbErr;
-      const barById = new Map((SESSION.cache.bars || []).map(b => [b.id, b]));
       const seen = new Set();
       (nbs || []).forEach(nb => {
-        const b = barById.get(nb.bar_id);
-        if (b && b.active && !seen.has(b.id)) { seen.add(b.id); activeBars.push({ bar_id:b.id, name:b.name }); }
+        const b = nb.bars;
+        if (b && b.active && b.bar_type === 'bar' && !seen.has(nb.bar_id)) {
+          seen.add(nb.bar_id);
+          activeBars.push({ bar_id: nb.bar_id, name: b.name });
+        }
       });
     }
 
