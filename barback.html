@@ -2703,7 +2703,8 @@ function buildWeightNotes(weight_g, bottle_state) {
 
 // Short human label for review rows, e.g. "Weight: 642g · PARTIAL".
 // Returns '' when there's nothing to show.
-function weightStateLabel(weight_g, bottle_state, remaining_percent) {
+function weightStateLabel(weight_g, bottle_state, remaining_percent, opts) {
+  opts = opts || {};
   const w = normalizeWeightG(weight_g);
   const stt = normalizeBottleState(bottle_state, weight_g);
   const hasRemaining = (remaining_percent != null && isFinite(remaining_percent));
@@ -2712,6 +2713,10 @@ function weightStateLabel(weight_g, bottle_state, remaining_percent) {
   if (w != null) parts.push('Weight: ' + w + 'g');
   if (stt !== 'NOT_WEIGHED') parts.push(stt);
   if (hasRemaining) parts.push('Remaining: ' + Math.round(remaining_percent) + '%');
+  // Scale V3 — derived liquid weight + remaining ml + review status (all optional).
+  if (opts.liquid_weight_g != null && isFinite(opts.liquid_weight_g)) parts.push('Liquid: ' + (Math.round(opts.liquid_weight_g * 10) / 10) + 'g');
+  if (opts.remaining_ml != null && isFinite(opts.remaining_ml)) parts.push('~' + Math.round(opts.remaining_ml) + ' ml');
+  if (opts.reviewRequired) parts.push('⚠ review');
   return parts.join(' · ');
 }
 
@@ -2787,7 +2792,7 @@ const WeightProfiles = {
 
 // Notes enrichment for the weight profile / remaining %. Returns '' when
 // there's nothing to record. Appended AFTER buildWeightNotes at submit.
-function buildProfileNotes(tare_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g) {
+function buildProfileNotes(tare_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g, liquid_weight_g, remaining_ml) {
   const tare = normalizeWeightG(tare_weight_g);
   const fp = normalizeWeightG(full_weight_g);
   const w = normalizeWeightG(weight_g);
@@ -2800,7 +2805,51 @@ function buildProfileNotes(tare_weight_g, full_weight_g, remaining_percent, weig
   } else if (w != null) {
     tags.push('[WEIGHT_PROFILE_NEEDED=true]'); // weight captured but no usable profile
   }
+  // Scale V3 — derived values, emitted ONLY when derivable (liquid can be 0g for a
+  // bottle returned at tare). Independent of the profile-needed branch above.
+  if (liquid_weight_g != null && isFinite(liquid_weight_g) && liquid_weight_g >= 0) {
+    tags.push('[LIQUID_WEIGHT_G=' + (Math.round(liquid_weight_g * 10) / 10) + ']');
+  }
+  if (remaining_ml != null && isFinite(remaining_ml) && remaining_ml >= 0) {
+    tags.push('[REMAINING_ML=' + Math.round(remaining_ml) + ']');
+  }
   return tags.join(' ');
+}
+
+// ── Scale V3 — derived-value helpers (notes-only; no DB) ────────────
+// Coerce to a finite number >= 0 (liquid weight / remaining ml can legitimately
+// be 0), else null. Distinct from normalizeWeightG which treats 0 as "no value".
+function nonNegNum(v) { const n = parseFloat(v); return (isFinite(n) && n >= 0) ? n : null; }
+// Bottle volume in ml from the catalog item. Prefers a numeric bottle_size_ml if
+// the catalog ever provides one; otherwise parses the human size string
+// ("750ml", "1.14 L", or a bare "1140"). Returns null when not derivable.
+function parseBottleSizeMl(item) {
+  if (!item) return null;
+  const direct = nonNegNum(item.bottle_size_ml);
+  if (direct != null && direct > 0) return direct;
+  const s = String((item.size != null ? item.size : item.unit_size) || '').toLowerCase().trim();
+  if (!s) return null;
+  const mlM = s.match(/([\d.]+)\s*ml\b/);
+  if (mlM) { const ml = parseFloat(mlM[1]); return (isFinite(ml) && ml > 0) ? ml : null; }
+  const lM = s.match(/([\d.]+)\s*l\b/);
+  if (lM) { const l = parseFloat(lM[1]); return (isFinite(l) && l > 0) ? l * 1000 : null; }
+  const bare = s.match(/^([\d.]+)$/);
+  if (bare) { const n = parseFloat(bare[1]); return (isFinite(n) && n > 0) ? n : null; }
+  return null;
+}
+// liquid weight = gross − tare (>= 0); null if either missing or negative reading.
+function deriveLiquidG(weight_g, tare_weight_g) {
+  const w = normalizeWeightG(weight_g), t = normalizeWeightG(tare_weight_g);
+  if (w == null || t == null) return null;
+  const liq = Math.round((w - t) * 10) / 10;
+  return liq >= 0 ? liq : null;
+}
+// remaining ml = remaining% × bottle_size_ml; null if either missing.
+function deriveRemainingMl(remaining_percent, bottle_size_ml) {
+  if (remaining_percent == null || !isFinite(remaining_percent)) return null;
+  const ml = nonNegNum(bottle_size_ml);
+  if (ml == null || ml <= 0) return null;
+  return Math.round((remaining_percent / 100) * ml);
 }
 
 // ── Scale V2 UI — profile section + live Estimated Remaining % ──────
@@ -2817,12 +2866,23 @@ function updateRemainingDisplay() {
   const w = normalizeWeightG(($('weight-g-input') && $('weight-g-input').value) || '');
   const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
   if (!prof) {
-    el.textContent = (w != null) ? 'Enter tare/full profile to calculate remaining %' : '';
-    el.style.color = '#9ca3af';
+    // Scale V3 — weight captured but no profile → REVIEW REQUIRED (matches the
+    // [WEIGHT_PROFILE_NEEDED=true] note tag emitted at submit).
+    el.textContent = (w != null) ? '⚠ Review required — no weight profile (enter tare/full to calculate remaining %)' : '';
+    el.style.color = (w != null) ? '#fbbf24' : '#9ca3af';
     return;
   }
   if (w == null) { el.textContent = 'Using saved profile · enter weight for remaining %'; el.style.color = '#9ca3af'; return; }
-  el.textContent = 'Estimated Remaining: ' + WeightProfiles.calcRemaining(w, prof) + '%';
+  // Scale V3 — show remaining %, derived liquid weight, remaining ml (when the
+  // item size is known), and a confidence label. All UI-only / computed live.
+  const pct = WeightProfiles.calcRemaining(w, prof);
+  const liquid = deriveLiquidG(w, prof.tare_weight_g);
+  const rml = deriveRemainingMl(pct, parseBottleSizeMl(_selectedItemObj()));
+  const bits = ['Estimated Remaining: ' + pct + '%'];
+  if (liquid != null) bits.push('Liquid ' + (Math.round(liquid * 10) / 10) + 'g');
+  if (rml != null) bits.push('~' + Math.round(rml) + ' ml');
+  bits.push('Confidence: profile ✓');
+  el.textContent = bits.join(' · ');
   el.style.color = '#7dd3fc';
 }
 // Show/hide + prefill the profile section for the selected item.
@@ -2994,6 +3054,12 @@ function addToReview(payload) {
     record.weight_profile_source = (record.weight_g != null)
       ? (validProfile ? 'local_manual_profile' : 'profile_needed')
       : null;                                                // draft UI only — stripped at submit
+    // Scale V3 — derived liquid weight + remaining ml (draft UI only — stripped at
+    // submit, flattened into notes). bottle_size_ml is kept so an edit can recompute.
+    const ml = nonNegNum(payload.bottle_size_ml);
+    record.bottle_size_ml = (ml != null && ml > 0) ? ml : null;
+    record.liquid_weight_g = deriveLiquidG(record.weight_g, record.tare_weight_g);
+    record.remaining_ml = deriveRemainingMl(record.remaining_percent, record.bottle_size_ml);
   }
   if (phase3) {
     record.source     = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE && !STAGING_MODE)
@@ -3069,6 +3135,7 @@ $('save-btn').addEventListener('click', async () => {
     bottle_state: $('bottle-state-select').value,
     tare_weight_g: _svProf ? _svProf.tare_weight_g : null,     // Scale V2.1 (draft-only)
     full_weight_g: _svProf ? _svProf.full_weight_g : null,     // Scale V2.1 (draft-only)
+    bottle_size_ml: parseBottleSizeMl(_selectedItemObj()),     // Scale V3 (draft-only)
   });
 
   $('save-btn').disabled = false;
@@ -3716,7 +3783,9 @@ function renderReview() {
       '<span class="body">' +
         '<span class="' + (d.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(d.action) + '</span> · ' +
         esc(name) + ' · ' + esc(String(d.qty)) +
-        (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state, d.remaining_percent);
+        (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state, d.remaining_percent,
+            { liquid_weight_g: d.liquid_weight_g, remaining_ml: d.remaining_ml,
+              reviewRequired: (d.weight_profile_source === 'profile_needed') });
           return wl ? '<div class="small" style="color:#7dd3fc;margin-top:2px;">⚖️ ' + esc(wl) + '</div>' : ''; })() +
         (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
         staleHint +
@@ -4151,16 +4220,23 @@ function onDraftEditSave(ce, form) {
     ? WeightProfiles.calcRemaining(weight_g, { tare_weight_g: _tare, full_weight_g: _fp }) : null;
   const weight_profile_source = (weight_g != null)
     ? (_validProfile ? 'local_manual_profile' : 'profile_needed') : null;
+  // Scale V3 — recompute derived values from the (preserved) bottle_size_ml and
+  // the edited weight. bottle_size_ml itself is not edited here.
+  const _ml = nonNegNum(arr[i].bottle_size_ml);
+  const liquid_weight_g = deriveLiquidG(weight_g, _validProfile ? _tare : null);
+  const remaining_ml = deriveRemainingMl(remaining_percent, _ml);
 
   // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
-  // weight_g / bottle_state / measurement_source + the Scale V2.1 profile fields
+  // weight_g / bottle_state / measurement_source + the Scale V2.1/V3 profile fields
   // are draft-only helpers (stripped + flattened into notes at submit).
   arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes,
              weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source,
              tare_weight_g: _validProfile ? _tare : null, empty_weight_g: undefined,
              full_weight_g: _validProfile ? _fp : null,
-             remaining_percent: remaining_percent, weight_profile_source: weight_profile_source };
+             remaining_percent: remaining_percent, weight_profile_source: weight_profile_source,
+             bottle_size_ml: (_ml != null && _ml > 0) ? _ml : null,
+             liquid_weight_g: liquid_weight_g, remaining_ml: remaining_ml };
   Drafts.save(arr);
 
   form.style.display = 'none';
@@ -4201,14 +4277,16 @@ async function submitAllDraftsToBarinv() {
     // helpers — they must NEVER reach PostgREST as columns. Instead they
     // are flattened into the notes string here, just before promotion.
     const { item_name, drafted_at, weight_g, bottle_state, measurement_source,
-            tare_weight_g, empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, ...rec } = d;
+            tare_weight_g, empty_weight_g, full_weight_g, remaining_percent, weight_profile_source,
+            bottle_size_ml, liquid_weight_g, remaining_ml, ...rec } = d;
     const wtNotes = buildWeightNotes(weight_g, bottle_state);
     if (wtNotes) rec.notes = [rec.notes, wtNotes].filter(Boolean).join(' ').trim();
-    // Scale V2.1 — flatten TARE/remaining into notes (legacy empty_weight_g read
-    // as a fallback). The destructure above STRIPPED tare_weight_g AND the legacy
-    // empty_weight_g, so neither reaches Outbox/eventsInsert as a column.
+    // Scale V2.1/V3 — flatten TARE/remaining + derived LIQUID_WEIGHT_G/REMAINING_ML
+    // into notes (legacy empty_weight_g read as a tare fallback). The destructure
+    // above STRIPPED tare/empty/bottle_size_ml/liquid/remaining_ml, so none reach
+    // Outbox/eventsInsert as columns.
     const _tareForNotes = (tare_weight_g != null) ? tare_weight_g : empty_weight_g;
-    const profNotes = buildProfileNotes(_tareForNotes, full_weight_g, remaining_percent, weight_profile_source, weight_g);
+    const profNotes = buildProfileNotes(_tareForNotes, full_weight_g, remaining_percent, weight_profile_source, weight_g, liquid_weight_g, remaining_ml);
     if (profNotes) rec.notes = [rec.notes, profNotes].filter(Boolean).join(' ').trim();
     try {
       Outbox.push(rec);            // dedupes by client_event_id
