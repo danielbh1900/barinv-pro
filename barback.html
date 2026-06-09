@@ -197,6 +197,38 @@
     .scanner-toast.warn { border-color:#f59e0b; color:#fbbf24; }
     .scanner-toast.err { border-color:#ef4444; color:#fca5a5; }
 
+    /* ── Scanner center-ROI scan window (PLAN-2026-06-09) ────────────
+       Visual guidance that also mirrors the cropped decode region used by
+       the ROI decode loop (ROI_FRAME_W / ROI_FRAME_H in JS). The stage
+       wraps the video so the dimming shadow is clipped to the camera area
+       and never darkens the CLOSE bar. pointer-events:none keeps CLOSE and
+       the video tappable. */
+    .scanner-box .scanner-stage {
+      position:relative; flex:1; min-height:0; overflow:hidden;
+      display:flex; flex-direction:column; background:#000;
+    }
+    .scanner-roi {
+      position:absolute; inset:0; z-index:1; pointer-events:none;
+      display:none; align-items:center; justify-content:center;
+    }
+    .scanner-box.active .scanner-roi { display:flex; }
+    .scanner-roi .frame {
+      position:relative; width:78%; height:30%; max-width:560px;
+      border-radius:14px;
+      box-shadow:0 0 0 100vmax rgba(0,0,0,0.58);
+      outline:2px solid rgba(255,255,255,0.55);
+    }
+    .scanner-roi .corner { position:absolute; width:26px; height:26px; border:3px solid #22c55e; }
+    .scanner-roi .corner.tl { top:-2px; left:-2px; border-right:none; border-bottom:none; border-top-left-radius:14px; }
+    .scanner-roi .corner.tr { top:-2px; right:-2px; border-left:none; border-bottom:none; border-top-right-radius:14px; }
+    .scanner-roi .corner.bl { bottom:-2px; left:-2px; border-right:none; border-top:none; border-bottom-left-radius:14px; }
+    .scanner-roi .corner.br { bottom:-2px; right:-2px; border-left:none; border-top:none; border-bottom-right-radius:14px; }
+    .scanner-roi .roi-label {
+      position:absolute; left:50%; transform:translateX(-50%); bottom:-42px;
+      white-space:nowrap; color:#fff; font-size:13px; font-weight:700;
+      text-shadow:0 1px 4px rgba(0,0,0,0.95);
+    }
+
     /* ── Toasts / status pills ───────────────────────────────────── */
     .status { padding:14px; margin:10px 0; border-radius:6px; font-weight:600; font-size:13px; line-height:1.45; }
     .status.ok   { background:rgba(34,197,94,0.10);  color:#4ade80; border:1px solid #22c55e; }
@@ -593,7 +625,16 @@
     <div class="left">📷 SCAN BARCODE<span class="rapid-tag" id="scanner-rapid-tag" style="display:none;">RAPID</span></div>
     <button id="scanner-close">CLOSE</button>
   </div>
-  <video id="scanner-video" autoplay playsinline muted></video>
+  <div class="scanner-stage">
+    <video id="scanner-video" autoplay playsinline muted></video>
+    <div class="scanner-roi" id="scanner-roi" aria-hidden="true">
+      <div class="frame">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+        <span class="roi-label">Point barcode inside the frame</span>
+      </div>
+    </div>
+  </div>
   <div class="scanner-toast" id="scanner-toast">—</div>
   <div class="hint" id="scanner-hint">Hold the bottle barcode 10–20 cm from the lens. Fill the frame. Keep still for 1 second. Camera permission is required.</div>
 </div>
@@ -726,6 +767,18 @@ const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
 const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
 const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
+// PLAN-2026-06-09 — Scanner center-ROI. Cropped decode region (and the visual
+// frame in CSS .scanner-roi .frame) as a fraction of the displayed video.
+// Wide + short to suit horizontal UPC/EAN bottle barcodes. Keep these two in
+// sync with the 78% / 30% in the .scanner-roi .frame CSS rule.
+const ROI_FRAME_W = 0.78;
+const ROI_FRAME_H = 0.30;
+const ROI_DECODE_INTERVAL_MS = 160;  // cropped-decode tick (responsive, no spam)
+// Fail-OPEN acceptance band for the FULL-FRAME ZXing path: reject a detection
+// only when its result-point centroid is clearly outside this generous central
+// band (normalized intrinsic-frame coords). Missing/invalid geometry → accept,
+// so this is never stricter than the pre-2026-06-09 behaviour.
+const ROI_ACCEPT = { xMin:0.12, xMax:0.88, yMin:0.20, yMax:0.80 };
 const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
 
 // ════════════════════════════════════════════════════════════════════
@@ -1306,6 +1359,8 @@ const state = {
   scannerContinuous: false,
   scannerCooldown: {},  // code → lastScannedAt
   zxingControls: null,
+  roiTimer: null,       // setTimeout handle for the center-ROI decode loop
+  roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
   expirationInterval: null,
   jwtCheckInterval: null,
   syncTimer: null,
@@ -1867,6 +1922,116 @@ async function ensureZXing() {
   return window.ZXingBrowser;
 }
 
+// PLAN-2026-06-09 — Shared accept path for BOTH decode routes (full-frame
+// ZXing continuous + cropped center-ROI loop). One dupe window so a code seen
+// by either route within DUPE_SCAN_WINDOW_MS is never double-added.
+function acceptDecodedCode(code, controls) {
+  if (!code) return;
+  const now = Date.now();
+  const last = state.scannerCooldown[code] || 0;
+  if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
+  state.scannerCooldown[code] = now;
+  Feedback.scan();
+  onBarcodeScanned(code, controls);
+}
+
+// Returns true when a full-frame detection sits inside the central scan band,
+// OR when its position cannot be determined (fail-open — never stricter than
+// the pre-ROI behaviour). The cropped ROI loop below does not need this: by
+// construction it only ever decodes pixels from inside the frame.
+function resultInCenterROI(result) {
+  try {
+    const pts = (result && typeof result.getResultPoints === 'function')
+      ? result.getResultPoints() : null;
+    if (!pts || !pts.length) return true;
+    const vid = $('scanner-video');
+    const vw = vid && vid.videoWidth, vh = vid && vid.videoHeight;
+    if (!vw || !vh) return true;
+    let sx = 0, sy = 0, n = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      if (!p || typeof p.getX !== 'function' || typeof p.getY !== 'function') continue;
+      sx += p.getX(); sy += p.getY(); n++;
+    }
+    if (!n) return true;
+    const cx = (sx / n) / vw, cy = (sy / n) / vh;
+    return cx >= ROI_ACCEPT.xMin && cx <= ROI_ACCEPT.xMax &&
+           cy >= ROI_ACCEPT.yMin && cy <= ROI_ACCEPT.yMax;
+  } catch (_) {
+    return true;
+  }
+}
+
+// PLAN-2026-06-09 — True center-ROI decode loop. ZXing's continuous
+// decodeFromConstraints reads the WHOLE frame, so a small/curved bottle
+// barcode gets few pixels per bar and often won't lock. This loop crops the
+// centre frame (the on-screen scan window) to a canvas at native resolution
+// and decodes ONLY that region — a zoomed view for ZXing. It runs in PARALLEL
+// with the full-frame reader: whichever decodes first wins (shared dupe window
+// prevents a double add). Best-effort & fail-safe — any error skips the tick,
+// and if the build lacks decodeFromCanvas the original scanner is untouched.
+function startRoiDecodeLoop(zxing, hints) {
+  stopRoiDecodeLoop();
+  let reader;
+  try {
+    reader = hints ? new zxing.BrowserMultiFormatReader(hints)
+                   : new zxing.BrowserMultiFormatReader();
+  } catch (_) { return; }
+  if (typeof reader.decodeFromCanvas !== 'function') return; // enhancement unavailable
+  state.roiReader = reader;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const tick = () => {
+    if (!state.roiReader) return; // scanner closed
+    try {
+      const vid = $('scanner-video');
+      const vw = vid && vid.videoWidth, vh = vid && vid.videoHeight;
+      const cw = vid && vid.clientWidth, ch = vid && vid.clientHeight;
+      if (vw && vh && cw && ch) {
+        // Map the centred CSS frame (object-fit:cover) into intrinsic pixels.
+        const scale = Math.max(cw / vw, ch / vh);
+        const offX = (vw * scale - cw) / 2;
+        const offY = (vh * scale - ch) / 2;
+        const fwDisp = cw * ROI_FRAME_W, fhDisp = ch * ROI_FRAME_H;
+        const dx0 = (cw - fwDisp) / 2, dy0 = (ch - fhDisp) / 2;
+        let ix = (dx0 + offX) / scale;
+        let iy = (dy0 + offY) / scale;
+        let iw = fwDisp / scale;
+        let ih = fhDisp / scale;
+        ix = Math.max(0, Math.min(ix, vw - 1));
+        iy = Math.max(0, Math.min(iy, vh - 1));
+        iw = Math.max(1, Math.min(iw, vw - ix));
+        ih = Math.max(1, Math.min(ih, vh - iy));
+        canvas.width = Math.round(iw);
+        canvas.height = Math.round(ih);
+        ctx.drawImage(vid, ix, iy, iw, ih, 0, 0, canvas.width, canvas.height);
+        let result = null;
+        try { result = state.roiReader.decodeFromCanvas(canvas); }
+        catch (_) { result = null; } // NotFoundException = no barcode this tick
+        if (result && typeof result.getText === 'function') {
+          const code = result.getText();
+          try {
+            const s = String(code || '');
+            console.log('[scanner] roi-decoded', { len: s.length, last4: s.slice(-4) });
+          } catch (_) { /* console may be unavailable */ }
+          acceptDecodedCode(code, state.zxingControls);
+        }
+      }
+    } catch (_) { /* skip this tick */ }
+    if (state.roiReader) state.roiTimer = setTimeout(tick, ROI_DECODE_INTERVAL_MS);
+  };
+  state.roiTimer = setTimeout(tick, ROI_DECODE_INTERVAL_MS);
+}
+
+function stopRoiDecodeLoop() {
+  if (state.roiTimer) { try { clearTimeout(state.roiTimer); } catch (_) {} state.roiTimer = null; }
+  if (state.roiReader) {
+    try { if (typeof state.roiReader.reset === 'function') state.roiReader.reset(); } catch (_) {}
+    state.roiReader = null;
+  }
+}
+
 async function openScanner() {
   // PLAN-2026-06-04 — safe diagnostic so iPhone Web Inspector can
   // tell whether the scanner actually opened. Logs ZERO secrets — only
@@ -1947,12 +2112,15 @@ async function openScanner() {
       const s = String(code || '');
       console.log('[scanner] decoded', { len: s.length, last4: s.slice(-4) });
     } catch (_) { /* console may be unavailable */ }
-    const now = Date.now();
-    const last = state.scannerCooldown[code] || 0;
-    if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
-    state.scannerCooldown[code] = now;
-    Feedback.scan();
-    onBarcodeScanned(code, controls);
+    // PLAN-2026-06-09 — Center-ROI gate (full-frame path). Fail-OPEN: ignore a
+    // detection whose result-point centroid is clearly outside the central
+    // band so an off-centre / second bottle isn't grabbed; if geometry is
+    // unavailable we accept exactly as before (no regression).
+    if (!resultInCenterROI(result)) {
+      try { console.log('[scanner] off-center detection ignored'); } catch (_) {}
+      return;
+    }
+    acceptDecodedCode(code, controls);
   };
 
   const constraints = {
@@ -1989,6 +2157,10 @@ async function openScanner() {
     }
   }
   state.zxingControls = controls;
+  // PLAN-2026-06-09 — start the parallel cropped center-ROI decode loop for
+  // better reads on small / curved bottle barcodes. Enhancement only: if it
+  // cannot init, the full-frame reader above keeps working unchanged.
+  try { startRoiDecodeLoop(zxing, hints); } catch (_) {}
 }
 
 async function onBarcodeScanned(code, controls) {
@@ -2074,6 +2246,7 @@ function showScannerToast(msg, level) {
 
 function closeScanner() {
   $('scanner-box').classList.remove('active');
+  stopRoiDecodeLoop();
   try { if (state.zxingControls && state.zxingControls.stop) state.zxingControls.stop(); } catch (_) {}
   state.zxingControls = null;
   state.scannerContinuous = false;
