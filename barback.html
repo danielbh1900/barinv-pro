@@ -442,6 +442,7 @@
     <div class="row">
       <label>⚖️ WEIGHT (grams · optional · manual scale)</label>
       <input id="weight-g-input" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 642" autocomplete="off">
+      <div id="remaining-display" class="small" style="margin-top:4px;min-height:14px;color:#7dd3fc;"></div>
     </div>
 
     <div class="row">
@@ -453,6 +454,24 @@
         <option value="EMPTY">EMPTY</option>
       </select>
       <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
+    </div>
+
+    <!-- Scale V2 — local per-item weight profile (localStorage only, no DB).
+         Visible only when an item is selected; drives Estimated Remaining %. -->
+    <div class="row" id="weight-profile-section" style="display:none;">
+      <details id="weight-profile-details">
+        <summary style="cursor:pointer;font-size:13px;color:#9ca3af;letter-spacing:0.03em;">⚖️ Bottle Weight Profile</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+          <input id="profile-empty-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Empty (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
+          <input id="profile-full-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Full (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
+          <button type="button" id="use-empty-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as EMPTY</button>
+          <button type="button" id="use-full-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as FULL</button>
+          <button type="button" id="save-profile-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;font-weight:800;background:#22c55e;color:#000;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.03em;">💾 Save Profile</button>
+        </div>
+        <div id="profile-status" class="small" style="margin-top:4px;min-height:14px;color:#9ca3af;"></div>
+      </details>
     </div>
 
     <div class="row">
@@ -1753,6 +1772,7 @@ function enterMain() {
   if ($('bottle-state-select')) $('bottle-state-select').value = 'NOT_WEIGHED';
   state.selectedItemId = null;
   state.selectedItemName = null;
+  try { if (typeof refreshWeightProfileUI === 'function') refreshWeightProfileUI(); } catch (_) {}
   clearStatus('save-status');
 
   // Action default — preserved across saves; first entry to screen leaves it blank
@@ -1855,6 +1875,7 @@ function setPickedItem(it) {
     (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
   $('search-results').style.display = 'none';
   $('search-input').value = '';
+  try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
 }
 function searchItems(q) {
   q = String(q || '').trim().toLowerCase();
@@ -2679,15 +2700,176 @@ function buildWeightNotes(weight_g, bottle_state) {
 
 // Short human label for review rows, e.g. "Weight: 642g · PARTIAL".
 // Returns '' when there's nothing to show.
-function weightStateLabel(weight_g, bottle_state) {
+function weightStateLabel(weight_g, bottle_state, remaining_percent) {
   const w = normalizeWeightG(weight_g);
-  const state = normalizeBottleState(bottle_state);
-  if (w == null && state === 'NOT_WEIGHED') return '';
+  const stt = normalizeBottleState(bottle_state);
+  const hasRemaining = (remaining_percent != null && isFinite(remaining_percent));
+  if (w == null && stt === 'NOT_WEIGHED' && !hasRemaining) return '';
   const parts = [];
   if (w != null) parts.push('Weight: ' + w + 'g');
-  if (state !== 'NOT_WEIGHED') parts.push(state);
+  if (stt !== 'NOT_WEIGHED') parts.push(stt);
+  if (hasRemaining) parts.push('Remaining: ' + Math.round(remaining_percent) + '%');
   return parts.join(' · ');
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  Scale V2 — local Weight Profile + Estimated Remaining %  (2026-06-09)
+// ────────────────────────────────────────────────────────────────────
+// Per-item empty/full bottle weights live ONLY in browser localStorage
+// (key barinv_barback_weight_profiles_v1) — no DB column, no schema, no
+// SQL. remaining_percent is computed locally and, exactly like the Manual
+// Scale MVP fields, flattened into event NOTES at submit and STRIPPED
+// before Outbox/eventsInsert. With no profile saved, nothing changes.
+const WEIGHT_PROFILES_LS_KEY = 'barinv_barback_weight_profiles_v1';
+const WeightProfiles = {
+  // Stable storage key for an item: item_id → barcode/code/sku → name.
+  keyForItem(item) {
+    if (!item) return null;
+    if (item.id) return String(item.id);
+    if (item.barcode) return 'barcode:' + String(item.barcode);
+    if (item.code) return 'barcode:' + String(item.code);
+    if (item.sku) return 'barcode:' + String(item.sku);
+    if (item.name) return 'name:' + String(item.name).toLowerCase().replace(/\s+/g, ' ').trim();
+    return null;
+  },
+  load() {
+    try { const raw = localStorage.getItem(WEIGHT_PROFILES_LS_KEY); const o = raw ? JSON.parse(raw) : {}; return (o && typeof o === 'object') ? o : {}; }
+    catch (_) { return {}; }
+  },
+  save(map) {
+    try { localStorage.setItem(WEIGHT_PROFILES_LS_KEY, JSON.stringify(map || {})); return true; }
+    catch (_) { return false; }
+  },
+  getForItem(key) {
+    if (!key) return null;
+    const p = this.load()[key];
+    if (!p) return null;
+    const ep = normalizeWeightG(p.empty_weight_g);
+    const fp = normalizeWeightG(p.full_weight_g);
+    if (ep == null || fp == null || fp <= ep) return null; // ignore invalid stored rows
+    return p;
+  },
+  setForItem(key, profile) {
+    if (!key || !profile) return { ok: false, error: 'missing key/profile' };
+    const ep = normalizeWeightG(profile.empty_weight_g);
+    const fp = normalizeWeightG(profile.full_weight_g);
+    if (ep == null) return { ok: false, error: 'empty weight must be a positive number' };
+    if (fp == null || fp <= ep) return { ok: false, error: 'full weight must be greater than empty' };
+    const m = this.load();
+    m[key] = {
+      item_id: profile.item_id || (String(key).indexOf(':') < 0 ? key : null),
+      item_name: profile.item_name || null,
+      empty_weight_g: ep,
+      full_weight_g: fp,
+      updated_at: Date.now(),
+      source: 'local_manual_profile',
+    };
+    return this.save(m) ? { ok: true, profile: m[key] } : { ok: false, error: 'could not save (storage)' };
+  },
+  // Integer 0–100, or null if profile/weight invalid. Clamped at both ends.
+  calcRemaining(weight_g, profile) {
+    const w = normalizeWeightG(weight_g);
+    if (w == null || !profile) return null;
+    const ep = normalizeWeightG(profile.empty_weight_g);
+    const fp = normalizeWeightG(profile.full_weight_g);
+    if (ep == null || fp == null || fp <= ep) return null;
+    let pct = ((w - ep) / (fp - ep)) * 100;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return Math.round(pct);
+  },
+};
+
+// Notes enrichment for the weight profile / remaining %. Returns '' when
+// there's nothing to record. Appended AFTER buildWeightNotes at submit.
+function buildProfileNotes(empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g) {
+  const ep = normalizeWeightG(empty_weight_g);
+  const fp = normalizeWeightG(full_weight_g);
+  const w = normalizeWeightG(weight_g);
+  const tags = [];
+  if (ep != null && fp != null && fp > ep && remaining_percent != null) {
+    tags.push('[EMPTY_WEIGHT_G=' + ep + ']');
+    tags.push('[FULL_WEIGHT_G=' + fp + ']');
+    tags.push('[REMAINING_PERCENT=' + Math.round(remaining_percent) + ']');
+    tags.push('[WEIGHT_PROFILE_SOURCE=' + (weight_profile_source || 'local_manual_profile') + ']');
+  } else if (w != null) {
+    tags.push('[WEIGHT_PROFILE_NEEDED=true]'); // weight captured but no usable profile
+  }
+  return tags.join(' ');
+}
+
+// ── Scale V2 UI — profile section + live Estimated Remaining % ──────
+function _selectedItemObj() {
+  if (!state.selectedItemId) return null;
+  return (cache.items || []).find(x => x.id === state.selectedItemId) ||
+         { id: state.selectedItemId, name: state.selectedItemName };
+}
+function profileKeyForSelectedItem() { return WeightProfiles.keyForItem(_selectedItemObj()); }
+// Live remaining % from the CURRENT weight input + SAVED profile.
+function updateRemainingDisplay() {
+  const el = $('remaining-display'); if (!el) return;
+  if (!state.selectedItemId) { el.textContent = ''; return; }
+  const w = normalizeWeightG(($('weight-g-input') && $('weight-g-input').value) || '');
+  const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
+  if (!prof) {
+    el.textContent = (w != null) ? 'Enter empty/full profile to calculate remaining %' : '';
+    el.style.color = '#9ca3af';
+    return;
+  }
+  if (w == null) { el.textContent = 'Using saved profile · enter weight for remaining %'; el.style.color = '#9ca3af'; return; }
+  el.textContent = 'Estimated Remaining: ' + WeightProfiles.calcRemaining(w, prof) + '%';
+  el.style.color = '#7dd3fc';
+}
+// Show/hide + prefill the profile section for the selected item.
+function refreshWeightProfileUI() {
+  const sec = $('weight-profile-section'); if (!sec) return;
+  if (!state.selectedItemId) {
+    sec.style.display = 'none';
+    if ($('profile-status')) $('profile-status').textContent = '';
+    updateRemainingDisplay();
+    return;
+  }
+  sec.style.display = '';
+  const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
+  if ($('profile-empty-input')) $('profile-empty-input').value = prof ? String(prof.empty_weight_g) : '';
+  if ($('profile-full-input'))  $('profile-full-input').value  = prof ? String(prof.full_weight_g)  : '';
+  if ($('profile-status')) {
+    $('profile-status').textContent = prof ? 'Using saved profile' : 'Profile needed for remaining %';
+    $('profile-status').style.color = prof ? '#4ade80' : '#fbbf24';
+  }
+  updateRemainingDisplay();
+}
+function saveWeightProfileFromInputs() {
+  const item = _selectedItemObj();
+  const key = WeightProfiles.keyForItem(item);
+  const st = $('profile-status');
+  if (!key) { if (st) { st.textContent = 'Pick an item first'; st.style.color = '#fca5a5'; } return; }
+  const res = WeightProfiles.setForItem(key, {
+    item_id: (item && item.id) || null,
+    item_name: (item && item.name) || state.selectedItemName || null,
+    empty_weight_g: ($('profile-empty-input') && $('profile-empty-input').value) || '',
+    full_weight_g: ($('profile-full-input') && $('profile-full-input').value) || '',
+  });
+  if (!res.ok) { if (st) { st.textContent = res.error || 'Invalid profile'; st.style.color = '#fca5a5'; } try { Feedback.warn(); } catch (_) {} return; }
+  if (st) { st.textContent = 'Profile saved'; st.style.color = '#4ade80'; }
+  try { Feedback.ok(); } catch (_) {}
+  updateRemainingDisplay();
+}
+// Wire Scale V2 controls once at load (elements are defined above this script).
+(function wireScaleV2() {
+  try {
+    if ($('save-profile-btn')) $('save-profile-btn').addEventListener('click', saveWeightProfileFromInputs);
+    if ($('use-empty-btn')) $('use-empty-btn').addEventListener('click', function () {
+      const w = ($('weight-g-input') && $('weight-g-input').value) || '';
+      if ($('profile-empty-input')) $('profile-empty-input').value = w;
+    });
+    if ($('use-full-btn')) $('use-full-btn').addEventListener('click', function () {
+      const w = ($('weight-g-input') && $('weight-g-input').value) || '';
+      if ($('profile-full-input')) $('profile-full-input').value = w;
+    });
+    if ($('weight-g-input')) $('weight-g-input').addEventListener('input', updateRemainingDisplay);
+  } catch (_) {}
+})();
 
 // ════════════════════════════════════════════════════════════════════
 //  Review-First — addToReview (manual SAVE button path)
@@ -2792,6 +2974,21 @@ function addToReview(payload) {
     record.measurement_source =                   // draft UI only — stripped at submit
       (w != null || st !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
   }
+  // Scale V2 — draft-only weight-profile + remaining %. STRIPPED at submit
+  // and flattened into notes; they NEVER reach Outbox/eventsInsert as columns.
+  {
+    const ep = normalizeWeightG(payload.empty_weight_g);
+    const fp = normalizeWeightG(payload.full_weight_g);
+    const validProfile = (ep != null && fp != null && fp > ep);
+    record.empty_weight_g = validProfile ? ep : null;        // draft UI only — stripped at submit
+    record.full_weight_g  = validProfile ? fp : null;        // draft UI only — stripped at submit
+    record.remaining_percent = (validProfile && record.weight_g != null)
+      ? WeightProfiles.calcRemaining(record.weight_g, { empty_weight_g: ep, full_weight_g: fp })
+      : null;                                                // draft UI only — stripped at submit
+    record.weight_profile_source = (record.weight_g != null)
+      ? (validProfile ? 'local_manual_profile' : 'profile_needed')
+      : null;                                                // draft UI only — stripped at submit
+  }
   if (phase3) {
     record.source     = (typeof LIVE_PILOT_MODE !== 'undefined' && LIVE_PILOT_MODE && !STAGING_MODE)
                           ? 'barback_live_pilot'
@@ -2854,6 +3051,7 @@ $('save-btn').addEventListener('click', async () => {
   $('save-btn').disabled = true;
   $('save-btn').textContent = '… ADDING';
 
+  const _svProf = WeightProfiles.getForItem(profileKeyForSelectedItem());
   const r = addToReview({
     item_id: state.selectedItemId,
     item_name: state.selectedItemName,
@@ -2863,6 +3061,8 @@ $('save-btn').addEventListener('click', async () => {
     notes: ($('notes-input').value || '').trim(),
     weight_g: $('weight-g-input').value,
     bottle_state: $('bottle-state-select').value,
+    empty_weight_g: _svProf ? _svProf.empty_weight_g : null,   // Scale V2 (draft-only)
+    full_weight_g:  _svProf ? _svProf.full_weight_g  : null,   // Scale V2 (draft-only)
   });
 
   $('save-btn').disabled = false;
@@ -2893,6 +3093,7 @@ $('save-btn').addEventListener('click', async () => {
   $('notes-input').value = '';
   $('weight-g-input').value = '';
   $('bottle-state-select').value = 'NOT_WEIGHED';
+  try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — hide/reset profile (item cleared)
   refreshQueueCount();
   try { refreshDraftCount(); } catch (_) {}
   renderRecentMini();
@@ -3509,7 +3710,7 @@ function renderReview() {
       '<span class="body">' +
         '<span class="' + (d.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(d.action) + '</span> · ' +
         esc(name) + ' · ' + esc(String(d.qty)) +
-        (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state);
+        (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state, d.remaining_percent);
           return wl ? '<div class="small" style="color:#7dd3fc;margin-top:2px;">⚖️ ' + esc(wl) + '</div>' : ''; })() +
         (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
         staleHint +
@@ -3934,20 +4135,31 @@ function onDraftEditSave(ce, form) {
     statusOn('review-status', 'PARTIAL bottle requires weight in grams', 'err'); return;
   }
   const measurement_source = (weight_g != null || bottle_state !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
+  // Scale V2 — recompute remaining % from the draft's stored profile after the
+  // weight edit. The empty/full profile itself is preserved (not edited here).
+  const _ep = normalizeWeightG(arr[i].empty_weight_g);
+  const _fp = normalizeWeightG(arr[i].full_weight_g);
+  const _validProfile = (_ep != null && _fp != null && _fp > _ep);
+  const remaining_percent = (_validProfile && weight_g != null)
+    ? WeightProfiles.calcRemaining(weight_g, { empty_weight_g: _ep, full_weight_g: _fp }) : null;
+  const weight_profile_source = (weight_g != null)
+    ? (_validProfile ? 'local_manual_profile' : 'profile_needed') : null;
 
   // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
-  // weight_g / bottle_state / measurement_source are draft-only helpers
-  // (stripped + flattened into notes at submit) so editing them is safe.
+  // weight_g / bottle_state / measurement_source + the Scale V2 profile fields
+  // are draft-only helpers (stripped + flattened into notes at submit).
   arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes,
-             weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source };
+             weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source,
+             empty_weight_g: _validProfile ? _ep : null, full_weight_g: _validProfile ? _fp : null,
+             remaining_percent: remaining_percent, weight_profile_source: weight_profile_source };
   Drafts.save(arr);
 
   form.style.display = 'none';
   form.innerHTML = '';
   try { refreshDraftCount(); } catch (_) {}
   try { renderReview(); } catch (_) {}
-  statusOn('review-status', 'Draft updated', 'ok');
+  statusOn('review-status', 'Draft updated' + (remaining_percent != null ? (' · Remaining: ' + remaining_percent + '%') : ''), 'ok');
 }
 
 // SUBMIT ALL TO BARINV — promotes every draft into the existing
@@ -3980,9 +4192,14 @@ async function submitAllDraftsToBarinv() {
     // weight_g/bottle_state/measurement_source are the Manual Scale MVP
     // helpers — they must NEVER reach PostgREST as columns. Instead they
     // are flattened into the notes string here, just before promotion.
-    const { item_name, drafted_at, weight_g, bottle_state, measurement_source, ...rec } = d;
+    const { item_name, drafted_at, weight_g, bottle_state, measurement_source,
+            empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, ...rec } = d;
     const wtNotes = buildWeightNotes(weight_g, bottle_state);
     if (wtNotes) rec.notes = [rec.notes, wtNotes].filter(Boolean).join(' ').trim();
+    // Scale V2 — flatten profile/remaining into notes; the destructure above
+    // already STRIPPED them so they never reach Outbox/eventsInsert as columns.
+    const profNotes = buildProfileNotes(empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g);
+    if (profNotes) rec.notes = [rec.notes, profNotes].filter(Boolean).join(' ').trim();
     try {
       Outbox.push(rec);            // dedupes by client_event_id
       Recent.add({
