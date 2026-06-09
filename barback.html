@@ -451,7 +451,6 @@
         <option value="NOT_WEIGHED" selected>NOT WEIGHED</option>
         <option value="UNOPENED">UNOPENED</option>
         <option value="PARTIAL">PARTIAL</option>
-        <option value="EMPTY">EMPTY</option>
       </select>
       <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
     </div>
@@ -462,11 +461,11 @@
       <details id="weight-profile-details">
         <summary style="cursor:pointer;font-size:13px;color:#9ca3af;letter-spacing:0.03em;">⚖️ Bottle Weight Profile</summary>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
-          <input id="profile-empty-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Empty (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
+          <input id="profile-tare-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Tare (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
           <input id="profile-full-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Full (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
-          <button type="button" id="use-empty-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as EMPTY</button>
+          <button type="button" id="use-tare-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as TARE</button>
           <button type="button" id="use-full-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as FULL</button>
           <button type="button" id="save-profile-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;font-weight:800;background:#22c55e;color:#000;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.03em;">💾 Save Profile</button>
         </div>
@@ -2667,7 +2666,7 @@ async function saveCore(payload) {
 // events `notes` string as compact tags — NO schema change, NO new
 // PostgREST columns. NOT_WEIGHED is the default and emits zero tags, so
 // the count-only workflow stays byte-identical to pre-MVP behaviour.
-const BOTTLE_STATES = ['NOT_WEIGHED', 'UNOPENED', 'PARTIAL', 'EMPTY'];
+const BOTTLE_STATES = ['NOT_WEIGHED', 'UNOPENED', 'PARTIAL'];
 
 // Coerce a raw weight value into a positive number, or null. Empty,
 // non-numeric, zero, and negative all collapse to null (= "no weight").
@@ -2680,7 +2679,11 @@ function normalizeWeightG(raw) {
 
 // Coerce a raw bottle-state value into one of BOTTLE_STATES, defaulting
 // to NOT_WEIGHED for anything unknown/empty.
-function normalizeBottleState(raw) {
+// Scale V2.1 — EMPTY was removed as an operational state (empty bottles go to
+// recycling, not inventory). Any LEGACY EMPTY value is mapped safely: with a
+// weight it reads as PARTIAL, otherwise NOT_WEIGHED. EMPTY is never selectable.
+function normalizeBottleState(raw, weight_g) {
+  if (raw === 'EMPTY') return (normalizeWeightG(weight_g) != null) ? 'PARTIAL' : 'NOT_WEIGHED';
   return BOTTLE_STATES.indexOf(raw) >= 0 ? raw : 'NOT_WEIGHED';
 }
 
@@ -2688,7 +2691,7 @@ function normalizeBottleState(raw) {
 // there is nothing to record (no weight AND state is NOT_WEIGHED).
 function buildWeightNotes(weight_g, bottle_state) {
   const w = normalizeWeightG(weight_g);
-  const state = normalizeBottleState(bottle_state);
+  const state = normalizeBottleState(bottle_state, weight_g);
   if (w == null && state === 'NOT_WEIGHED') return '';
   const tags = [];
   if (w != null) tags.push('[WEIGHT_G=' + w + ']');
@@ -2702,7 +2705,7 @@ function buildWeightNotes(weight_g, bottle_state) {
 // Returns '' when there's nothing to show.
 function weightStateLabel(weight_g, bottle_state, remaining_percent) {
   const w = normalizeWeightG(weight_g);
-  const stt = normalizeBottleState(bottle_state);
+  const stt = normalizeBottleState(bottle_state, weight_g);
   const hasRemaining = (remaining_percent != null && isFinite(remaining_percent));
   if (w == null && stt === 'NOT_WEIGHED' && !hasRemaining) return '';
   const parts = [];
@@ -2744,22 +2747,24 @@ const WeightProfiles = {
     if (!key) return null;
     const p = this.load()[key];
     if (!p) return null;
-    const ep = normalizeWeightG(p.empty_weight_g);
+    // Backward compat: legacy profiles stored empty_weight_g; new ones store
+    // tare_weight_g. Normalize to tare_weight_g for every consumer.
+    const tare = normalizeWeightG(p.tare_weight_g != null ? p.tare_weight_g : p.empty_weight_g);
     const fp = normalizeWeightG(p.full_weight_g);
-    if (ep == null || fp == null || fp <= ep) return null; // ignore invalid stored rows
-    return p;
+    if (tare == null || fp == null || fp <= tare) return null; // ignore invalid stored rows
+    return { ...p, tare_weight_g: tare, full_weight_g: fp };
   },
   setForItem(key, profile) {
     if (!key || !profile) return { ok: false, error: 'missing key/profile' };
-    const ep = normalizeWeightG(profile.empty_weight_g);
+    const tare = normalizeWeightG(profile.tare_weight_g != null ? profile.tare_weight_g : profile.empty_weight_g);
     const fp = normalizeWeightG(profile.full_weight_g);
-    if (ep == null) return { ok: false, error: 'empty weight must be a positive number' };
-    if (fp == null || fp <= ep) return { ok: false, error: 'full weight must be greater than empty' };
+    if (tare == null) return { ok: false, error: 'tare weight must be a positive number' };
+    if (fp == null || fp <= tare) return { ok: false, error: 'full weight must be greater than tare' };
     const m = this.load();
     m[key] = {
       item_id: profile.item_id || (String(key).indexOf(':') < 0 ? key : null),
       item_name: profile.item_name || null,
-      empty_weight_g: ep,
+      tare_weight_g: tare,            // Scale V2.1 — replaces legacy empty_weight_g
       full_weight_g: fp,
       updated_at: Date.now(),
       source: 'local_manual_profile',
@@ -2770,10 +2775,10 @@ const WeightProfiles = {
   calcRemaining(weight_g, profile) {
     const w = normalizeWeightG(weight_g);
     if (w == null || !profile) return null;
-    const ep = normalizeWeightG(profile.empty_weight_g);
+    const tare = normalizeWeightG(profile.tare_weight_g != null ? profile.tare_weight_g : profile.empty_weight_g);
     const fp = normalizeWeightG(profile.full_weight_g);
-    if (ep == null || fp == null || fp <= ep) return null;
-    let pct = ((w - ep) / (fp - ep)) * 100;
+    if (tare == null || fp == null || fp <= tare) return null;
+    let pct = ((w - tare) / (fp - tare)) * 100;
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
     return Math.round(pct);
@@ -2782,13 +2787,13 @@ const WeightProfiles = {
 
 // Notes enrichment for the weight profile / remaining %. Returns '' when
 // there's nothing to record. Appended AFTER buildWeightNotes at submit.
-function buildProfileNotes(empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g) {
-  const ep = normalizeWeightG(empty_weight_g);
+function buildProfileNotes(tare_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g) {
+  const tare = normalizeWeightG(tare_weight_g);
   const fp = normalizeWeightG(full_weight_g);
   const w = normalizeWeightG(weight_g);
   const tags = [];
-  if (ep != null && fp != null && fp > ep && remaining_percent != null) {
-    tags.push('[EMPTY_WEIGHT_G=' + ep + ']');
+  if (tare != null && fp != null && fp > tare && remaining_percent != null) {
+    tags.push('[TARE_WEIGHT_G=' + tare + ']');
     tags.push('[FULL_WEIGHT_G=' + fp + ']');
     tags.push('[REMAINING_PERCENT=' + Math.round(remaining_percent) + ']');
     tags.push('[WEIGHT_PROFILE_SOURCE=' + (weight_profile_source || 'local_manual_profile') + ']');
@@ -2812,7 +2817,7 @@ function updateRemainingDisplay() {
   const w = normalizeWeightG(($('weight-g-input') && $('weight-g-input').value) || '');
   const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
   if (!prof) {
-    el.textContent = (w != null) ? 'Enter empty/full profile to calculate remaining %' : '';
+    el.textContent = (w != null) ? 'Enter tare/full profile to calculate remaining %' : '';
     el.style.color = '#9ca3af';
     return;
   }
@@ -2831,8 +2836,8 @@ function refreshWeightProfileUI() {
   }
   sec.style.display = '';
   const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
-  if ($('profile-empty-input')) $('profile-empty-input').value = prof ? String(prof.empty_weight_g) : '';
-  if ($('profile-full-input'))  $('profile-full-input').value  = prof ? String(prof.full_weight_g)  : '';
+  if ($('profile-tare-input')) $('profile-tare-input').value = prof ? String(prof.tare_weight_g) : '';
+  if ($('profile-full-input')) $('profile-full-input').value = prof ? String(prof.full_weight_g) : '';
   if ($('profile-status')) {
     $('profile-status').textContent = prof ? 'Using saved profile' : 'Profile needed for remaining %';
     $('profile-status').style.color = prof ? '#4ade80' : '#fbbf24';
@@ -2847,7 +2852,7 @@ function saveWeightProfileFromInputs() {
   const res = WeightProfiles.setForItem(key, {
     item_id: (item && item.id) || null,
     item_name: (item && item.name) || state.selectedItemName || null,
-    empty_weight_g: ($('profile-empty-input') && $('profile-empty-input').value) || '',
+    tare_weight_g: ($('profile-tare-input') && $('profile-tare-input').value) || '',
     full_weight_g: ($('profile-full-input') && $('profile-full-input').value) || '',
   });
   if (!res.ok) { if (st) { st.textContent = res.error || 'Invalid profile'; st.style.color = '#fca5a5'; } try { Feedback.warn(); } catch (_) {} return; }
@@ -2859,9 +2864,9 @@ function saveWeightProfileFromInputs() {
 (function wireScaleV2() {
   try {
     if ($('save-profile-btn')) $('save-profile-btn').addEventListener('click', saveWeightProfileFromInputs);
-    if ($('use-empty-btn')) $('use-empty-btn').addEventListener('click', function () {
+    if ($('use-tare-btn')) $('use-tare-btn').addEventListener('click', function () {
       const w = ($('weight-g-input') && $('weight-g-input').value) || '';
-      if ($('profile-empty-input')) $('profile-empty-input').value = w;
+      if ($('profile-tare-input')) $('profile-tare-input').value = w;
     });
     if ($('use-full-btn')) $('use-full-btn').addEventListener('click', function () {
       const w = ($('weight-g-input') && $('weight-g-input').value) || '';
@@ -2906,7 +2911,7 @@ function addToReview(payload) {
   // they can't support partial-inventory tracking. Defensive guard here
   // (not just the button) so NO caller path — button, draft edit, rapid,
   // HID, staging — can ever park a weightless PARTIAL draft.
-  if (normalizeBottleState(payload.bottle_state) === 'PARTIAL' &&
+  if (normalizeBottleState(payload.bottle_state, payload.weight_g) === 'PARTIAL' &&
       normalizeWeightG(payload.weight_g) == null) {
     return { ok:false, error:'PARTIAL bottle requires weight in grams' };
   }
@@ -2968,22 +2973,23 @@ function addToReview(payload) {
   // reach Outbox/eventsInsert as DB columns. Default state emits nothing.
   {
     const w = normalizeWeightG(payload.weight_g);
-    const st = normalizeBottleState(payload.bottle_state);
+    const st = normalizeBottleState(payload.bottle_state, payload.weight_g);
     record.weight_g = w;                          // draft UI only — stripped at submit
     record.bottle_state = st;                     // draft UI only — stripped at submit
     record.measurement_source =                   // draft UI only — stripped at submit
       (w != null || st !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
   }
-  // Scale V2 — draft-only weight-profile + remaining %. STRIPPED at submit
-  // and flattened into notes; they NEVER reach Outbox/eventsInsert as columns.
+  // Scale V2.1 — draft-only weight-profile (TARE) + remaining %. STRIPPED at
+  // submit and flattened into notes; they NEVER reach Outbox/eventsInsert as
+  // columns. Legacy payload.empty_weight_g is read as a tare fallback.
   {
-    const ep = normalizeWeightG(payload.empty_weight_g);
+    const tare = normalizeWeightG(payload.tare_weight_g != null ? payload.tare_weight_g : payload.empty_weight_g);
     const fp = normalizeWeightG(payload.full_weight_g);
-    const validProfile = (ep != null && fp != null && fp > ep);
-    record.empty_weight_g = validProfile ? ep : null;        // draft UI only — stripped at submit
-    record.full_weight_g  = validProfile ? fp : null;        // draft UI only — stripped at submit
+    const validProfile = (tare != null && fp != null && fp > tare);
+    record.tare_weight_g = validProfile ? tare : null;       // draft UI only — stripped at submit
+    record.full_weight_g = validProfile ? fp : null;         // draft UI only — stripped at submit
     record.remaining_percent = (validProfile && record.weight_g != null)
-      ? WeightProfiles.calcRemaining(record.weight_g, { empty_weight_g: ep, full_weight_g: fp })
+      ? WeightProfiles.calcRemaining(record.weight_g, { tare_weight_g: tare, full_weight_g: fp })
       : null;                                                // draft UI only — stripped at submit
     record.weight_profile_source = (record.weight_g != null)
       ? (validProfile ? 'local_manual_profile' : 'profile_needed')
@@ -3061,8 +3067,8 @@ $('save-btn').addEventListener('click', async () => {
     notes: ($('notes-input').value || '').trim(),
     weight_g: $('weight-g-input').value,
     bottle_state: $('bottle-state-select').value,
-    empty_weight_g: _svProf ? _svProf.empty_weight_g : null,   // Scale V2 (draft-only)
-    full_weight_g:  _svProf ? _svProf.full_weight_g  : null,   // Scale V2 (draft-only)
+    tare_weight_g: _svProf ? _svProf.tare_weight_g : null,     // Scale V2.1 (draft-only)
+    full_weight_g: _svProf ? _svProf.full_weight_g : null,     // Scale V2.1 (draft-only)
   });
 
   $('save-btn').disabled = false;
@@ -4072,7 +4078,7 @@ function onDraftEdit(ce) {
       '<label class="small">State</label>' +
       '<select class="de-state" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
         BOTTLE_STATES.map(function(s){ return '<option value="' + s + '"' +
-          (normalizeBottleState(d.bottle_state) === s ? ' selected' : '') + '>' +
+          (normalizeBottleState(d.bottle_state, d.weight_g) === s ? ' selected' : '') + '>' +
           (s === 'NOT_WEIGHED' ? 'NOT WEIGHED' : s) + '</option>'; }).join('') +
       '</select>' +
     '</div>' +
@@ -4130,28 +4136,30 @@ function onDraftEditSave(ce, form) {
     statusOn('review-status', 'Weight (g) must be a positive number, or leave it blank', 'err'); return;
   }
   const weight_g = normalizeWeightG(weightRaw);
-  const bottle_state = normalizeBottleState(sEl ? sEl.value : 'NOT_WEIGHED');
+  const bottle_state = normalizeBottleState(sEl ? sEl.value : 'NOT_WEIGHED', weight_g);
   if (bottle_state === 'PARTIAL' && weight_g == null) {
     statusOn('review-status', 'PARTIAL bottle requires weight in grams', 'err'); return;
   }
   const measurement_source = (weight_g != null || bottle_state !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
-  // Scale V2 — recompute remaining % from the draft's stored profile after the
-  // weight edit. The empty/full profile itself is preserved (not edited here).
-  const _ep = normalizeWeightG(arr[i].empty_weight_g);
+  // Scale V2.1 — recompute remaining % from the draft's stored TARE profile after
+  // the weight edit (legacy empty_weight_g read as fallback). The profile itself
+  // is preserved, not edited here. Old empty_weight_g is dropped from the row.
+  const _tare = normalizeWeightG(arr[i].tare_weight_g != null ? arr[i].tare_weight_g : arr[i].empty_weight_g);
   const _fp = normalizeWeightG(arr[i].full_weight_g);
-  const _validProfile = (_ep != null && _fp != null && _fp > _ep);
+  const _validProfile = (_tare != null && _fp != null && _fp > _tare);
   const remaining_percent = (_validProfile && weight_g != null)
-    ? WeightProfiles.calcRemaining(weight_g, { empty_weight_g: _ep, full_weight_g: _fp }) : null;
+    ? WeightProfiles.calcRemaining(weight_g, { tare_weight_g: _tare, full_weight_g: _fp }) : null;
   const weight_profile_source = (weight_g != null)
     ? (_validProfile ? 'local_manual_profile' : 'profile_needed') : null;
 
   // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
-  // weight_g / bottle_state / measurement_source + the Scale V2 profile fields
+  // weight_g / bottle_state / measurement_source + the Scale V2.1 profile fields
   // are draft-only helpers (stripped + flattened into notes at submit).
   arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes,
              weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source,
-             empty_weight_g: _validProfile ? _ep : null, full_weight_g: _validProfile ? _fp : null,
+             tare_weight_g: _validProfile ? _tare : null, empty_weight_g: undefined,
+             full_weight_g: _validProfile ? _fp : null,
              remaining_percent: remaining_percent, weight_profile_source: weight_profile_source };
   Drafts.save(arr);
 
@@ -4193,12 +4201,14 @@ async function submitAllDraftsToBarinv() {
     // helpers — they must NEVER reach PostgREST as columns. Instead they
     // are flattened into the notes string here, just before promotion.
     const { item_name, drafted_at, weight_g, bottle_state, measurement_source,
-            empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, ...rec } = d;
+            tare_weight_g, empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, ...rec } = d;
     const wtNotes = buildWeightNotes(weight_g, bottle_state);
     if (wtNotes) rec.notes = [rec.notes, wtNotes].filter(Boolean).join(' ').trim();
-    // Scale V2 — flatten profile/remaining into notes; the destructure above
-    // already STRIPPED them so they never reach Outbox/eventsInsert as columns.
-    const profNotes = buildProfileNotes(empty_weight_g, full_weight_g, remaining_percent, weight_profile_source, weight_g);
+    // Scale V2.1 — flatten TARE/remaining into notes (legacy empty_weight_g read
+    // as a fallback). The destructure above STRIPPED tare_weight_g AND the legacy
+    // empty_weight_g, so neither reaches Outbox/eventsInsert as a column.
+    const _tareForNotes = (tare_weight_g != null) ? tare_weight_g : empty_weight_g;
+    const profNotes = buildProfileNotes(_tareForNotes, full_weight_g, remaining_percent, weight_profile_source, weight_g);
     if (profNotes) rec.notes = [rec.notes, profNotes].filter(Boolean).join(' ').trim();
     try {
       Outbox.push(rec);            // dedupes by client_event_id
