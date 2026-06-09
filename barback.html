@@ -213,7 +213,7 @@
     }
     .scanner-box.active .scanner-roi { display:flex; }
     .scanner-roi .frame {
-      position:relative; width:78%; height:30%; max-width:560px;
+      position:relative; width:86%; height:34%; max-width:600px;
       border-radius:14px;
       box-shadow:0 0 0 100vmax rgba(0,0,0,0.58);
       outline:2px solid rgba(255,255,255,0.55);
@@ -636,7 +636,7 @@
     </div>
   </div>
   <div class="scanner-toast" id="scanner-toast">—</div>
-  <div class="hint" id="scanner-hint">Hold the bottle barcode 10–20 cm from the lens. Fill the frame. Keep still for 1 second. Camera permission is required.</div>
+  <div class="hint" id="scanner-hint">Move closer, hold steady, keep barcode flat inside the frame. Camera permission is required.</div>
 </div>
 
 <!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
@@ -771,14 +771,20 @@ const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
 // frame in CSS .scanner-roi .frame) as a fraction of the displayed video.
 // Wide + short to suit horizontal UPC/EAN bottle barcodes. Keep these two in
 // sync with the 78% / 30% in the .scanner-roi .frame CSS rule.
-const ROI_FRAME_W = 0.78;
-const ROI_FRAME_H = 0.30;
+const ROI_FRAME_W = 0.86;
+const ROI_FRAME_H = 0.34;
 const ROI_DECODE_INTERVAL_MS = 160;  // cropped-decode tick (responsive, no spam)
+// PLAN-2026-06-09 (iPhone tuning) — ROI-first: for the first
+// ROI_FULLFRAME_FALLBACK_MS the full-frame reader only accepts CENTER
+// detections; after that, if nothing has decoded yet, off-centre full-frame
+// detections are also accepted as a fallback. The cropped ROI loop keeps
+// running throughout, so a centred barcode is always preferred/first.
+const ROI_FULLFRAME_FALLBACK_MS = 2500;
 // Fail-OPEN acceptance band for the FULL-FRAME ZXing path: reject a detection
 // only when its result-point centroid is clearly outside this generous central
 // band (normalized intrinsic-frame coords). Missing/invalid geometry → accept,
 // so this is never stricter than the pre-2026-06-09 behaviour.
-const ROI_ACCEPT = { xMin:0.12, xMax:0.88, yMin:0.20, yMax:0.80 };
+const ROI_ACCEPT = { xMin:0.10, xMax:0.90, yMin:0.16, yMax:0.84 };
 const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
 
 // ════════════════════════════════════════════════════════════════════
@@ -1361,6 +1367,8 @@ const state = {
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
   roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
+  scannerFullFrameFallback: false, // after ROI_FULLFRAME_FALLBACK_MS: accept off-centre full-frame reads
+  scannerFallbackTimer: null,      // setTimeout handle for the ROI→full-frame flip
   expirationInterval: null,
   jwtCheckInterval: null,
   syncTimer: null,
@@ -2056,8 +2064,8 @@ async function openScanner() {
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
   $('scanner-toast').style.display = 'none';
   $('scanner-hint').textContent = continuous
-    ? 'Continuous mode: scan multiple bottles, each saves as qty=1 with the current action.'
-    : 'Hold the bottle barcode 10–20 cm from the lens. Fill the frame. Keep still for 1 second.';
+    ? 'Continuous mode: each scan saves as qty=1. Move closer, hold steady, keep barcode flat inside the frame.'
+    : 'Move closer, hold steady, keep barcode flat inside the frame.';
 
   let zxing;
   try { zxing = await ensureZXing(); }
@@ -2116,8 +2124,11 @@ async function openScanner() {
     // detection whose result-point centroid is clearly outside the central
     // band so an off-centre / second bottle isn't grabbed; if geometry is
     // unavailable we accept exactly as before (no regression).
-    if (!resultInCenterROI(result)) {
-      try { console.log('[scanner] off-center detection ignored'); } catch (_) {}
+    // iPhone tuning: this centre-only gate applies ONLY before the full-frame
+    // fallback flips on (ROI_FULLFRAME_FALLBACK_MS). After that, off-centre
+    // reads are accepted too so a hard-to-centre barcode still scans.
+    if (!state.scannerFullFrameFallback && !resultInCenterROI(result)) {
+      try { console.log('[scanner] off-center detection ignored (pre-fallback)'); } catch (_) {}
       return;
     }
     acceptDecodedCode(code, controls);
@@ -2127,8 +2138,11 @@ async function openScanner() {
     audio: false,
     video: {
       facingMode: { ideal: 'environment' },
-      width:      { ideal: 1280 },
-      height:     { ideal: 720 },
+      // Higher ideal resolution = more pixels per barcode bar = easier decode.
+      // `ideal` is a SOFT preference: the browser picks the closest supported
+      // mode and never rejects for it, so this cannot break camera start.
+      width:      { ideal: 1920 },
+      height:     { ideal: 1080 },
     },
   };
 
@@ -2161,6 +2175,18 @@ async function openScanner() {
   // better reads on small / curved bottle barcodes. Enhancement only: if it
   // cannot init, the full-frame reader above keeps working unchanged.
   try { startRoiDecodeLoop(zxing, hints); } catch (_) {}
+  // PLAN-2026-06-09 (iPhone tuning) — ROI-first → full-frame fallback. Start
+  // centred-only; after ROI_FULLFRAME_FALLBACK_MS with no decode, allow
+  // off-centre full-frame reads too (the ROI loop keeps preferring centre).
+  state.scannerFullFrameFallback = false;
+  if (state.scannerFallbackTimer) { try { clearTimeout(state.scannerFallbackTimer); } catch (_) {} }
+  state.scannerFallbackTimer = setTimeout(function () {
+    state.scannerFullFrameFallback = true;
+    try { console.log('[scanner] full-frame fallback enabled'); } catch (_) {}
+  }, ROI_FULLFRAME_FALLBACK_MS);
+  // PLAN-2026-06-09 (iPhone tuning) — best-effort continuous focus/exposure for
+  // sharper barcode edges. Feature-detected via getCapabilities; never throws.
+  try { applyScannerTrackTuning(); } catch (_) {}
 }
 
 async function onBarcodeScanned(code, controls) {
@@ -2244,9 +2270,40 @@ function showScannerToast(msg, level) {
   t._timer = setTimeout(() => { t.style.display = 'none'; }, 1400);
 }
 
+// PLAN-2026-06-09 (iPhone tuning) — best-effort camera track tuning. After the
+// stream starts, ask for continuous autofocus (and continuous auto-exposure)
+// so curved/handheld bottle labels stay sharp. ALL feature-detected via
+// getCapabilities and wrapped so it can never throw or block scanning. On
+// browsers that don't expose these (incl. much of iOS Safari) it simply no-ops.
+// Zoom is deliberately NOT auto-applied — narrowing the field of view makes the
+// barcode harder to find. Does not touch ROI/decode logic or item lookup.
+function applyScannerTrackTuning() {
+  try {
+    var vid = $('scanner-video');
+    var ms = vid && vid.srcObject;
+    var track = (ms && ms.getVideoTracks) ? ms.getVideoTracks()[0] : null;
+    if (!track || !track.getCapabilities || !track.applyConstraints) return;
+    var caps = null;
+    try { caps = track.getCapabilities(); } catch (_) { caps = null; }
+    if (!caps) return;
+    var advanced = [];
+    if (caps.focusMode && caps.focusMode.indexOf && caps.focusMode.indexOf('continuous') >= 0) {
+      advanced.push({ focusMode: 'continuous' });
+    }
+    if (caps.exposureMode && caps.exposureMode.indexOf && caps.exposureMode.indexOf('continuous') >= 0) {
+      advanced.push({ exposureMode: 'continuous' });
+    }
+    if (advanced.length) {
+      track.applyConstraints({ advanced: advanced }).catch(function () { /* unsupported — ignore */ });
+    }
+  } catch (_) { /* never break scanning */ }
+}
+
 function closeScanner() {
   $('scanner-box').classList.remove('active');
   stopRoiDecodeLoop();
+  if (state.scannerFallbackTimer) { try { clearTimeout(state.scannerFallbackTimer); } catch (_) {} state.scannerFallbackTimer = null; }
+  state.scannerFullFrameFallback = false;
   try { if (state.zxingControls && state.zxingControls.stop) state.zxingControls.stop(); } catch (_) {}
   state.zxingControls = null;
   state.scannerContinuous = false;
