@@ -654,7 +654,7 @@
     </div>
   </div>
   <div class="scanner-toast" id="scanner-toast">—</div>
-  <div class="hint" id="scanner-hint">Move closer, hold steady, keep barcode flat inside the frame. Camera permission is required.</div>
+  <div class="hint" id="scanner-hint">Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame. Camera permission is required.</div>
 </div>
 
 <!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
@@ -2092,8 +2092,8 @@ async function openScanner() {
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
   $('scanner-toast').style.display = 'none';
   $('scanner-hint').textContent = continuous
-    ? 'Continuous mode: each scan saves as qty=1. Move closer, hold steady, keep barcode flat inside the frame.'
-    : 'Move closer, hold steady, keep barcode flat inside the frame.';
+    ? 'Continuous mode: each scan saves as qty=1. Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame.'
+    : 'Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame.';
 
   let zxing;
   try { zxing = await ensureZXing(); }
