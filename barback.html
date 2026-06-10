@@ -785,6 +785,7 @@ const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
 const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
 const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
+const SCAN_SUCCESS_CLOSE_MS = 450; // single-scan: show the success toast this long, then close
 // PLAN-2026-06-09 — Scanner center-ROI. Cropped decode region (and the visual
 // frame in CSS .scanner-roi .frame) as a fraction of the displayed video.
 // Wide + short to suit horizontal UPC/EAN bottle barcodes. Keep these two in
@@ -1381,6 +1382,7 @@ const state = {
   selectedItemName: null,
   selectedBarId: null,
   scannerContinuous: false,
+  scannerClosing: false,   // single-scan: true during the brief success-toast→close window
   scannerCooldown: {},  // code → lastScannedAt
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
@@ -1960,7 +1962,12 @@ function acceptDecodedCode(code, controls) {
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
   state.scannerCooldown[code] = now;
   Feedback.scan();
-  onBarcodeScanned(code, controls);
+  // PLAN-2026-06-09 hotfix — NEVER let a success-handler exception bubble into the
+  // ZXing decode callback / ROI tick; an uncaught throw there halts the continuous
+  // decode and freezes the camera ("stuck/doing nothing after first scan"). Both
+  // decode routes stay alive.
+  try { onBarcodeScanned(code, controls); }
+  catch (e) { try { console.warn('[scanner] onBarcodeScanned threw — decode loop kept alive', (e && e.message) || e); } catch (_) {} }
 }
 
 // Returns true when a full-frame detection sits inside the central scan band,
@@ -2079,6 +2086,7 @@ async function openScanner() {
   }
   const continuous = !!$('rapid-mode').checked;
   state.scannerContinuous = continuous;
+  state.scannerClosing = false;
   state.scannerCooldown = {};
   $('scanner-box').classList.add('active');
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
@@ -2209,6 +2217,23 @@ async function openScanner() {
   try { applyScannerTrackTuning(); } catch (_) {}
 }
 
+// PLAN-2026-06-09 hotfix — does the CURRENT flow need a weight BEFORE adding?
+// True for RETURNED (Scale V3 return-weight), bottle-state PARTIAL (the existing
+// PARTIAL-requires-weight rule), or when a weight is already typed in the form.
+// In those cases a single scan PICKS the item so the operator can weigh it and tap
+// ADD TO REVIEW — it must NOT auto-add a weightless row (the scan-add route carries
+// no weight, which would bypass Scale V3).
+function shouldRequireWeightBeforeAdd() {
+  try {
+    if (state.selectedAction === 'RETURNED') return true;
+    const bs = $('bottle-state-select') && $('bottle-state-select').value;
+    if (bs === 'PARTIAL') return true;
+    const w = $('weight-g-input') && ($('weight-g-input').value || '').trim();
+    if (w) return true;
+  } catch (_) {}
+  return false;
+}
+
 async function onBarcodeScanned(code, controls) {
   const it = lookupByBarcode(code);
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
@@ -2237,9 +2262,10 @@ async function onBarcodeScanned(code, controls) {
     );
     try { $('search-input').value = code; } catch (_) {}
     if (!state.scannerContinuous) {
-      // One-shot: drop into manual search with code prefilled
-      if (controls && controls.stop) controls.stop();
-      closeScanner();
+      // One-shot: drop into manual search with code prefilled. Robust stop so an
+      // iOS controls.stop() quirk can't leave the camera frozen-open.
+      if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
+      try { closeScanner(); } catch (_) {}
       searchItems(code);
     }
     // Rapid mode: stay in scanner so the next bottle can be scanned;
@@ -2249,35 +2275,76 @@ async function onBarcodeScanned(code, controls) {
   }
 
   if (state.scannerContinuous) {
-    // PLAN-2026-06-05 — Rapid mode now ADDS TO REVIEW (qty=1), not
-    // immediate server sync. The scanned row sits in Drafts until the
-    // operator taps SUBMIT ALL TO BARINV on the Review screen, so a
-    // mis-scanned bottle can be inspected, edited, or deleted before
-    // any events row is created. Stays in the camera so the next
-    // bottle can be scanned. No eventsInsert, no Outbox push here.
-    const addRes = addToReview({
-      item_id: it.id,
-      item_name: it.name,
-      qty: 1,
-      action: state.selectedAction,
-      bar_id: state.selectedBarId,
-      notes: '',
-    });
-    const n = Drafts.count();
-    showScannerToast(
-      addRes.ok
-        ? '✓ ' + it.name + ' · Added to Review (' + n + ')'
-        : '⚠ ' + (addRes.error || 'add failed') + ': ' + it.name,
-      addRes.ok ? 'ok' : 'warn'
-    );
+    // RAPID / continuous — ADD TO REVIEW (qty=1) and KEEP the camera open so the
+    // next bottle can be scanned. Every side-effect is wrapped so a render/add
+    // error can NEVER bubble into the decode callback and freeze the loop (that
+    // was the "stuck after first scan" symptom). The per-barcode dupe lock
+    // (DUPE_SCAN_WINDOW_MS) auto-expires, so the SAME bottle can be rescanned
+    // after the window while immediate repeats stay suppressed. We stop NOTHING.
+    let addRes;
+    try {
+      addRes = addToReview({
+        item_id: it.id, item_name: it.name, qty: 1,
+        action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
+      });
+    } catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
+    let n = 0; try { n = Drafts.count(); } catch (_) {}
+    try {
+      showScannerToast(
+        (addRes && addRes.ok)
+          ? '✓ ' + it.name + ' · Added to Review (' + n + ')'
+          : '⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name,
+        (addRes && addRes.ok) ? 'ok' : 'warn'
+      );
+    } catch (_) {}
     try { refreshDraftCount(); } catch (_) {}
-    renderRecentMini();
+    try { renderRecentMini(); } catch (_) {}
   } else {
-    // One-shot: close scanner, set picked item, leave SAVE for user tap
-    if (controls && controls.stop) controls.stop();
-    closeScanner();
-    setPickedItem(it);
-    statusOn('save-status', '✓ Scanned: ' + it.name, 'ok');
+    // SINGLE-SCAN — guard against a second decode firing during the close window.
+    if (state.scannerClosing) return;
+    state.scannerClosing = true;
+    const requireWeight = shouldRequireWeightBeforeAdd();
+    let addRes = null, n = 0;
+    if (!requireWeight) {
+      // NORMAL single-scan — AUTO-ADD to Review (qty=1) now, then close. Every
+      // side-effect is wrapped so a throw can't bubble into the decode callback.
+      try {
+        addRes = addToReview({
+          item_id: it.id, item_name: it.name, qty: 1,
+          action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
+        });
+      } catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
+      try { n = Drafts.count(); } catch (_) {}
+      try { refreshDraftCount(); } catch (_) {}
+      try { renderRecentMini(); } catch (_) {}
+    }
+    // Brief success toast inside the scanner before it closes.
+    try {
+      showScannerToast(
+        requireWeight
+          ? ('✓ ' + it.name + ' · Scanned — weigh, then ADD')
+          : ((addRes && addRes.ok)
+              ? ('✓ ' + it.name + ' · Added to Review (' + n + ')')
+              : ('⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name)),
+        (requireWeight || (addRes && addRes.ok)) ? 'ok' : 'warn'
+      );
+    } catch (_) {}
+    // Stop the camera + close the overlay after the brief toast, then route the
+    // operator: weight-required → PICK the item (enter weight, then ADD TO REVIEW);
+    // normal → already added (just confirm on the main screen).
+    setTimeout(function () {
+      if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
+      try { closeScanner(); } catch (_) {}          // also stops the stream + ROI loop
+      if (requireWeight) {
+        try { setPickedItem(it); } catch (_) {}
+        try { statusOn('save-status', '✓ Scanned: ' + it.name + ' — enter weight, then ADD TO REVIEW', 'ok'); } catch (_) {}
+      } else {
+        try { statusOn('save-status',
+          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' (qty 1)')
+                                : ('⚠ Not added: ' + it.name + ' — ' + ((addRes && addRes.error) || 'unknown')),
+          (addRes && addRes.ok) ? 'ok' : 'warn'); } catch (_) {}
+      }
+    }, SCAN_SUCCESS_CLOSE_MS);
   }
 }
 
@@ -2327,6 +2394,7 @@ function closeScanner() {
   try { if (state.zxingControls && state.zxingControls.stop) state.zxingControls.stop(); } catch (_) {}
   state.zxingControls = null;
   state.scannerContinuous = false;
+  state.scannerClosing = false;
 }
 $('scan-btn').addEventListener('click', openScanner);
 $('scanner-close').addEventListener('click', closeScanner);
