@@ -170,6 +170,10 @@
       background:rgba(251,146,60,0.10); border:1px solid #fb923c; border-radius:6px;
       color:#fbbf24; font-weight:600; font-size:14px;
     }
+    /* Browse-item fallback (PLAN-2026-06-09) */
+    .browse-btn { margin-top:6px; padding:8px 12px; font-size:12px; background:#1f2937; color:#cbd5e1; border:1px solid #374151; border-radius:6px; cursor:pointer; }
+    .item-results .browse-head { position:sticky; top:0; background:#0a0a0a; padding:8px 14px; font-size:11px; color:#9ca3af; border-bottom:1px solid #1a1a1a; }
+    .item-results .browse-recent { color:#fbbf24; }
 
     /* ── Scanner modal ───────────────────────────────────────────── */
     .scanner-box {
@@ -426,6 +430,7 @@
         <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, auto-save qty=1</label>
       </div>
       <input id="search-input" type="text" placeholder="or type barcode / name (or use HID scanner)..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
       <div id="search-results" class="item-results" style="display:none;"></div>
       <div id="picked-item" class="selected-item" style="display:none;"></div>
     </div>
@@ -1878,9 +1883,81 @@ function setPickedItem(it) {
   $('search-input').value = '';
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
 }
+const BROWSE_MAX = 60;  // browse-fallback list cap (recent first, then alphabetical)
+let _browseTouching = false;  // true while a finger is down on a browse row (keeps the list open)
+// Build the browse list: recent items (from Recent.load) first, then the rest
+// alphabetical, capped to BROWSE_MAX. Returns { items, recentCount }.
+function _browseItems() {
+  const all = (cache.items || []);
+  if (!all.length) return { items: [], recentCount: 0 };
+  let recentIds = [];
+  try {
+    const seen = new Set();
+    (Recent.load() || []).forEach(r => { if (r && r.item_id && !seen.has(r.item_id)) { seen.add(r.item_id); recentIds.push(r.item_id); } });
+  } catch (_) {}
+  const byId = {}; all.forEach(it => { if (it && it.id) byId[it.id] = it; });
+  const recent = recentIds.map(id => byId[id]).filter(Boolean);
+  const recentSet = new Set(recent.map(it => it.id));
+  const rest = all.filter(it => it && it.id && !recentSet.has(it.id))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const items = recent.concat(rest).slice(0, BROWSE_MAX);
+  return { items: items, recentCount: Math.min(recent.length, items.length) };
+}
+// iPhone-safe row selection for BOTH the browse list and typed-search results.
+// Selects on the tap-up (scroll-safe via a 10px movement guard), with a per-row
+// flag so pointer/touch and the 'click' fallback never double-select. Reuses
+// setPickedItem; does NOT touch search matching, the item cache, or addToReview.
+function _wireItemRowSelect(box) {
+  if (!box) return;
+  const selectRowOnce = (row) => {
+    if (row._browsePicked) return;
+    row._browsePicked = true;
+    const it = (cache.items || []).find(x => x.id === row.dataset.id);
+    if (it) setPickedItem(it);
+  };
+  Array.from(box.querySelectorAll('.item-row[data-id]')).forEach(row => {
+    let sx = 0, sy = 0, moved = false;
+    const down = (e) => { _browseTouching = true; const p = (e.touches && e.touches[0]) || e; sx = p.clientX || 0; sy = p.clientY || 0; moved = false; };
+    const move = (e) => { const p = (e.touches && e.touches[0]) || e; if (Math.abs((p.clientX || 0) - sx) > 10 || Math.abs((p.clientY || 0) - sy) > 10) moved = true; };
+    const up = (e) => { _browseTouching = false; if (!moved) { try { e.preventDefault(); } catch (_) {} selectRowOnce(row); } };
+    const cancel = () => { _browseTouching = false; };
+    if (window.PointerEvent) {
+      row.addEventListener('pointerdown', down);
+      row.addEventListener('pointermove', move);
+      row.addEventListener('pointerup', up);
+      row.addEventListener('pointercancel', cancel);
+    } else {
+      row.addEventListener('touchstart', down, { passive: true });
+      row.addEventListener('touchmove', move, { passive: true });
+      row.addEventListener('touchend', up, { passive: false });
+      row.addEventListener('touchcancel', cancel);
+      row.addEventListener('mousedown', (e) => { try { e.preventDefault(); } catch (_) {} selectRowOnce(row); });
+    }
+    row.addEventListener('click', () => selectRowOnce(row));   // mouse/keyboard fallback (deduped)
+  });
+}
+
+// Render the browse list into #search-results. Rows reuse setPickedItem (the
+// SAME select path as search/scan), so Review-First + Scale V3 are untouched.
+function showBrowseList() {
+  const box = $('search-results'); if (!box) return;
+  const b = _browseItems();
+  if (!b.items.length) { box.style.display = 'none'; return; }
+  const rows = ['<div class="browse-head">Tap an item' + (b.recentCount ? ' · recent first' : '') + '</div>'];
+  b.items.forEach((it, i) => {
+    rows.push('<div class="item-row" data-id="' + esc(it.id) + '">' +
+      (i < b.recentCount ? '<span class="browse-recent">★</span> ' : '') +
+      esc(it.name || '?') + (it.size ? ' · ' + esc(it.size) : '') +
+      (it.sku ? '<span class="sku">' + esc(it.sku) + '</span>' : '') +
+    '</div>');
+  });
+  box.innerHTML = rows.join('');
+  _wireItemRowSelect(box);   // iPhone-safe pointer/touch/click selection (shared with typed search)
+  box.style.display = 'block';
+}
 function searchItems(q) {
   q = String(q || '').trim().toLowerCase();
-  if (!q) { $('search-results').style.display = 'none'; return; }
+  if (!q) { showBrowseList(); return; }   // browse fallback: empty query = browsable list
   const exact = lookupByBarcode(q);
   if (exact) { setPickedItem(exact); return; }
   const matches = (cache.items || []).filter(it => {
@@ -1897,12 +1974,7 @@ function searchItems(q) {
         (it.sku ? '<span class="sku">' + esc(it.sku) + '</span>' : '') +
       '</div>'
     ).join('');
-    Array.from($('search-results').querySelectorAll('.item-row')).forEach(row => {
-      row.addEventListener('click', () => {
-        const it = (cache.items || []).find(x => x.id === row.dataset.id);
-        if (it) setPickedItem(it);
-      });
-    });
+    _wireItemRowSelect($('search-results'));   // iPhone-safe pointer/touch/click selection (shared)
   }
   $('search-results').style.display = 'block';
 }
@@ -1925,6 +1997,25 @@ $('search-input').addEventListener('keydown', (e) => {
       if (matches.length === 1) setPickedItem(matches[0]);
     }
   }
+});
+// Browse fallback (PLAN-2026-06-09): focusing the empty search box opens a
+// browsable item list; typing still filters via searchItems. The mousedown
+// preventDefault keeps the input focused so a row tap registers (no blur race),
+// and the delayed blur hides the list only when focus truly leaves.
+$('search-input').addEventListener('focus', () => {
+  if (!(($('search-input').value) || '').trim()) showBrowseList();
+});
+$('search-input').addEventListener('blur', () => {
+  setTimeout(() => {
+    if (_browseTouching) return;                              // finger still down on the list
+    if (document.activeElement === $('search-input')) return; // still in the box
+    const box = $('search-results'); if (box) box.style.display = 'none';
+  }, 150);
+});
+if ($('search-results')) $('search-results').addEventListener('mousedown', (e) => { e.preventDefault(); });
+if ($('browse-btn')) $('browse-btn').addEventListener('click', () => {
+  try { $('search-input').focus(); } catch (_) {}
+  showBrowseList();
 });
 
 // ════════════════════════════════════════════════════════════════════
