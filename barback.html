@@ -175,6 +175,34 @@
     .item-results .browse-head { position:sticky; top:0; background:#0a0a0a; padding:8px 14px; font-size:11px; color:#9ca3af; border-bottom:1px solid #1a1a1a; }
     .item-results .browse-recent { color:#fbbf24; }
 
+    /* Full-screen Browse-Items grid picker (PLAN-2026-06-11 — Phase 1).
+       Opens on BROWSE ITEMS; keyboard stays closed (no autofocus). The
+       responsive auto-fill grid yields ~3 cols on iPhone portrait, 2 on
+       small phones, and 4+ on tablet/landscape with no media queries. */
+    .bm-overlay { position:fixed; inset:0; z-index:400; background:#0a0a0a; display:none; flex-direction:column; }
+    .bm-overlay.open { display:flex; }
+    .bm-head { position:sticky; top:0; z-index:1; background:#0a0a0a; border-bottom:1px solid #1f2937;
+               padding:calc(10px + env(safe-area-inset-top, 0px)) 12px 10px; display:flex; flex-direction:column; gap:8px; }
+    .bm-head-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .bm-title { font-size:14px; font-weight:800; letter-spacing:0.04em; color:#e5e7eb; }
+    .bm-close { padding:8px 14px; font-size:12px; font-weight:800; letter-spacing:0.04em;
+                background:#7f1d1d; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+    .bm-search { width:100%; padding:11px 12px; font-size:16px; background:#1f2937; color:#fff;
+                 border:1px solid #374151; border-radius:8px; }
+    .bm-grid { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; display:grid; gap:8px;
+               grid-template-columns:repeat(auto-fill, minmax(108px, 1fr)); align-content:start;
+               padding:10px 10px calc(130px + env(safe-area-inset-bottom, 0px)); }
+    .bm-card { position:relative; display:flex; flex-direction:column; gap:3px; text-align:left;
+               min-height:74px; padding:9px; background:#111827; border:1px solid #374151; border-radius:10px;
+               cursor:pointer; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+    .bm-card:active { background:#1f2937; border-color:#3b82f6; }
+    .bm-star { position:absolute; top:6px; right:7px; color:#fbbf24; font-size:12px; line-height:1; }
+    .bm-name { font-size:12.5px; font-weight:700; color:#f3f4f6; line-height:1.2; padding-right:12px;
+               display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+    .bm-size { font-size:11px; color:#9ca3af; }
+    .bm-sku { font-size:9.5px; color:#6b7280; font-variant-numeric:tabular-nums; word-break:break-all; }
+    .bm-empty { grid-column:1 / -1; text-align:center; color:#6b7280; padding:30px 12px; font-size:13px; }
+
     /* ── Scanner modal ───────────────────────────────────────────── */
     .scanner-box {
       position:fixed; inset:0; background:#000; z-index:200;
@@ -668,6 +696,20 @@
     <div id="ok-overlay-msg">✓ SAVED</div>
     <div class="sub" id="ok-overlay-sub">—</div>
   </div>
+</div>
+
+<!-- ===================== BROWSE-ITEMS FULL-SCREEN GRID (Phase 1) ===================== -->
+<div class="bm-overlay" id="browse-modal" aria-hidden="true">
+  <div class="bm-head">
+    <div class="bm-head-top">
+      <span class="bm-title">📋 BROWSE ITEMS</span>
+      <button type="button" class="bm-close" id="bm-close">✕ CLOSE</button>
+    </div>
+    <input id="bm-search" class="bm-search" type="text" inputmode="search"
+           placeholder="Filter items…" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false">
+  </div>
+  <div class="bm-grid" id="bm-grid"></div>
 </div>
 
 <script>
@@ -1908,15 +1950,18 @@ function _browseItems() {
 // Selects on the tap-up (scroll-safe via a 10px movement guard), with a per-row
 // flag so pointer/touch and the 'click' fallback never double-select. Reuses
 // setPickedItem; does NOT touch search matching, the item cache, or addToReview.
-function _wireItemRowSelect(box) {
+function _wireItemRowSelect(box, opts) {
   if (!box) return;
+  opts = opts || {};
+  const selector = opts.selector || '.item-row[data-id]';
+  const onPick   = opts.onPick   || setPickedItem;   // default: canonical select path
   const selectRowOnce = (row) => {
     if (row._browsePicked) return;
     row._browsePicked = true;
     const it = (cache.items || []).find(x => x.id === row.dataset.id);
-    if (it) setPickedItem(it);
+    if (it) onPick(it);
   };
-  Array.from(box.querySelectorAll('.item-row[data-id]')).forEach(row => {
+  Array.from(box.querySelectorAll(selector)).forEach(row => {
     let sx = 0, sy = 0, moved = false;
     const down = (e) => { _browseTouching = true; const p = (e.touches && e.touches[0]) || e; sx = p.clientX || 0; sy = p.clientY || 0; moved = false; };
     const move = (e) => { const p = (e.touches && e.touches[0]) || e; if (Math.abs((p.clientX || 0) - sx) > 10 || Math.abs((p.clientY || 0) - sy) > 10) moved = true; };
@@ -2014,10 +2059,74 @@ $('search-input').addEventListener('blur', () => {
   }, 150);
 });
 if ($('search-results')) $('search-results').addEventListener('mousedown', (e) => { e.preventDefault(); });
-if ($('browse-btn')) $('browse-btn').addEventListener('click', () => {
-  try { $('search-input').focus(); } catch (_) {}
-  showBrowseList();
-});
+// ════════════════════════════════════════════════════════════════════
+//  Full-screen Browse-Items grid picker (PLAN-2026-06-11 — Phase 1)
+// ════════════════════════════════════════════════════════════════════
+// Replaces the old inline #search-results dropdown for the BROWSE ITEMS
+// button. Opens a full-screen responsive card GRID with the keyboard
+// CLOSED (no autofocus anywhere). Tapping a card routes through the SAME
+// setPickedItem path as search/scan — no auto-submit, Review-First and
+// scanner/scale logic untouched. The typed-search box still uses the
+// inline dropdown (showBrowseList) when focused, so nothing else changes.
+function _bmCardHtml(it, isRecent) {
+  return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '">' +
+    (isRecent ? '<span class="bm-star" aria-hidden="true">★</span>' : '') +
+    '<span class="bm-name">' + esc(it.name || '?') + '</span>' +
+    (it.size ? '<span class="bm-size">' + esc(it.size) + '</span>' : '') +
+    (it.sku  ? '<span class="bm-sku">'  + esc(it.sku)  + '</span>' : '') +
+  '</div>';
+}
+function renderBrowseGrid(filter) {
+  const grid = $('bm-grid'); if (!grid) return;
+  const all = cache.items || [];
+  if (!all.length) { grid.innerHTML = '<div class="bm-empty">No items cached on this device yet.</div>'; return; }
+  const q = String(filter || '').trim().toLowerCase();
+  let list, recentCount;
+  if (q) {
+    // Typed filter searches the FULL catalog (name or sku), recent-first
+    // ordering does not apply, capped generously for a grid.
+    list = all.filter(it => (String(it.name || '').toLowerCase().indexOf(q) >= 0) ||
+                            (String(it.sku  || '').toLowerCase().indexOf(q) >= 0))
+              .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+              .slice(0, 200);
+    recentCount = 0;
+  } else {
+    const b = _browseItems();   // recent-first, capped to BROWSE_MAX
+    list = b.items; recentCount = b.recentCount;
+  }
+  if (!list.length) { grid.innerHTML = '<div class="bm-empty">No matches.</div>'; return; }
+  grid.innerHTML = list.map((it, i) => _bmCardHtml(it, i < recentCount)).join('');
+  _wireItemRowSelect(grid, { selector: '.bm-card[data-id]', onPick: pickFromBrowse });
+}
+function openBrowseModal() {
+  try { $('search-input').blur(); } catch (_) {}   // keep the soft keyboard closed
+  const sb = $('bm-search'); if (sb) sb.value = '';
+  renderBrowseGrid('');
+  const ov = $('browse-modal');
+  if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
+  const grid = $('bm-grid'); if (grid) { try { grid.scrollTop = 0; } catch (_) {} }
+  // Deliberately do NOT focus #bm-search — the picker must open keyboard-closed.
+}
+function closeBrowseModal() {
+  const sb = $('bm-search'); if (sb) { try { sb.blur(); } catch (_) {} }
+  const ov = $('browse-modal');
+  if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+}
+function pickFromBrowse(it) {
+  setPickedItem(it);          // canonical select path (also blurs #search-input)
+  closeBrowseModal();         // keyboard stays closed (bm-search was never focused unless user typed)
+  // Bring QTY / Add-to-Review into view; do NOT focus (would re-open keyboard).
+  try { $('qty-input').scrollIntoView({ block: 'center' }); } catch (_) {}
+}
+if ($('browse-btn')) $('browse-btn').addEventListener('click', openBrowseModal);
+if ($('bm-close'))   $('bm-close').addEventListener('click', closeBrowseModal);
+if ($('bm-search')) {
+  let _bmTimer = null;
+  $('bm-search').addEventListener('input', () => {
+    clearTimeout(_bmTimer);
+    _bmTimer = setTimeout(() => renderBrowseGrid($('bm-search').value), 80);
+  });
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  Camera scanner — lazy-load ZXing-browser + continuous mode
