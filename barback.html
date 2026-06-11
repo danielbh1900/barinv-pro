@@ -202,6 +202,9 @@
     .bm-size { font-size:11px; color:#9ca3af; }
     .bm-sku { font-size:9.5px; color:#6b7280; font-variant-numeric:tabular-nums; word-break:break-all; }
     .bm-empty { grid-column:1 / -1; text-align:center; color:#6b7280; padding:30px 12px; font-size:13px; }
+    .bm-scope-warn { background:#3f2c0a; color:#fbbf24; border:1px solid #7a5a12; border-radius:6px;
+                     padding:7px 9px; font-size:11px; font-weight:700; line-height:1.3; }
+    .bm-debug { font-size:10px; color:#6b7280; letter-spacing:0.02em; }
 
     /* ── Scanner modal ───────────────────────────────────────────── */
     .scanner-box {
@@ -708,6 +711,8 @@
     <input id="bm-search" class="bm-search" type="text" inputmode="search"
            placeholder="Filter items…" autocomplete="off" autocapitalize="off"
            autocorrect="off" spellcheck="false">
+    <div id="bm-scope-warn" class="bm-scope-warn" style="display:none;">⚠ Item scope metadata missing. VIP filtering cannot be verified. Refresh / reseed BARINV cache.</div>
+    <div id="bm-debug" class="bm-debug">—</div>
   </div>
   <div class="bm-grid" id="bm-grid"></div>
 </div>
@@ -1915,6 +1920,13 @@ function lookupByBarcode(raw) {
   }) || null;
 }
 function setPickedItem(it) {
+  // Role/scope SAFETY backstop — vip_only stock is never selectable in
+  // barback mode. Lists/search/scan are already pre-filtered; this guard
+  // catches any remaining path so a VIP-only item can never be picked.
+  if (!isBarbackVisibleItem(it)) {
+    try { statusOn('save-status', 'This item is VIP/Table-only and is not available in Barback mode.', 'err'); } catch (_) {}
+    return;
+  }
   state.selectedItemId = it.id;
   state.selectedItemName = it.name;
   $('picked-item').style.display = 'block';
@@ -1926,12 +1938,63 @@ function setPickedItem(it) {
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
 }
+// ── Role / scope item visibility (PLAN-2026-06-11) ───────────────────
+// The barback link is ALWAYS a barback context — the session model has no
+// "server" link type (audit: barback_sessions has no role column; VIP is
+// a separate subsystem). public.items.service_mode ∈ {regular_bar,
+// vip_only, all_bars}. VIP-table / bottle-service stock (service_mode
+// 'vip_only') must NOT appear in a barback's item selection. Items that
+// are 'regular_bar', 'all_bars', or carry NO service_mode stay visible.
+//
+// Fail-open on missing metadata: cache.items is built by the external
+// BARINV app and may be a slim shape without service_mode. Hiding on
+// "unknown" would blank the whole catalog and brick the picker, so we
+// only hide an item we can POSITIVELY identify as vip_only. When the
+// cache carries no service_mode at all the filter is a no-op and we
+// cannot enforce separation client-side — surfaced once via console so a
+// missing-metadata cache is never silently mistaken for "all clear".
+function isBarbackVisibleItem(it) {
+  return !!it && String(it.service_mode || '').toLowerCase() !== 'vip_only';
+}
+function barbackVisibleItems() {
+  return (cache.items || []).filter(isBarbackVisibleItem);
+}
+let _scopeWarned = false;
+function scopeMetaPresent() {
+  return (cache.items || []).some(it => it && it.service_mode != null && it.service_mode !== '');
+}
+function warnIfNoScopeMetadata() {
+  if (_scopeWarned) return;
+  const items = cache.items || [];
+  if (items.length && !scopeMetaPresent()) {
+    _scopeWarned = true;
+    try { console.warn('[barback-scope] cached items carry no service_mode — vip_only items cannot be filtered on this device. Re-seed the offline cache from the BARINV app so scope separation is enforced.'); } catch (_) {}
+  }
+}
+// Update the VISIBLE Browse-picker diagnostics: a debug count line and,
+// when no item carries service_mode, an amber "metadata missing" banner.
+// Also logs the same counts so field testers can confirm with OR without
+// the Safari console.
+function updateScopeDiagnostics() {
+  const items   = cache.items || [];
+  const total   = items.length;
+  const hidden  = items.filter(it => it && String(it.service_mode || '').toLowerCase() === 'vip_only').length;
+  const visible = total - hidden;
+  const hasMeta = scopeMetaPresent();
+  const dbg = $('bm-debug');
+  if (dbg) dbg.textContent = total + ' items · ' + visible + ' visible · ' + hidden + ' VIP hidden · scope ' + (hasMeta ? '✓' : '✗ (no metadata)');
+  const warn = $('bm-scope-warn');
+  if (warn) warn.style.display = (total && !hasMeta) ? 'block' : 'none';
+  try { console.log('[barback-scope]', { total: total, visible: visible, vip_hidden: hidden, service_mode_present: hasMeta }); } catch (_) {}
+}
+
 const BROWSE_MAX = 60;  // browse-fallback list cap (recent first, then alphabetical)
 let _browseTouching = false;  // true while a finger is down on a browse row (keeps the list open)
 // Build the browse list: recent items (from Recent.load) first, then the rest
 // alphabetical, capped to BROWSE_MAX. Returns { items, recentCount }.
 function _browseItems() {
-  const all = (cache.items || []);
+  warnIfNoScopeMetadata();
+  const all = barbackVisibleItems();   // hide vip_only (VIP-table) stock from barbacks
   if (!all.length) return { items: [], recentCount: 0 };
   let recentIds = [];
   try {
@@ -2005,14 +2068,14 @@ function searchItems(q) {
   q = String(q || '').trim().toLowerCase();
   if (!q) { showBrowseList(); return; }   // browse fallback: empty query = browsable list
   const exact = lookupByBarcode(q);
-  if (exact) { setPickedItem(exact); return; }
-  const matches = (cache.items || []).filter(it => {
+  if (exact && isBarbackVisibleItem(exact)) { setPickedItem(exact); return; }   // never select vip_only by typed code
+  const matches = barbackVisibleItems().filter(it => {
     const n = String(it.name || '').toLowerCase();
     const s = String(it.sku || '').toLowerCase();
     return n.indexOf(q) >= 0 || s.indexOf(q) >= 0;
   }).slice(0, 40);
   if (!matches.length) {
-    $('search-results').innerHTML = '<div class="item-row" style="color:#666">(no matches in ' + (cache.items || []).length + ' cached items)</div>';
+    $('search-results').innerHTML = '<div class="item-row" style="color:#666">(no matches in ' + barbackVisibleItems().length + ' items)</div>';
   } else {
     $('search-results').innerHTML = matches.map(it =>
       '<div class="item-row" data-id="' + esc(it.id) + '">' +
@@ -2035,9 +2098,9 @@ $('search-input').addEventListener('keydown', (e) => {
     const v = $('search-input').value.trim();
     if (!v) return;
     const it = lookupByBarcode(v);
-    if (it) { setPickedItem(it); }
+    if (it && isBarbackVisibleItem(it)) { setPickedItem(it); }
     else {
-      const matches = (cache.items || []).filter(x =>
+      const matches = barbackVisibleItems().filter(x =>
         String(x.name || '').toLowerCase().indexOf(v.toLowerCase()) >= 0
       );
       if (matches.length === 1) setPickedItem(matches[0]);
@@ -2078,7 +2141,9 @@ function _bmCardHtml(it, isRecent) {
 }
 function renderBrowseGrid(filter) {
   const grid = $('bm-grid'); if (!grid) return;
-  const all = cache.items || [];
+  warnIfNoScopeMetadata();
+  updateScopeDiagnostics();            // visible debug counts + missing-metadata banner
+  const all = barbackVisibleItems();   // hide vip_only (VIP-table) stock from barbacks
   if (!all.length) { grid.innerHTML = '<div class="bm-empty">No items cached on this device yet.</div>'; return; }
   const q = String(filter || '').trim().toLowerCase();
   let list, recentCount;
@@ -2473,6 +2538,22 @@ async function onBarcodeScanned(code, controls) {
     // the unmatched code is now in the search field for review when
     // the operator closes the scanner.
     return;
+  }
+
+  // Role/scope SAFETY (PLAN-2026-06-11) — a resolved item that is
+  // service_mode='vip_only' is VIP-table / bottle-service stock and must
+  // NEVER be selected or auto-added in barback mode. Block here, before
+  // either the rapid or one-shot add branch, so neither path can write it.
+  // This is a pure safety gate — no scanner speed / camera / UX change.
+  if (!isBarbackVisibleItem(it)) {
+    try { console.log('[scanner] blocked vip_only', { item_id_suffix: String(it.id || '').slice(-8) }); } catch (_) {}
+    try { showScannerToast('🔒 ' + (it.name || 'Item') + ' is VIP/Table-only — not available in Barback mode', 'warn'); } catch (_) {}
+    if (!state.scannerContinuous) {
+      if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
+      try { closeScanner(); } catch (_) {}
+      try { statusOn('save-status', 'This item is VIP/Table-only and is not available in Barback mode.', 'err'); } catch (_) {}
+    }
+    return;   // rapid mode: stays open for the next bottle; vip_only simply ignored
   }
 
   if (state.scannerContinuous) {
