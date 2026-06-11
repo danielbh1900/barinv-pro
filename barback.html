@@ -1881,6 +1881,7 @@ function setPickedItem(it) {
     (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
   $('search-results').style.display = 'none';
   $('search-input').value = '';
+  try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
 }
 const BROWSE_MAX = 60;  // browse-fallback list cap (recent first, then alphabetical)
