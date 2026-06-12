@@ -1242,6 +1242,7 @@ const Auth = {
           token_payload: tokenPayload,
           staff_id: resp.staff?.id || staffId,
           staff_name: resp.staff?.name || null,
+          staff_role: resp.staff?.role || null,   // drives barback vs VIP/Server item scope
           issued_at: new Date().toISOString(),
           scoped_jwt: resp.jwt,
           jwt_expires_at: resp.expires_at || null,
@@ -1429,6 +1430,7 @@ const state = {
   tokenPayload: null,
   staffId: null,
   staffName: null,
+  staffRole: null,        // comma-separated staff.role from login bundle → operator mode
   selectedAction: null,
   selectedItemId: null,
   selectedItemName: null,
@@ -1512,6 +1514,7 @@ function boot() {
       state.staffName    = existing.staff_name ||
         ((cache.staff || []).find(x => x.id === state.staffId) || {}).name ||
         '(unknown staff)';
+      state.staffRole    = existing.staff_role || null;   // operator-mode source
       // Phase 3: re-attach JWT + bundle
       if (existing.scoped_jwt) {
         const msLeft = Phase3.msUntilExpiry(existing.scoped_jwt);
@@ -1706,6 +1709,7 @@ $('pin-submit').addEventListener('click', async () => {
   Feedback.ok();
   // Capture Phase 3 fields into state + session
   state.authPath = res.path || 'phase2_test';
+  state.staffRole = res.session.staff_role || null;   // barback vs VIP/Server item scope
   if (res.session.scoped_jwt) {
     state.jwt           = res.session.scoped_jwt;
     state.jwtExpiresAt  = res.session.jwt_expires_at || null;
@@ -1958,21 +1962,24 @@ function setPickedItem(it) {
 // barback (sees bar/both, never VIP). True server-mode needs the Edge to
 // surface the staff's real role (reported, not done — no Edge change).
 function getCurrentUserRole() {
-  try {
-    if (state && state.jwt) {
-      const parts = String(state.jwt).split('.');
-      if (parts.length >= 2) {
-        let p = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        while (p.length % 4) p += '=';
-        const c = JSON.parse(atob(p));
-        const r = String(c.barback_role || c.role || '').toLowerCase();
-        if (r.indexOf('admin') >= 0 || r.indexOf('manager') >= 0 || r.indexOf('owner') >= 0) return 'admin';
-        if (r.indexOf('server') >= 0) return 'server';
-        if (r.indexOf('barback') >= 0 || r === 'barback_user') return 'barback';
-      }
-    }
-  } catch (_) {}
-  return 'barback';   // safest default for an operator session
+  // Derive a single operator mode from the logged-in staff's role labels
+  // (state.staffRole, supplied by barback-pin-login). staff.role is a
+  // comma-separated set, e.g. "bartender, server" or "barback".
+  //
+  // PRIORITY (protects bar workflow): anyone tagged barback OR bartender
+  // operates in BAR mode (sees regular_bar + all_bars); only staff tagged
+  // server/table WITHOUT a bar role get VIP mode (sees vip_only). Pure
+  // managers/others default to BAR mode. When no role is present (legacy
+  // bundle pre-role), default to 'barback' so existing behaviour is kept.
+  const roleStr = String((state && state.staffRole) || '').toLowerCase();
+  if (roleStr) {
+    const toks = roleStr.split(/[,;/|]+/).map(t => t.trim()).filter(Boolean);
+    const has = (x) => toks.some(t => t.indexOf(x) >= 0);
+    if (has('barback') || has('bartender')) return 'barback';
+    if (has('server')  || has('table'))     return 'server';
+    return 'barback';
+  }
+  return 'barback';   // no role data yet → safe default (bar workflow)
 }
 
 // Normalize an item's scope → 'bar' | 'both' | 'vip' | 'hidden' | ''
@@ -1999,8 +2006,8 @@ function isItemAllowedForRole(item, role) {
   const scope = normalizeItemScope(item);
   if (role === 'admin') return scope !== 'hidden';   // admin: all except explicit hidden
   if (scope === '' || scope === 'hidden') return false;   // barback/server: never show unscoped/hidden
-  if (role === 'server') return scope === 'vip' || scope === 'both';
-  return scope === 'bar' || scope === 'both';   // barback (default)
+  if (role === 'server') return scope === 'vip';   // VIP/Server: vip_only (all_bars NOT shared with VIP for now)
+  return scope === 'bar' || scope === 'both';   // barback (default): regular_bar + all_bars
 }
 
 function getAllowedItemsForCurrentSession(items) {
@@ -2019,7 +2026,13 @@ function warnIfNoScopeMetadata() { /* superseded by the visible diagnostic */ }
 
 // Why a given item is blocked, for user-facing messages.
 function scopeBlockReason(item) {
-  return normalizeItemScope(item) === 'vip'
+  const scope = normalizeItemScope(item);
+  if (getCurrentUserRole() === 'server') {
+    return (scope === 'bar' || scope === 'both')
+      ? 'This is a bar item and is not available in VIP/Server mode.'
+      : 'Item scope not loaded — log out and log in to refresh, then try again.';
+  }
+  return scope === 'vip'
     ? 'This item is VIP/Table-only and is not available in Barback mode.'
     : 'Item scope not loaded — log out and log in to refresh, then try again.';
 }
