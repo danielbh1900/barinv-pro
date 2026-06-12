@@ -3347,6 +3347,14 @@ function updateRemainingDisplay() {
   const el = $('remaining-display'); if (!el) return;
   if (!state.selectedItemId) { el.textContent = ''; return; }
   const w = normalizeWeightG(($('weight-g-input') && $('weight-g-input').value) || '');
+  // Scale Phase 1 polish — live PARTIAL guidance: surface the weight
+  // requirement the moment PARTIAL is selected (not only when Add fails).
+  const _bs = ($('bottle-state-select') && $('bottle-state-select').value) || '';
+  if (_bs === 'PARTIAL' && w == null) {
+    el.textContent = '⚠ PARTIAL needs weight (grams) before Add to Review';
+    el.style.color = '#fbbf24';
+    return;
+  }
   const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
   if (!prof) {
     // Scale V3 — weight captured but no profile → REVIEW REQUIRED (matches the
@@ -3416,6 +3424,9 @@ function saveWeightProfileFromInputs() {
       if ($('profile-full-input')) $('profile-full-input').value = w;
     });
     if ($('weight-g-input')) $('weight-g-input').addEventListener('input', updateRemainingDisplay);
+    // Scale Phase 1 polish — refresh the remaining/hint line when bottle
+    // state changes (e.g. PARTIAL → show the weight prompt immediately).
+    if ($('bottle-state-select')) $('bottle-state-select').addEventListener('change', updateRemainingDisplay);
   } catch (_) {}
 })();
 
