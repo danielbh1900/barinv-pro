@@ -1961,25 +1961,57 @@ function setPickedItem(it) {
 // regardless of staff.role, so a server using this link is treated as a
 // barback (sees bar/both, never VIP). True server-mode needs the Edge to
 // surface the staff's real role (reported, not done — no Edge change).
+// AREA TYPE of the session's assigned bar — the PRIMARY mode signal. The
+// bundle's bars now carry bar_type (barback-pin-login); a session bound to
+// a bar_type='table' area is a VIP/Table session regardless of who logged
+// in. Falls back to the bar NAME ("TABLE …") when bar_type is absent.
+function getSessionAreaType() {
+  const bars = cache.bars || [];
+  const p = (state && state.tokenPayload) || {};
+  const barId = (state && state.selectedBarId) || p.bar_id;
+  const lookup = (id) => bars.find(b => b.id === id) || null;
+  const typeOf = (b) => b ? String(b.bar_type || '').toLowerCase().trim() : '';
+  const nameOf = (b, fallback) => String((b && b.name) || fallback || '').toLowerCase().trim();
+
+  let bt = '', nm = '';
+  if (barId) { const b = lookup(barId); bt = typeOf(b); nm = nameOf(b, p.bar_name); }
+  if (!bt && !barId) nm = String(p.bar_name || '').toLowerCase().trim();
+  // Multi-bar session with no single bar: if every allowed bar shares one
+  // type, use it.
+  if (!bt && !barId && Array.isArray(p.allowed_bars) && p.allowed_bars.length) {
+    const types = new Set(p.allowed_bars.map(id => typeOf(lookup(id))).filter(Boolean));
+    if (types.size === 1) bt = Array.from(types)[0];
+  }
+  if (bt) return bt;                                   // explicit bar_type wins
+  if (/^table\b|^vip\b|\btable\b|\bvip\b/.test(nm)) return 'table';   // name fallback
+  return '';
+}
+// Map a bar_type/area to an operator mode. '' = can't tell from area.
+function areaTypeToMode(bt) {
+  if (!bt) return '';
+  if (bt === 'table' || bt === 'vip' || bt === 'booth') return 'server';
+  if (bt === 'bar' || bt === 'warehouse' || bt === 'liquor_room' || bt === 'liquor room') return 'barback';
+  return '';   // kitchen / security / coatcheck / etc. — not an item-service area
+}
+// Derive the operator's role/mode. PRECEDENCE (per PLAN-2026-06-11):
+//   1. (future) explicit session operator_mode — reserved
+//   2. AREA TYPE of the assigned bar (bar_type) — a TABLE session is VIP
+//      even if the staff member is a bartender/manager combo
+//   3. staff.role labels (secondary)
+//   4. 'unknown' → FAIL CLOSED (no items + clear mode error). We never
+//      silently default to barback, so a mis-tagged TABLE session can't
+//      fall through to showing bar stock.
 function getCurrentUserRole() {
-  // Derive a single operator mode from the logged-in staff's role labels
-  // (state.staffRole, supplied by barback-pin-login). staff.role is a
-  // comma-separated set, e.g. "bartender, server" or "barback".
-  //
-  // PRIORITY (protects bar workflow): anyone tagged barback OR bartender
-  // operates in BAR mode (sees regular_bar + all_bars); only staff tagged
-  // server/table WITHOUT a bar role get VIP mode (sees vip_only). Pure
-  // managers/others default to BAR mode. When no role is present (legacy
-  // bundle pre-role), default to 'barback' so existing behaviour is kept.
+  const areaMode = areaTypeToMode(getSessionAreaType());
+  if (areaMode) return areaMode;
   const roleStr = String((state && state.staffRole) || '').toLowerCase();
   if (roleStr) {
     const toks = roleStr.split(/[,;/|]+/).map(t => t.trim()).filter(Boolean);
     const has = (x) => toks.some(t => t.indexOf(x) >= 0);
     if (has('barback') || has('bartender')) return 'barback';
     if (has('server')  || has('table'))     return 'server';
-    return 'barback';
   }
-  return 'barback';   // no role data yet → safe default (bar workflow)
+  return 'unknown';   // no area type, no recognized role → fail closed
 }
 
 // Normalize an item's scope → 'bar' | 'both' | 'vip' | 'hidden' | ''
@@ -2005,9 +2037,10 @@ function normalizeItemScope(item) {
 function isItemAllowedForRole(item, role) {
   const scope = normalizeItemScope(item);
   if (role === 'admin') return scope !== 'hidden';   // admin: all except explicit hidden
-  if (scope === '' || scope === 'hidden') return false;   // barback/server: never show unscoped/hidden
-  if (role === 'server') return scope === 'vip';   // VIP/Server: vip_only (all_bars NOT shared with VIP for now)
-  return scope === 'bar' || scope === 'both';   // barback (default): regular_bar + all_bars
+  if (scope === '' || scope === 'hidden') return false;   // never show unscoped/hidden to operators
+  if (role === 'server')  return scope === 'vip';                     // VIP/Server: vip_only only
+  if (role === 'barback') return scope === 'bar' || scope === 'both'; // barback: regular_bar + all_bars
+  return false;   // 'unknown' mode → FAIL CLOSED (no items)
 }
 
 function getAllowedItemsForCurrentSession(items) {
@@ -2054,14 +2087,20 @@ function updateScopeDiagnostics() {
   const hidden  = total - visible;
   const allScoped = (total > 0 && miss === 0);
   const src = cache.source || 'none';
-  const line = 'role=' + role + ' · src=' + src + ' · total=' + total +
+  const areaType = getSessionAreaType() || '—';
+  const staffRoleStr = (state && state.staffRole) ? String(state.staffRole).toLowerCase() : '—';
+  const line = 'finalMode=' + role + ' · areaType=' + areaType + ' · staffRole=' + staffRoleStr +
+    ' · src=' + src + ' · total=' + total +
     ' · regular_bar=' + reg + ' · all_bars=' + allb + ' · vip_only=' + vip +
     (hid ? ' · hidden=' + hid : '') + ' · missing=' + miss +
     ' · visible=' + visible + ' · hidden=' + hidden + ' · scope ' + (allScoped ? '✓' : '✗');
   const dbg = $('bm-debug'); if (dbg) dbg.textContent = line;
   const warn = $('bm-scope-warn');
   if (warn) {
-    if (total && miss > 0) {
+    if (role === 'unknown') {
+      warn.style.display = 'block';
+      warn.textContent = '⚠ Session mode could not be determined (area type unknown, no recognized role). All items hidden for safety — check this session\'s area/bar assignment, then log out and log in again.';
+    } else if (total && miss > 0) {
       warn.style.display = 'block';
       warn.textContent = (miss === total)
         ? '⚠ No item scope on this device (src=' + src + '). All items hidden for safety. Log OUT and log IN to refresh the item bundle, then reopen Browse Items.'
@@ -2070,7 +2109,7 @@ function updateScopeDiagnostics() {
       warn.style.display = 'none';
     }
   }
-  try { console.log('[barback-scope]', { role: role, src: src, total: total, regular_bar: reg, all_bars: allb, vip_only: vip, hidden_flag: hid, missing: miss, visible: visible, hidden: hidden }); } catch (_) {}
+  try { console.log('[barback-scope]', { finalMode: role, areaType: areaType, staffRole: staffRoleStr, src: src, total: total, regular_bar: reg, all_bars: allb, vip_only: vip, hidden_flag: hid, missing: miss, visible: visible, hidden: hidden }); } catch (_) {}
 }
 
 const BROWSE_MAX = 60;  // browse-fallback list cap (recent first, then alphabetical)
@@ -2230,9 +2269,12 @@ function renderBrowseGrid(filter) {
   const all = barbackVisibleItems();   // role-scoped, fail-closed (hides vip_only + unscoped)
   if (!all.length) {
     const totalCached = (cache.items || []).length;
-    grid.innerHTML = '<div class="bm-empty">' + (totalCached
-      ? 'No items available in your view. If you expect items here, log OUT and log IN to refresh the item bundle (item scope is missing on this device).'
-      : 'No items cached on this device yet.') + '</div>';
+    const msg = (getCurrentUserRole() === 'unknown')
+      ? 'Session mode could not be determined — items hidden for safety. Check this session\'s area/bar assignment, then log out and log in again.'
+      : (totalCached
+          ? 'No items available in your view. If you expect items here, log OUT and log IN to refresh the item bundle (item scope is missing on this device).'
+          : 'No items cached on this device yet.');
+    grid.innerHTML = '<div class="bm-empty">' + msg + '</div>';
     return;
   }
   const q = String(filter || '').trim().toLowerCase();
