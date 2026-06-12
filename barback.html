@@ -1924,7 +1924,7 @@ function setPickedItem(it) {
   // barback mode. Lists/search/scan are already pre-filtered; this guard
   // catches any remaining path so a VIP-only item can never be picked.
   if (!isBarbackVisibleItem(it)) {
-    try { statusOn('save-status', 'This item is VIP/Table-only and is not available in Barback mode.', 'err'); } catch (_) {}
+    try { statusOn('save-status', scopeBlockReason(it), 'err'); } catch (_) {}
     return;
   }
   state.selectedItemId = it.id;
@@ -1938,54 +1938,126 @@ function setPickedItem(it) {
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
 }
-// ── Role / scope item visibility (PLAN-2026-06-11) ───────────────────
-// The barback link is ALWAYS a barback context — the session model has no
-// "server" link type (audit: barback_sessions has no role column; VIP is
-// a separate subsystem). public.items.service_mode ∈ {regular_bar,
-// vip_only, all_bars}. VIP-table / bottle-service stock (service_mode
-// 'vip_only') must NOT appear in a barback's item selection. Items that
-// are 'regular_bar', 'all_bars', or carry NO service_mode stay visible.
+// ════════════════════════════════════════════════════════════════════
+//  Role / scope item visibility — SINGLE SOURCE OF TRUTH (hardened)
+// ════════════════════════════════════════════════════════════════════
+// Source of scope: public.items.service_mode, surfaced into the login
+// bundle by barback-pin-login (regular_bar / all_bars / vip_only).
 //
-// Fail-open on missing metadata: cache.items is built by the external
-// BARINV app and may be a slim shape without service_mode. Hiding on
-// "unknown" would blank the whole catalog and brick the picker, so we
-// only hide an item we can POSITIVELY identify as vip_only. When the
-// cache carries no service_mode at all the filter is a no-op and we
-// cannot enforce separation client-side — surfaced once via console so a
-// missing-metadata cache is never silently mistaken for "all clear".
-function isBarbackVisibleItem(it) {
-  return !!it && String(it.service_mode || '').toLowerCase() !== 'vip_only';
+// FAIL-CLOSED: an item with NO resolvable scope is NOT shown to a
+// barback/server (prevents leaking VIP stock through a slim/stale bundle
+// that lacks service_mode). Only an admin context may see unscoped items.
+// Every item-entry path (browse grid, browse list, typed search, exact
+// code, Enter, scanner, setPickedItem, addToReview) routes through these.
+
+// Operator role. The barback web-link mints barback_role='barback' in the
+// JWT (barback-pin-login). We read it defensively from the decoded JWT;
+// default 'barback'. NOTE: this page cannot today distinguish a SERVER
+// staff from a barback — the Edge JWT hardcodes barback_role='barback'
+// regardless of staff.role, so a server using this link is treated as a
+// barback (sees bar/both, never VIP). True server-mode needs the Edge to
+// surface the staff's real role (reported, not done — no Edge change).
+function getCurrentUserRole() {
+  try {
+    if (state && state.jwt) {
+      const parts = String(state.jwt).split('.');
+      if (parts.length >= 2) {
+        let p = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        while (p.length % 4) p += '=';
+        const c = JSON.parse(atob(p));
+        const r = String(c.barback_role || c.role || '').toLowerCase();
+        if (r.indexOf('admin') >= 0 || r.indexOf('manager') >= 0 || r.indexOf('owner') >= 0) return 'admin';
+        if (r.indexOf('server') >= 0) return 'server';
+        if (r.indexOf('barback') >= 0 || r === 'barback_user') return 'barback';
+      }
+    }
+  } catch (_) {}
+  return 'barback';   // safest default for an operator session
 }
-function barbackVisibleItems() {
-  return (cache.items || []).filter(isBarbackVisibleItem);
+
+// Normalize an item's scope → 'bar' | 'both' | 'vip' | 'hidden' | ''
+// ('' = unknown/unscoped). Canonical field is service_mode; aliases are
+// accepted defensively so a renamed field can't silently bypass scope.
+function normalizeItemScope(item) {
+  if (!item) return '';
+  const raw = String(
+    item.service_mode != null ? item.service_mode :
+    item.serviceMode  != null ? item.serviceMode  :
+    item.scope        != null ? item.scope        :
+    item.item_scope   != null ? item.item_scope   : ''
+  ).toLowerCase().trim();
+  if (!raw) return '';
+  if (raw === 'regular_bar' || raw === 'bar' || raw === 'bar_only') return 'bar';
+  if (raw === 'all_bars'    || raw === 'both')                       return 'both';
+  if (raw === 'vip_only' || raw === 'vip' || raw === 'table_only' || raw === 'server_only') return 'vip';
+  if (raw === 'hidden' || raw === 'disabled') return 'hidden';
+  return '';   // unrecognized token → unscoped → fail-closed
 }
-let _scopeWarned = false;
+
+// Is this item selectable by the given role? FAIL-CLOSED on unknown scope.
+function isItemAllowedForRole(item, role) {
+  const scope = normalizeItemScope(item);
+  if (role === 'admin') return scope !== 'hidden';   // admin: all except explicit hidden
+  if (scope === '' || scope === 'hidden') return false;   // barback/server: never show unscoped/hidden
+  if (role === 'server') return scope === 'vip' || scope === 'both';
+  return scope === 'bar' || scope === 'both';   // barback (default)
+}
+
+function getAllowedItemsForCurrentSession(items) {
+  const role = getCurrentUserRole();
+  return (items || []).filter(it => isItemAllowedForRole(it, role));
+}
+
+// Back-compat wrappers used across the selection surfaces.
+function isBarbackVisibleItem(it) { return isItemAllowedForRole(it, getCurrentUserRole()); }
+function barbackVisibleItems()    { return getAllowedItemsForCurrentSession(cache.items); }
+
 function scopeMetaPresent() {
-  return (cache.items || []).some(it => it && it.service_mode != null && it.service_mode !== '');
+  return (cache.items || []).some(it => normalizeItemScope(it) !== '');
 }
-function warnIfNoScopeMetadata() {
-  if (_scopeWarned) return;
-  const items = cache.items || [];
-  if (items.length && !scopeMetaPresent()) {
-    _scopeWarned = true;
-    try { console.warn('[barback-scope] cached items carry no service_mode — vip_only items cannot be filtered on this device. Re-seed the offline cache from the BARINV app so scope separation is enforced.'); } catch (_) {}
-  }
+function warnIfNoScopeMetadata() { /* superseded by the visible diagnostic */ }
+
+// Why a given item is blocked, for user-facing messages.
+function scopeBlockReason(item) {
+  return normalizeItemScope(item) === 'vip'
+    ? 'This item is VIP/Table-only and is not available in Barback mode.'
+    : 'Item scope not loaded — log out and log in to refresh, then try again.';
 }
-// Update the VISIBLE Browse-picker diagnostics: a debug count line and,
-// when no item carries service_mode, an amber "metadata missing" banner.
-// Also logs the same counts so field testers can confirm with OR without
-// the Safari console.
+
+// VISIBLE Browse-picker diagnostics: role, bundle SOURCE (phase3 = fresh
+// Edge bundle; localStorage = stale external cache), full service_mode
+// distribution, and a fail-closed warning banner. Logged too.
 function updateScopeDiagnostics() {
-  const items   = cache.items || [];
-  const total   = items.length;
-  const hidden  = items.filter(it => it && String(it.service_mode || '').toLowerCase() === 'vip_only').length;
-  const visible = total - hidden;
-  const hasMeta = scopeMetaPresent();
-  const dbg = $('bm-debug');
-  if (dbg) dbg.textContent = total + ' items · ' + visible + ' visible · ' + hidden + ' VIP hidden · scope ' + (hasMeta ? '✓' : '✗ (no metadata)');
+  const items = cache.items || [];
+  const role  = getCurrentUserRole();
+  const total = items.length;
+  let reg = 0, allb = 0, vip = 0, hid = 0, miss = 0;
+  items.forEach(it => {
+    const s = normalizeItemScope(it);
+    if (s === 'bar') reg++; else if (s === 'both') allb++; else if (s === 'vip') vip++;
+    else if (s === 'hidden') hid++; else miss++;
+  });
+  const visible = getAllowedItemsForCurrentSession(items).length;
+  const hidden  = total - visible;
+  const allScoped = (total > 0 && miss === 0);
+  const src = cache.source || 'none';
+  const line = 'role=' + role + ' · src=' + src + ' · total=' + total +
+    ' · regular_bar=' + reg + ' · all_bars=' + allb + ' · vip_only=' + vip +
+    (hid ? ' · hidden=' + hid : '') + ' · missing=' + miss +
+    ' · visible=' + visible + ' · hidden=' + hidden + ' · scope ' + (allScoped ? '✓' : '✗');
+  const dbg = $('bm-debug'); if (dbg) dbg.textContent = line;
   const warn = $('bm-scope-warn');
-  if (warn) warn.style.display = (total && !hasMeta) ? 'block' : 'none';
-  try { console.log('[barback-scope]', { total: total, visible: visible, vip_hidden: hidden, service_mode_present: hasMeta }); } catch (_) {}
+  if (warn) {
+    if (total && miss > 0) {
+      warn.style.display = 'block';
+      warn.textContent = (miss === total)
+        ? '⚠ No item scope on this device (src=' + src + '). All items hidden for safety. Log OUT and log IN to refresh the item bundle, then reopen Browse Items.'
+        : '⚠ ' + miss + ' of ' + total + ' items have no scope and are hidden for safety. Log out/in to refresh.';
+    } else {
+      warn.style.display = 'none';
+    }
+  }
+  try { console.log('[barback-scope]', { role: role, src: src, total: total, regular_bar: reg, all_bars: allb, vip_only: vip, hidden_flag: hid, missing: miss, visible: visible, hidden: hidden }); } catch (_) {}
 }
 
 const BROWSE_MAX = 60;  // browse-fallback list cap (recent first, then alphabetical)
@@ -2141,10 +2213,15 @@ function _bmCardHtml(it, isRecent) {
 }
 function renderBrowseGrid(filter) {
   const grid = $('bm-grid'); if (!grid) return;
-  warnIfNoScopeMetadata();
-  updateScopeDiagnostics();            // visible debug counts + missing-metadata banner
-  const all = barbackVisibleItems();   // hide vip_only (VIP-table) stock from barbacks
-  if (!all.length) { grid.innerHTML = '<div class="bm-empty">No items cached on this device yet.</div>'; return; }
+  updateScopeDiagnostics();            // visible debug counts + role/source + fail-closed banner
+  const all = barbackVisibleItems();   // role-scoped, fail-closed (hides vip_only + unscoped)
+  if (!all.length) {
+    const totalCached = (cache.items || []).length;
+    grid.innerHTML = '<div class="bm-empty">' + (totalCached
+      ? 'No items available in your view. If you expect items here, log OUT and log IN to refresh the item bundle (item scope is missing on this device).'
+      : 'No items cached on this device yet.') + '</div>';
+    return;
+  }
   const q = String(filter || '').trim().toLowerCase();
   let list, recentCount;
   if (q) {
@@ -2546,14 +2623,15 @@ async function onBarcodeScanned(code, controls) {
   // either the rapid or one-shot add branch, so neither path can write it.
   // This is a pure safety gate — no scanner speed / camera / UX change.
   if (!isBarbackVisibleItem(it)) {
-    try { console.log('[scanner] blocked vip_only', { item_id_suffix: String(it.id || '').slice(-8) }); } catch (_) {}
-    try { showScannerToast('🔒 ' + (it.name || 'Item') + ' is VIP/Table-only — not available in Barback mode', 'warn'); } catch (_) {}
+    const _scope = normalizeItemScope(it);
+    try { console.log('[scanner] blocked out-of-scope', { item_id_suffix: String(it.id || '').slice(-8), scope: _scope || 'missing' }); } catch (_) {}
+    try { showScannerToast('🔒 ' + (it.name || 'Item') + (_scope === 'vip' ? ' is VIP/Table-only — not available in Barback mode' : ' — item scope not loaded; log out/in to refresh'), 'warn'); } catch (_) {}
     if (!state.scannerContinuous) {
       if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
       try { closeScanner(); } catch (_) {}
-      try { statusOn('save-status', 'This item is VIP/Table-only and is not available in Barback mode.', 'err'); } catch (_) {}
+      try { statusOn('save-status', scopeBlockReason(it), 'err'); } catch (_) {}
     }
-    return;   // rapid mode: stays open for the next bottle; vip_only simply ignored
+    return;   // rapid mode: stays open for the next bottle; out-of-scope simply ignored
   }
 
   if (state.scannerContinuous) {
@@ -3303,6 +3381,14 @@ function saveWeightProfileFromInputs() {
 function addToReview(payload) {
   const p = state.tokenPayload;
   if (!p) return { ok:false, error:'no session' };
+  // Role/scope SAFETY backstop — never let an out-of-scope item (e.g.
+  // vip_only for a barback, or any unscoped item under fail-closed) reach
+  // Drafts, regardless of caller path (button, scanner, HID, draft edit).
+  const _scopeItem = (cache.items || []).find(x => x.id === payload.item_id) ||
+                     { service_mode: payload.service_mode };
+  if (!isItemAllowedForRole(_scopeItem, getCurrentUserRole())) {
+    return { ok:false, error: scopeBlockReason(_scopeItem) };
+  }
   // Defensive qty guard. Every caller path (manual SAVE button,
   // rapid-mode scanner, HID scanner) is supposed to validate before
   // calling, but a single hard guard here means qty=0 / NaN can never
