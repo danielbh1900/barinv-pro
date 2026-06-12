@@ -2038,8 +2038,8 @@ function isItemAllowedForRole(item, role) {
   const scope = normalizeItemScope(item);
   if (role === 'admin') return scope !== 'hidden';   // admin: all except explicit hidden
   if (scope === '' || scope === 'hidden') return false;   // never show unscoped/hidden to operators
-  if (role === 'server')  return scope === 'vip';                     // VIP/Server: vip_only only
-  if (role === 'barback') return scope === 'bar' || scope === 'both'; // barback: regular_bar + all_bars
+  if (role === 'server')  return scope === 'vip' || scope === 'both'; // VIP/Server: vip_only + all_bars (shared)
+  if (role === 'barback') return scope === 'bar' || scope === 'both'; // barback: regular_bar + all_bars (shared)
   return false;   // 'unknown' mode → FAIL CLOSED (no items)
 }
 
