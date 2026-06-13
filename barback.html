@@ -554,13 +554,16 @@
 
     <div class="row">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <label style="margin:0;">RECENT</label>
+        <label style="margin:0;">RECENT (submitted)</label>
         <div>
           <button class="btn-secondary" id="recent-undo" style="font-size:10px;padding:6px 10px;border-radius:4px;cursor:pointer;">↶ UNDO LAST</button>
           <button class="btn-secondary" id="recent-viewall" style="font-size:10px;padding:6px 10px;border-radius:4px;cursor:pointer;margin-left:4px;">VIEW ALL</button>
         </div>
       </div>
-      <div id="recent" class="recent">No saves yet.</div>
+      <!-- Draft indicator — unsent items live in Review, NOT in RECENT (which
+           is submitted/synced history). Shows when drafts exist; tap to open. -->
+      <div id="draft-summary" style="display:none;margin:4px 0;padding:9px 11px;background:#3f2c0a;color:#fbbf24;border:1px solid #7a5a12;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;"></div>
+      <div id="recent" class="recent">No submitted saves yet.</div>
     </div>
   </div>
 
@@ -1864,6 +1867,7 @@ function enterMain() {
   startExpirationTimer();
   refreshQueueCount();
   renderRecentMini();
+  try { refreshDraftCount(); } catch (_) {}   // init main-screen draft indicator (persisted drafts)
   renderRecentItemChips();   // Phase 5
   refreshBleCard();
   // Phase 5: start telemetry heartbeat when running Phase 3 (signed JWT)
@@ -2777,7 +2781,7 @@ async function onBarcodeScanned(code, controls) {
         try { statusOn('save-status', '✓ Scanned: ' + it.name + ' — enter weight, then ADD TO REVIEW', 'ok'); } catch (_) {}
       } else {
         try { statusOn('save-status',
-          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : ''))
+          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' — tap VIEW REVIEW')
                                 : ('⚠ Not added: ' + it.name + ' — ' + ((addRes && addRes.error) || 'unknown')),
           (addRes && addRes.ok) ? 'ok' : 'warn'); } catch (_) {}
       }
@@ -3739,7 +3743,12 @@ $('save-btn').addEventListener('click', async () => {
   clearStatus('save-status');
   if (!state.tokenPayload) { statusOn('save-status','Session lost — log in again','err'); return; }
   if (!state.selectedAction) { showOverlay('PICK ACTION', 'TAKEN or RETURN', 'err'); Feedback.warn(); return; }
-  if (!state.selectedItemId) { showOverlay('PICK ITEM', 'Scan or search first', 'err'); Feedback.warn(); return; }
+  if (!state.selectedItemId) {
+    let _dn = 0; try { _dn = Drafts.count(); } catch (_) {}
+    if (_dn > 0) { showOverlay('ALREADY ADDED', 'Scan / search another item, or tap VIEW REVIEW (' + _dn + ')', 'ok'); }
+    else { showOverlay('PICK ITEM', 'Scan or search first', 'err'); }
+    Feedback.warn(); return;
+  }
 
   // Double-tap guard (manual): same (item, action, qty) within 1.5 s.
   const qtyToSave = parseFloat($('qty-input').value);
@@ -3819,7 +3828,7 @@ $('ok-overlay').addEventListener('click', () => $('ok-overlay').classList.remove
 function renderRecentMini() {
   const arr = Recent.load().slice(0, 8);
   const el = $('recent');
-  if (!arr.length) { el.innerHTML = '<div class="muted small">No saves yet.</div>'; return; }
+  if (!arr.length) { el.innerHTML = '<div class="muted small">No submitted saves yet. (Unsent items are in Review — see above.)</div>'; return; }
   el.innerHTML = arr.map(r => {
     const badge = r.undone ? 'undone'
                 : (r.status === 'SYNCED' ? 'synced'
@@ -3836,6 +3845,7 @@ function renderRecentMini() {
 }
 $('recent-undo').addEventListener('click', undoLast);
 $('recent-viewall').addEventListener('click', () => showReview());
+if ($('draft-summary')) $('draft-summary').addEventListener('click', () => showReview());
 
 // ════════════════════════════════════════════════════════════════════
 //  Undo last (test mode)
@@ -4962,6 +4972,22 @@ async function submitAllDraftsToBarinv() {
 // mutation, and after every addToReview.
 function refreshDraftCount() {
   const n = Drafts.count();
+  // Main-screen draft indicator — so the operator sees drafts even though the
+  // RECENT list only shows submitted saves. VIEW ALL → 'VIEW REVIEW (N)' + an
+  // amber summary banner. Runs regardless of which screen is mounted.
+  try {
+    const va = $('recent-viewall');
+    if (va) va.textContent = (n > 0) ? ('VIEW REVIEW (' + n + ')') : 'VIEW ALL';
+    const ds = $('draft-summary');
+    if (ds) {
+      if (n > 0) {
+        ds.style.display = 'block';
+        ds.textContent = '📝 ' + n + ' draft' + (n !== 1 ? 's' : '') + ' waiting in Review — tap to view / submit';
+      } else {
+        ds.style.display = 'none';
+      }
+    }
+  } catch (_) {}
   const btn = $('review-submit-all');
   if (!btn) return;
   if (n > 0) {
