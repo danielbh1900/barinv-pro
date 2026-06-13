@@ -1933,6 +1933,11 @@ function setPickedItem(it) {
   }
   state.selectedItemId = it.id;
   state.selectedItemName = it.name;
+  // QTY default — every newly-picked item starts at qty=1, so qty can never
+  // carry over from a previous item (covers both add-then-select and
+  // change-qty-then-switch-item-without-adding). The post-add handler also
+  // resets to 1; this guarantees it at the item-select boundary too.
+  if ($('qty-input')) $('qty-input').value = '1';
   $('picked-item').style.display = 'block';
   $('picked-item').innerHTML = '✓ <b>' + esc(it.name || '?') + '</b>' +
     (it.size ? ' · ' + esc(it.size) : '') +
