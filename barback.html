@@ -205,6 +205,14 @@
     .bm-scope-warn { background:#3f2c0a; color:#fbbf24; border:1px solid #7a5a12; border-radius:6px;
                      padding:7px 9px; font-size:11px; font-weight:700; line-height:1.3; }
     .bm-debug { font-size:10px; color:#6b7280; letter-spacing:0.02em; }
+    /* Opening / Multi-Bar selector chips (mobile-friendly, 2-col grid) */
+    #multibar-list { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .mb-chip { width:100%; padding:13px 10px; font-size:14px; font-weight:800; letter-spacing:0.02em;
+               text-align:center; background:#1f2937; color:#cbd5e1; border:1px solid #374151;
+               border-radius:8px; cursor:pointer; white-space:nowrap; overflow:hidden;
+               text-overflow:ellipsis; -webkit-tap-highlight-color:transparent; }
+    .mb-chip.on { background:#064e3b; color:#6ee7b7; border-color:#10b981; }
+    .mb-chip:active { transform:scale(0.98); }
 
     /* ── Scanner modal ───────────────────────────────────────────── */
     .scanner-box {
@@ -466,7 +474,7 @@
           <button type="button" id="multibar-none" class="browse-btn" style="margin:0;">Clear</button>
           <span id="multibar-count" class="small" style="color:#fbbf24;font-weight:700;">0 bars selected</span>
         </div>
-        <div id="multibar-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <div id="multibar-list"></div>
         <div class="muted small" style="margin-top:4px;">Opening items only. PARTIAL bottles must be added one bar at a time.</div>
       </div>
     </div>
@@ -503,8 +511,8 @@
     <div class="row">
       <label>BOTTLE STATE (optional)</label>
       <select id="bottle-state-select" style="width:100%;padding:12px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
-        <option value="NOT_WEIGHED" selected>NOT WEIGHED</option>
-        <option value="UNOPENED">UNOPENED</option>
+        <option value="UNOPENED" selected>UNOPENED</option>
+        <option value="NOT_WEIGHED">NOT WEIGHED</option>
         <option value="PARTIAL">PARTIAL</option>
       </select>
       <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
@@ -1854,7 +1862,7 @@ function enterMain() {
   $('qty-input').value = '1';
   $('notes-input').value = '';
   if ($('weight-g-input')) $('weight-g-input').value = '';
-  if ($('bottle-state-select')) $('bottle-state-select').value = 'NOT_WEIGHED';
+  if ($('bottle-state-select')) $('bottle-state-select').value = 'UNOPENED';
   state.selectedItemId = null;
   state.selectedItemName = null;
   try { if (typeof refreshWeightProfileUI === 'function') refreshWeightProfileUI(); } catch (_) {}
@@ -2770,7 +2778,10 @@ async function onBarcodeScanned(code, controls) {
     } catch (_) {}
     // On a successful non-weight add, reset the visible qty to 1 for the next
     // entry (mirrors the manual post-add reset).
-    if (!requireWeight && addRes && addRes.ok) { try { $('qty-input').value = '1'; } catch (_) {} }
+    if (!requireWeight && addRes && addRes.ok) {
+      try { $('qty-input').value = '1'; } catch (_) {}
+      try { $('bottle-state-select').value = 'UNOPENED'; } catch (_) {}   // default for opening
+    }
     // Stop the camera + close after the brief toast, then route the operator:
     // weight-required → PICK the item (enter weight, then ADD); normal → done.
     setTimeout(function () {
@@ -3196,7 +3207,9 @@ function normalizeBottleState(raw, weight_g) {
 function buildWeightNotes(weight_g, bottle_state) {
   const w = normalizeWeightG(weight_g);
   const state = normalizeBottleState(bottle_state, weight_g);
-  if (w == null && state === 'NOT_WEIGHED') return '';
+  // No weight + a non-measured state (NOT_WEIGHED or the new UNOPENED default)
+  // → plain count add; emit no weight tags so normal event notes stay clean.
+  if (w == null && (state === 'NOT_WEIGHED' || state === 'UNOPENED')) return '';
   const tags = [];
   if (w != null) tags.push('[WEIGHT_G=' + w + ']');
   if (state !== 'NOT_WEIGHED') tags.push('[BOTTLE_STATE=' + state + ']');
@@ -3613,12 +3626,19 @@ function multiBarEligible() {
 function multiBarActive() {
   return !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
 }
+// Single source of truth for the Add button: state.multiBars.length.
+// Multi-Bar ON + 0 bars → disabled "SELECT BARS FIRST"; ON + N → "FOR N BARS";
+// OFF → "ADD TO REVIEW". (No disabled-guard — this owns the disabled state.)
 function syncAddButtonLabel() {
-  const btn = $('save-btn'); if (!btn || btn.disabled) return;
+  const btn = $('save-btn'); if (!btn) return;
+  if (btn.dataset.busy === '1') return;   // don't clobber the transient "… ADDING"
   const n = (state.multiBars || []).length;
-  btn.textContent = (state.multiBarMode && n > 0)
-    ? ('➕ ADD TO REVIEW FOR ' + n + ' BAR' + (n !== 1 ? 'S' : ''))
-    : '➕ ADD TO REVIEW';
+  if (state.multiBarMode && getCurrentUserRole() === 'barback') {
+    if (n > 0) { btn.textContent = '➕ ADD TO REVIEW FOR ' + n + ' BAR' + (n !== 1 ? 'S' : ''); btn.disabled = false; }
+    else       { btn.textContent = '👆 SELECT BARS FIRST'; btn.disabled = true; }
+  } else {
+    btn.textContent = '➕ ADD TO REVIEW'; btn.disabled = false;
+  }
 }
 function updateMultiBarCount() {
   const n = (state.multiBars || []).length;
@@ -3640,19 +3660,25 @@ function renderMultiBarUI() {
   const allowed = new Set(bars.map(b => b.id));
   state.multiBars = (state.multiBars || []).filter(id => allowed.has(id));   // drop any non-assigned
   const sel = new Set(state.multiBars);
-  $('multibar-list').innerHTML = bars.map(b =>
-    '<label style="display:inline-flex;align-items:center;gap:5px;padding:6px 10px;background:#1f2937;' +
-      'border:1px solid #374151;border-radius:6px;font-size:13px;color:#e5e7eb;cursor:pointer;">' +
-      '<input type="checkbox" class="mb-bar" value="' + esc(b.id) + '"' + (sel.has(b.id) ? ' checked' : '') + '> ' +
-      esc(b.name || '?') + '</label>').join('');
-  Array.from($('multibar-list').querySelectorAll('.mb-bar')).forEach(cb => {
-    cb.addEventListener('change', () => {
-      const s = new Set(state.multiBars || []);
-      if (cb.checked) s.add(cb.value); else s.delete(cb.value);
-      state.multiBars = Array.from(s);
-      updateMultiBarCount();
+  const list = $('multibar-list');
+  if (list) {
+    // Tappable chips (2-col grid via CSS) — clear selected/unselected state,
+    // full bar name, no detached native checkbox, no broken text.
+    list.innerHTML = bars.map(b => {
+      const on = sel.has(b.id);
+      return '<button type="button" class="mb-chip' + (on ? ' on' : '') + '" data-bar="' + esc(b.id) + '">' +
+        (on ? '✓ ' : '') + esc(b.name || '?') + '</button>';
+    }).join('');
+    Array.from(list.querySelectorAll('.mb-chip')).forEach(chip => {
+      chip.addEventListener('click', () => {
+        const id = chip.getAttribute('data-bar');
+        const s = new Set(state.multiBars || []);
+        if (s.has(id)) s.delete(id); else s.add(id);
+        state.multiBars = Array.from(s);
+        renderMultiBarUI();   // re-render chip states + count + button from one source
+      });
     });
-  });
+  }
   if ($('multibar-panel')) $('multibar-panel').style.display = state.multiBarMode ? '' : 'none';
   updateMultiBarCount();
 }
@@ -3699,7 +3725,7 @@ function addCurrentSelectionToReview(opts) {
     return { ok:false, error:'TAKEN qty must be a whole number (bottles)' };
   }
 
-  const bottleState = ($('bottle-state-select') && $('bottle-state-select').value) || 'NOT_WEIGHED';
+  const bottleState = ($('bottle-state-select') && $('bottle-state-select').value) || 'UNOPENED';
   // Multi-Bar guards (barback only) — PARTIAL is single-bar only.
   const multi = multiBarActive();
   if (state.multiBarMode && getCurrentUserRole() === 'barback') {
@@ -3760,9 +3786,11 @@ $('save-btn').addEventListener('click', async () => {
 
   // PLAN-2026-06-05 — Review-First: SAVE button ADDS TO REVIEW (no eventsInsert).
   // PLAN-2026-06-13 — routed through the SHARED core so manual + scanner match.
+  $('save-btn').dataset.busy = '1';
   $('save-btn').disabled = true;
   $('save-btn').textContent = '… ADDING';
   const res = addCurrentSelectionToReview({});
+  $('save-btn').dataset.busy = '';
   $('save-btn').disabled = false;
   syncAddButtonLabel();
 
@@ -3797,7 +3825,7 @@ $('save-btn').addEventListener('click', async () => {
   $('qty-input').value = '1';
   $('notes-input').value = '';
   $('weight-g-input').value = '';
-  $('bottle-state-select').value = 'NOT_WEIGHED';
+  $('bottle-state-select').value = 'UNOPENED';   // default for opening workflow
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — hide/reset profile (item cleared)
   try { syncAddButtonLabel(); } catch (_) {}
 
