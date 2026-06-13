@@ -2725,24 +2725,20 @@ async function onBarcodeScanned(code, controls) {
     // was the "stuck after first scan" symptom). The per-barcode dupe lock
     // (DUPE_SCAN_WINDOW_MS) auto-expires, so the SAME bottle can be rescanned
     // after the window while immediate repeats stay suppressed. We stop NOTHING.
+    // Rapid = qty 1 per scan, via the SHARED core (Multi-Bar fan-out + draft
+    // refresh handled inside). Message states the actual qty, never the count.
     let addRes;
-    try {
-      addRes = addToReview({
-        item_id: it.id, item_name: it.name, qty: 1,
-        action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
-      });
-    } catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
+    try { addRes = addCurrentSelectionToReview({ item: it, qtyOverride: 1 }); }
+    catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
     let n = 0; try { n = Drafts.count(); } catch (_) {}
     try {
       showScannerToast(
         (addRes && addRes.ok)
-          ? '✓ ' + it.name + ' · Added to Review (' + n + ')'
+          ? ('✓ ' + it.name + ' · qty 1' + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' added · ' + n + ' draft' + (n !== 1 ? 's' : ''))
           : '⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name,
         (addRes && addRes.ok) ? 'ok' : 'warn'
       );
     } catch (_) {}
-    try { refreshDraftCount(); } catch (_) {}
-    try { renderRecentMini(); } catch (_) {}
   } else {
     // SINGLE-SCAN — guard against a second decode firing during the close window.
     if (state.scannerClosing) return;
@@ -2750,32 +2746,29 @@ async function onBarcodeScanned(code, controls) {
     const requireWeight = shouldRequireWeightBeforeAdd();
     let addRes = null, n = 0;
     if (!requireWeight) {
-      // NORMAL single-scan — AUTO-ADD to Review (qty=1) now, then close. Every
-      // side-effect is wrapped so a throw can't bubble into the decode callback.
-      try {
-        addRes = addToReview({
-          item_id: it.id, item_name: it.name, qty: 1,
-          action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
-        });
-      } catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
+      // NORMAL single-scan — add via the SHARED core using the VISIBLE qty
+      // (not forced 1) + Multi-Bar fan-out. Then close. Wrapped so a throw
+      // can't bubble into the decode callback.
+      try { addRes = addCurrentSelectionToReview({ item: it }); }
+      catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
       try { n = Drafts.count(); } catch (_) {}
-      try { refreshDraftCount(); } catch (_) {}
-      try { renderRecentMini(); } catch (_) {}
     }
-    // Brief success toast inside the scanner before it closes.
+    // Brief toast inside the scanner before it closes — states the actual qty.
     try {
       showScannerToast(
         requireWeight
           ? ('✓ ' + it.name + ' · Scanned — weigh, then ADD')
           : ((addRes && addRes.ok)
-              ? ('✓ ' + it.name + ' · Added to Review (' + n + ')')
+              ? ('✓ ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' added · ' + n + ' draft' + (n !== 1 ? 's' : ''))
               : ('⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name)),
         (requireWeight || (addRes && addRes.ok)) ? 'ok' : 'warn'
       );
     } catch (_) {}
-    // Stop the camera + close the overlay after the brief toast, then route the
-    // operator: weight-required → PICK the item (enter weight, then ADD TO REVIEW);
-    // normal → already added (just confirm on the main screen).
+    // On a successful non-weight add, reset the visible qty to 1 for the next
+    // entry (mirrors the manual post-add reset).
+    if (!requireWeight && addRes && addRes.ok) { try { $('qty-input').value = '1'; } catch (_) {} }
+    // Stop the camera + close after the brief toast, then route the operator:
+    // weight-required → PICK the item (enter weight, then ADD); normal → done.
     setTimeout(function () {
       if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
       try { closeScanner(); } catch (_) {}          // also stops the stream + ROI loop
@@ -2784,7 +2777,7 @@ async function onBarcodeScanned(code, controls) {
         try { statusOn('save-status', '✓ Scanned: ' + it.name + ' — enter weight, then ADD TO REVIEW', 'ok'); } catch (_) {}
       } else {
         try { statusOn('save-status',
-          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' (qty 1)')
+          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : ''))
                                 : ('⚠ Not added: ' + it.name + ' — ' + ((addRes && addRes.error) || 'unknown')),
           (addRes && addRes.ok) ? 'ok' : 'warn'); } catch (_) {}
       }
@@ -2865,22 +2858,17 @@ function installHidListener() {
         const it = lookupByBarcode(code);
         if (it) {
           if (state.selectedAction) {
-            // PLAN-2026-06-05 — HID continuous-speed path now ADDS TO
-            // REVIEW (qty=1) rather than calling eventsInsert. Same
-            // Review-First safety as the touch SAVE button and the
-            // rapid-mode camera scanner. addToReview is synchronous.
-            const r = addToReview({
-              item_id: it.id, item_name: it.name, qty: 1,
-              action: state.selectedAction, bar_id: state.selectedBarId, notes: '',
-            });
+            // PLAN-2026-06-13 — HID continuous-speed path now goes through the
+            // SHARED core (qty=1), so it matches the touch SAVE button and the
+            // camera scanner (Multi-Bar fan-out + draft refresh inside).
+            let r; try { r = addCurrentSelectionToReview({ item: it, qtyOverride: 1 }); }
+            catch (e) { r = { ok:false, error:(e && e.message) || 'add failed' }; }
             const n = Drafts.count();
             statusOn('save-status',
-              r.ok
-                ? '✓ HID added to Review: ' + it.name + ' (' + n + ' draft' + (n !== 1 ? 's' : '') + ')'
-                : '⚠ HID add failed: ' + (r.error || 'unknown') + ' — ' + it.name,
-              r.ok ? 'ok' : 'warn');
-            try { refreshDraftCount(); } catch (_) {}
-            renderRecentMini();
+              (r && r.ok)
+                ? ('✓ HID added: ' + it.name + ' · qty 1' + (r.multi ? (' × ' + r.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''))
+                : ('⚠ HID add failed: ' + ((r && r.error) || 'unknown') + ' — ' + it.name),
+              (r && r.ok) ? 'ok' : 'warn');
           } else {
             setPickedItem(it);
             statusOn('save-status', '✓ HID scan: ' + it.name + ' — pick TAKEN / RETURN to add to Review', 'info');
@@ -3681,121 +3669,118 @@ if ($('multibar-none')) $('multibar-none').addEventListener('click', () => {
   state.multiBars = []; renderMultiBarUI();
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  Shared Add-to-Review CORE (PLAN-2026-06-13) — used by BOTH the manual
+//  SAVE button and the camera/HID scanner so they can never drift.
+// ════════════════════════════════════════════════════════════════════
+// Validates the current selection (action/bar/qty/weight/state) against an
+// item (explicit override for scanner; else state.selectedItemId), fans out
+// one draft per selected bar in Multi-Bar mode, refreshes draft state +
+// renderReview, and returns { ok, added, fail, qty, multi, error, partial }.
+//   opts.item        — explicit item object (scanner). Default: current selection.
+//   opts.qtyOverride — force a qty (rapid/HID scanner = 1). Default: visible qty.
+// Does NOT do UI overlays / reset / dup-guard — callers handle those.
+function addCurrentSelectionToReview(opts) {
+  opts = opts || {};
+  if (!state.tokenPayload)   return { ok:false, error:'Session lost — log in again' };
+  if (!state.selectedAction) return { ok:false, error:'Pick TAKEN or RETURN first' };
+  const itemId   = opts.item ? opts.item.id   : state.selectedItemId;
+  const itemName = opts.item ? opts.item.name : state.selectedItemName;
+  if (!itemId) return { ok:false, error:'Pick or scan an item first' };
+  const itemObj = opts.item || _selectedItemObj() || { id: itemId, name: itemName };
+
+  const qty = (opts.qtyOverride != null) ? opts.qtyOverride : parseFloat($('qty-input').value);
+  if (!isFinite(qty) || qty <= 0) return { ok:false, error:'Qty must be greater than zero' };
+  if (state.selectedAction === 'TAKEN' && qty !== Math.floor(qty)) {
+    return { ok:false, error:'TAKEN qty must be a whole number (bottles)' };
+  }
+
+  const bottleState = ($('bottle-state-select') && $('bottle-state-select').value) || 'NOT_WEIGHED';
+  // Multi-Bar guards (barback only) — PARTIAL is single-bar only.
+  const multi = multiBarActive();
+  if (state.multiBarMode && getCurrentUserRole() === 'barback') {
+    if ((state.multiBars || []).length === 0) return { ok:false, error:'Select at least one bar, or turn off Multi-Bar' };
+    if (bottleState === 'PARTIAL') return { ok:false, partial:true, error:'PARTIAL bottles can only be added to one bar at a time' };
+  }
+  const weightRaw = (($('weight-g-input') && $('weight-g-input').value) || '').trim();
+  if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'Weight (grams) must be a positive number, or leave it blank' };
+  if (bottleState === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'PARTIAL bottle requires weight in grams' };
+
+  const _svProf = WeightProfiles.getForItem(WeightProfiles.keyForItem(itemObj));
+  const base = {
+    item_id: itemId, item_name: itemName, qty: qty, action: state.selectedAction,
+    notes: (($('notes-input') && $('notes-input').value) || '').trim(),
+    weight_g: ($('weight-g-input') && $('weight-g-input').value) || '',
+    bottle_state: bottleState,
+    tare_weight_g: _svProf ? _svProf.tare_weight_g : null,
+    full_weight_g: _svProf ? _svProf.full_weight_g : null,
+    bottle_size_ml: parseBottleSizeMl(itemObj),
+  };
+  let added = 0, fail = 0, lastErr = null;
+  if (multi) {
+    const allowed = new Set(multiBarAssignedBars().map(b => b.id));
+    for (const bid of (state.multiBars || []).filter(id => allowed.has(id))) {
+      const rr = addToReview({ ...base, bar_id: bid });
+      if (rr && rr.ok) added++; else { fail++; lastErr = (rr && rr.error) || 'add failed'; }
+    }
+  } else {
+    const rr = addToReview({ ...base, bar_id: state.selectedBarId });
+    if (rr && rr.ok) added++; else { fail++; lastErr = (rr && rr.error) || 'add failed'; }
+  }
+  try { refreshDraftCount(); } catch (_) {}
+  try { refreshQueueCount(); } catch (_) {}
+  try { renderRecentMini(); } catch (_) {}
+  try { renderReview(); } catch (_) {}   // keep Transaction Review in sync immediately
+  return { ok: added > 0, added: added, fail: fail, qty: qty, multi: multi,
+           error: added > 0 ? null : (lastErr || 'add failed') };
+}
+
 $('save-btn').addEventListener('click', async () => {
   clearStatus('save-status');
   if (!state.tokenPayload) { statusOn('save-status','Session lost — log in again','err'); return; }
   if (!state.selectedAction) { showOverlay('PICK ACTION', 'TAKEN or RETURN', 'err'); Feedback.warn(); return; }
   if (!state.selectedItemId) { showOverlay('PICK ITEM', 'Scan or search first', 'err'); Feedback.warn(); return; }
-  const qty = parseFloat($('qty-input').value);
-  // qty must be finite and STRICTLY positive. Zero is not a valid
-  // bottle/return — refuse it so it never reaches Drafts.
-  if (!isFinite(qty) || qty <= 0) {
-    showOverlay('BAD QTY', 'Qty must be greater than zero', 'err'); Feedback.warn(); return;
-  }
-  if (state.selectedAction === 'TAKEN' && qty !== Math.floor(qty)) {
-    showOverlay('BAD QTY', 'TAKEN qty must be a whole number (bottles)', 'err'); Feedback.warn(); return;
-  }
 
-  // Opening / Multi-Bar guards (barback only) — checked BEFORE weight rules so
-  // the PARTIAL message is authoritative. PARTIAL is single-bar only (one
-  // weight can't represent N bars); require ≥1 selected bar when ON.
-  if (state.multiBarMode && getCurrentUserRole() === 'barback') {
-    if ((state.multiBars || []).length === 0) {
-      showOverlay('PICK BARS', 'Select at least one bar, or turn off Multi-Bar.', 'err'); Feedback.warn(); return;
-    }
-    if ($('bottle-state-select').value === 'PARTIAL') {
-      showOverlay('ONE BAR FOR PARTIAL', 'PARTIAL bottles can only be added to one bar at a time.', 'err'); Feedback.warn(); return;
-    }
-  }
-
-  // Manual Scale MVP — weight is OPTIONAL: a blank field keeps the
-  // count-only flow untouched. But if the operator typed something, it
-  // must be a positive number (no zero / negative / garbage).
-  const weightRaw = ($('weight-g-input').value || '').trim();
-  if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) {
-    showOverlay('BAD WEIGHT', 'Weight (grams) must be a positive number, or leave it blank', 'err');
-    Feedback.warn(); return;
-  }
-  // PARTIAL bottles MUST carry a positive weight — that's the whole
-  // point of capturing partials for reusable inventory.
-  if ($('bottle-state-select').value === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) {
-    showOverlay('WEIGH PARTIAL', 'PARTIAL bottle requires weight in grams', 'err');
-    Feedback.warn(); return;
-  }
-
-  // Double-tap guard: same (item, action, qty) within 1.5 s is almost
-  // always an accidental second tap. Reject silently.
-  if (isDuplicateSave(state.selectedAction, state.selectedItemId, qty)) {
+  // Double-tap guard (manual): same (item, action, qty) within 1.5 s.
+  const qtyToSave = parseFloat($('qty-input').value);
+  if (isFinite(qtyToSave) && isDuplicateSave(state.selectedAction, state.selectedItemId, qtyToSave)) {
     Feedback.warn();
     statusOn('save-status', '⚠ Duplicate suppressed (same item + qty within 1.5 s)', 'warn');
     return;
   }
-  const _multi = multiBarActive();
 
-  // PLAN-2026-06-05 — Review-First: SAVE button now ADDS TO REVIEW
-  // instead of immediately calling eventsInsert. Drafts pile up in
-  // Drafts.load() and the operator taps SUBMIT ALL TO BARINV on the
-  // Transaction Review screen to commit them through the audited
-  // Outbox + eventsInsert path under the strict claim-scoped RLS.
+  // PLAN-2026-06-05 — Review-First: SAVE button ADDS TO REVIEW (no eventsInsert).
+  // PLAN-2026-06-13 — routed through the SHARED core so manual + scanner match.
   $('save-btn').disabled = true;
   $('save-btn').textContent = '… ADDING';
-
-  const _svProf = WeightProfiles.getForItem(profileKeyForSelectedItem());
-  const _basePayload = {
-    item_id: state.selectedItemId,
-    item_name: state.selectedItemName,
-    qty: qty,
-    action: state.selectedAction,
-    notes: ($('notes-input').value || '').trim(),
-    weight_g: $('weight-g-input').value,
-    bottle_state: $('bottle-state-select').value,
-    tare_weight_g: _svProf ? _svProf.tare_weight_g : null,     // Scale V2.1 (draft-only)
-    full_weight_g: _svProf ? _svProf.full_weight_g : null,     // Scale V2.1 (draft-only)
-    bottle_size_ml: parseBottleSizeMl(_selectedItemObj()),     // Scale V3 (draft-only)
-  };
-  let r, mbAdded = 0, mbFail = 0;
-  if (_multi) {
-    // Fan out: one draft row per selected ASSIGNED bar (assigned-only filter
-    // is a safety net). addToReview() mints a unique client_event_id each call.
-    const allowed = new Set(multiBarAssignedBars().map(b => b.id));
-    const targets = (state.multiBars || []).filter(id => allowed.has(id));
-    for (const bid of targets) {
-      const rr = addToReview({ ..._basePayload, bar_id: bid });
-      if (rr && rr.ok) mbAdded++; else mbFail++;
-    }
-    r = { ok: mbAdded > 0, error: mbFail ? (mbFail + ' bar(s) not added') : null };
-  } else {
-    r = addToReview({ ..._basePayload, bar_id: state.selectedBarId });
-  }
-
+  const res = addCurrentSelectionToReview({});
   $('save-btn').disabled = false;
   syncAddButtonLabel();
 
-  if (_multi && mbAdded > 0) {
-    Feedback.ok();
-    showOverlay('✓ ADDED FOR ' + mbAdded + ' BAR' + (mbAdded !== 1 ? 'S' : ''),
-      state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty +
-      (mbFail ? (' · ' + mbFail + ' failed') : ''), 'ok');
-    statusOn('save-status',
-      'Added to Review for ' + mbAdded + ' bar' + (mbAdded !== 1 ? 's' : '') +
-        ' — tap VIEW ALL to submit', 'ok');
-  } else if (r.ok && r.staged) {
-    Feedback.ok();
-    showOverlay('✓ STAGE SAVED', state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty, 'ok');
-  } else if (r.ok) {
-    Feedback.ok();
-    const n = Drafts.count();
-    showOverlay('✓ ADDED TO REVIEW',
-      'Not submitted yet · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' pending', 'ok');
-    statusOn('save-status',
-      'Added to Review · ' + n + ' draft' + (n !== 1 ? 's' : '') +
-        ' pending — tap VIEW ALL to submit', 'ok');
-  } else {
+  if (!res.ok) {
     Feedback.warn();
-    showOverlay('⚠ NOT ADDED', (r.error || 'unknown error'), 'err');
+    showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
+    return;   // keep the operator's entry so they can fix and retry
+  }
+  Feedback.ok();
+  const n = Drafts.count();
+  if (res.multi) {
+    showOverlay('✓ ADDED FOR ' + res.added + ' BAR' + (res.added !== 1 ? 'S' : ''),
+      state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + res.qty +
+      (res.fail ? (' · ' + res.fail + ' failed') : ''), 'ok');
+    statusOn('save-status',
+      'Added to Review for ' + res.added + ' bar' + (res.added !== 1 ? 's' : '') +
+        ' · qty ' + res.qty + ' — tap VIEW ALL to submit', 'ok');
+  } else {
+    showOverlay('✓ ADDED TO REVIEW',
+      state.selectedItemName + ' · qty ' + res.qty + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' pending', 'ok');
+    statusOn('save-status',
+      'Added to Review · qty ' + res.qty + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') +
+        ' pending — tap VIEW ALL to submit', 'ok');
   }
 
-  // POST-ADD: preserve action/bar/staff/session. Reset only item + qty + notes.
+  // POST-ADD (success only): preserve action/bar/staff/session + Multi-Bar
+  // selection; reset item + qty + notes + weight + state.
   state.selectedItemId = null;
   state.selectedItemName = null;
   $('picked-item').style.display = 'none';
@@ -3805,9 +3790,7 @@ $('save-btn').addEventListener('click', async () => {
   $('weight-g-input').value = '';
   $('bottle-state-select').value = 'NOT_WEIGHED';
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — hide/reset profile (item cleared)
-  refreshQueueCount();
-  try { refreshDraftCount(); } catch (_) {}
-  renderRecentMini();
+  try { syncAddButtonLabel(); } catch (_) {}
 
   // Auto-rescan if rapid-mode is on
   if ($('rapid-mode').checked) {
