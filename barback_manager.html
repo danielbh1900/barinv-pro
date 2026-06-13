@@ -317,7 +317,7 @@
             <div class="row">
               <label>WHO CAN USE THIS LINK</label>
               <div class="multi-select" id="c-staff"></div>
-              <div class="small muted">Select barbacks or manager-level staff allowed to log in with this link.</div>
+              <div class="small muted">Only selected-night barbacks/managers can log in with this link.</div>
             </div>
           </div>
         </div>
@@ -1018,26 +1018,9 @@ async function loadVenueContext() {
     .eq('venue_id', state.venueId)
     .order('name');
   state.staffList = staffRows || [];
-  // RIGHT SIDE = "WHO CAN USE THIS LINK" — login-eligible operational staff
-  // (barback + manager-level). This is a VENUE capability, NOT a per-night bar
-  // assignment: a server/table manager (e.g. Irish) must always be selectable
-  // even if not on this night's bar assignments. Plain bartenders/servers are
-  // excluded unless their role also carries barback/manager/admin/lead/supervisor.
-  const linkStaff = state.staffList.filter(canUseBarbackLink);
-  $('c-staff').innerHTML = linkStaff.length
-    ? linkStaff.map(s =>
-        '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
-          ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
-            '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a>' +
-        '</label>'
-      ).join('')
-    : '<div class="muted small">No barback or manager-level staff found for this venue.</div>';
-  $$('[data-rotate-staff]').forEach(a => {
-    a.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName);
-    });
-  });
+  // RIGHT SIDE ("WHO CAN USE THIS LINK") is populated PER SELECTED NIGHT by
+  // renderNightScoped() = this night's non-revoked assignees ∩ login-eligible
+  // roles (barback/manager-level). Not a venue-wide list.
   // Populate audit staff filter
   const sel = $('audit-filter-staff');
   if (sel) {
@@ -1056,20 +1039,22 @@ async function loadVenueContext() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  Night-scoped BAR selectors (PLAN-2026-06-13) — frontend-only.
+//  Night-scoped selectors (PLAN-2026-06-13) — frontend-only.
 // ════════════════════════════════════════════════════════════════════
-// LEFT SIDE only: shows the bars active for the selected night (night_bars)
-// — bar_type 'bar' (VIP tables + internal areas excluded) — labelled with the
-// assigned staff (night_staff_assignments.allowed_bar_ids; assigned_area_name
-// is not populated in current data). Underlying value stays the real bar_id;
-// only the LABEL adds names. The RIGHT-side "WHO CAN USE THIS LINK" staff box
-// is venue-level (login capability) and is populated in loadVenueContext.
+// LEFT: bars active for the selected night (night_bars), bar_type 'bar' (VIP
+// tables + internal areas excluded), labelled with assigned staff names
+// (night_staff_assignments.allowed_bar_ids). RIGHT ("WHO CAN USE THIS LINK"):
+// this night's NON-REVOKED assignees ∩ login-eligible roles (canUseBarbackLink
+// on the staff record). NOT venue-wide — a manager/barback not assigned to
+// this night does NOT appear. Underlying values stay real bar_id / staff_id;
+// only LEFT labels add names.
 async function renderNightScoped(nightId) {
-  const barSel = $('c-bar'), allowedBox = $('c-allowed-bars');
+  const barSel = $('c-bar'), allowedBox = $('c-allowed-bars'), staffBox = $('c-staff');
   if (!barSel || !allowedBox) return;
   if (!nightId) {
     barSel.innerHTML = '<option value="">(any bar)</option>';
     allowedBox.innerHTML = '<div class="muted small">Select a night.</div>';
+    if (staffBox) staffBox.innerHTML = '<div class="muted small">Select a night.</div>';
     return;
   }
   // 1. Active bars for this night
@@ -1111,6 +1096,30 @@ async function renderNightScoped(nightId) {
       '<option value="' + esc(b.id) + '">' + esc(labelFor(b)) + '</option>').join('');
     allowedBox.innerHTML = activeBars.map(b =>
       '<label><input type="checkbox" value="' + esc(b.id) + '"> ' + esc(labelFor(b)) + '</label>').join('');
+  }
+
+  // RIGHT SIDE — WHO CAN USE THIS LINK = this night's non-revoked assignees
+  // INTERSECT login-eligible roles (canUseBarbackLink on the staff record).
+  // Not venue-wide; never falls back to all staff.
+  if (staffBox) {
+    const byId = {}; (state.staffList || []).forEach(s => { byId[s.id] = s; });
+    const seen = new Set(); const eligible = [];
+    assigns.forEach(a => {
+      const s = byId[a.staff_id];
+      if (s && !seen.has(s.id) && canUseBarbackLink(s)) { seen.add(s.id); eligible.push(s); }
+    });
+    eligible.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    staffBox.innerHTML = eligible.length
+      ? eligible.map(s =>
+          '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+            ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
+              '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>'
+        ).join('')
+      : '<div class="muted small">No barback or manager-level staff assigned for this night.</div>';
+    $$('[data-rotate-staff]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation();
+        rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
+    });
   }
 }
 
