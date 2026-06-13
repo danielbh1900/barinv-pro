@@ -132,6 +132,9 @@
       letter-spacing:normal; margin:0; text-transform:none;
     }
     .multi-select input { width:auto; }
+    /* Two-column bars|staff layout on wide screens; stacked on mobile. */
+    .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+    @media (max-width:700px) { .cols-2 { grid-template-columns:1fr; gap:0; } }
     .small { font-size:11px; color:#888; line-height:1.5; }
     .muted { color:#666; }
     code { background:#000; padding:1px 6px; border-radius:3px; color:#fbbf24; font-size:11px; }
@@ -298,18 +301,24 @@
           <label>NIGHT</label>
           <select id="c-night"></select>
         </div>
-        <div class="row">
-          <label>PRIMARY BAR (optional — leave blank for multi-bar)</label>
-          <select id="c-bar"><option value="">(any bar)</option></select>
-        </div>
-        <div class="row">
-          <label>ADDITIONAL BARS THE BARBACK CAN POST TO</label>
-          <div class="multi-select" id="c-allowed-bars"></div>
-          <div class="small muted">Leave all unchecked to lock the barback to the primary bar only.</div>
-        </div>
-        <div class="row">
-          <label>STAFF ASSIGNED (uncheck = any cached staff allowed)</label>
-          <div class="multi-select" id="c-staff"></div>
+        <div class="cols-2">
+          <div>
+            <div class="row">
+              <label>PRIMARY BAR (optional — leave blank for multi-bar)</label>
+              <select id="c-bar"><option value="">(any bar)</option></select>
+            </div>
+            <div class="row">
+              <label>ADDITIONAL BARS THE BARBACK CAN POST TO</label>
+              <div class="multi-select" id="c-allowed-bars"></div>
+              <div class="small muted">Active bars for the selected night only. Leave all unchecked to lock the barback to the primary bar.</div>
+            </div>
+          </div>
+          <div>
+            <div class="row">
+              <label>STAFF ASSIGNED (this night)</label>
+              <div class="multi-select" id="c-staff"></div>
+            </div>
+          </div>
         </div>
         <div class="row">
           <label>EXPIRES AT</label>
@@ -977,16 +986,13 @@ async function loadVenueContext() {
 
   // Bars
   const { data: bars } = await SB.from('bars')
-    .select('id, name, active')
+    .select('id, name, active, bar_type')
     .eq('venue_id', state.venueId)
     .order('name');
   state.bars = (bars || []).filter(b => b.active !== false);
-  $('c-bar').innerHTML = '<option value="">(any bar)</option>' + state.bars.map(b =>
-    '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>'
-  ).join('');
-  $('c-allowed-bars').innerHTML = state.bars.map(b =>
-    '<label><input type="checkbox" value="' + esc(b.id) + '"> ' + esc(b.name || '?') + '</label>'
-  ).join('');
+  // #c-bar / #c-allowed-bars are populated PER SELECTED NIGHT by
+  // renderNightScoped() — only that night's active bars are shown (with the
+  // assigned staff name in the label). See below + the #c-night change handler.
 
   // Staff
   // PLAN-2026-06-04 — barback-link recipients are capability-filtered.
@@ -1005,25 +1011,8 @@ async function loadVenueContext() {
     .eq('venue_id', state.venueId)
     .order('name');
   state.staffList = staffRows || [];
-  const linkStaff = state.staffList.filter(canUseBarbackLink);
-  $('c-staff').innerHTML = linkStaff.length
-    ? linkStaff.map(s =>
-        '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
-          ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
-            '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a>' +
-        '</label>'
-      ).join('')
-    : '<div class="muted small">No barbacks / managers / table-managers found for this venue. ' +
-      'Edit staff roles to include "barback", "manager", or "table manager" to make them eligible.</div>';
-  // Wire per-staff rotate links (click consumes the event so the
-  // checkbox above doesn't toggle as a side-effect)
-  $$('[data-rotate-staff]').forEach(a => {
-    a.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName);
-    });
-  });
+  // #c-staff is populated PER SELECTED NIGHT by renderNightScoped() — only
+  // staff assigned to that night are shown.
   // Populate audit staff filter
   const sel = $('audit-filter-staff');
   if (sel) {
@@ -1032,6 +1021,96 @@ async function loadVenueContext() {
   }
 
   setExpiresQuick('end');
+
+  // Scope bars + staff to the selected night, and re-scope when it changes.
+  if ($('c-night') && !$('c-night')._wired) {
+    $('c-night')._wired = true;
+    $('c-night').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+  }
+  if (state.nights[0]) { try { await renderNightScoped(state.nights[0].id); } catch (_) {} }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Night-scoped bar + staff selectors (PLAN-2026-06-13) — frontend-only.
+// ════════════════════════════════════════════════════════════════════
+// Shows ONLY the bars active for the selected night (night_bars) — bar_type
+// 'bar' (VIP tables + internal areas excluded from the barback bar selector)
+// — labelled with the assigned staff (from night_staff_assignments.
+// allowed_bar_ids; assigned_area_name is not populated in current data).
+// Staff Assigned shows only that night's non-revoked operational assignees.
+// Underlying values stay real bar_id / staff_id; only the LABEL adds names.
+async function renderNightScoped(nightId) {
+  const barSel = $('c-bar'), allowedBox = $('c-allowed-bars'), staffBox = $('c-staff');
+  if (!barSel || !allowedBox || !staffBox) return;
+  if (!nightId) {
+    barSel.innerHTML = '<option value="">(any bar)</option>';
+    allowedBox.innerHTML = '<div class="muted small">Select a night.</div>';
+    staffBox.innerHTML = '<div class="muted small">Select a night.</div>';
+    return;
+  }
+  // 1. Active bars for this night
+  let activeBarIds = new Set();
+  try {
+    const { data: nb } = await SB.from('night_bars').select('bar_id').eq('night_id', nightId);
+    (nb || []).forEach(r => { if (r && r.bar_id) activeBarIds.add(r.bar_id); });
+  } catch (_) {}
+  // 2. Non-revoked staff assignments for this night
+  let assigns = [];
+  try {
+    const { data: a } = await SB.from('night_staff_assignments')
+      .select('staff_id, role, allowed_bar_ids, revoked')
+      .eq('night_id', nightId).eq('venue_id', state.venueId);
+    assigns = (a || []).filter(x => x && !x.revoked);
+  } catch (_) {}
+
+  // 3. Active operational bars = venue bars in night_bars AND bar_type 'bar'
+  const activeBars = (state.bars || []).filter(b =>
+    activeBarIds.has(b.id) && String(b.bar_type || '').toLowerCase() === 'bar');
+
+  // 4. bar_id -> assigned staff names (via allowed_bar_ids)
+  const nameById = {}; (state.staffList || []).forEach(s => { nameById[s.id] = s.name || '?'; });
+  const barStaff = {};
+  assigns.forEach(a => (a.allowed_bar_ids || []).forEach(bid => {
+    const nm = nameById[a.staff_id]; if (!nm) return;
+    (barStaff[bid] = barStaff[bid] || []);
+    if (barStaff[bid].indexOf(nm) < 0) barStaff[bid].push(nm);
+  }));
+  const labelFor = (b) => (b.name || '?') + ' — ' +
+    ((barStaff[b.id] && barStaff[b.id].length) ? barStaff[b.id].join(', ') : 'Unassigned');
+
+  // 5. Primary bar + additional bars (value = real bar_id; label adds name)
+  if (!activeBars.length) {
+    barSel.innerHTML = '<option value="">(any bar)</option>';
+    allowedBox.innerHTML = '<div class="muted small">No active bars/tables configured for this night.</div>';
+  } else {
+    barSel.innerHTML = '<option value="">(any bar)</option>' + activeBars.map(b =>
+      '<option value="' + esc(b.id) + '">' + esc(labelFor(b)) + '</option>').join('');
+    allowedBox.innerHTML = activeBars.map(b =>
+      '<label><input type="checkbox" value="' + esc(b.id) + '"> ' + esc(labelFor(b)) + '</label>').join('');
+  }
+
+  // 6. Staff assigned this night (operational roles only)
+  const opRole = (r) => { const t = String(r || '').toLowerCase();
+    return t.indexOf('barback') >= 0 || t.indexOf('bartender') >= 0 || t.indexOf('server') >= 0 || t.indexOf('manager') >= 0; };
+  const seen = new Set(); const assignedStaff = [];
+  assigns.forEach(a => {
+    if (opRole(a.role) && nameById[a.staff_id] && !seen.has(a.staff_id)) {
+      seen.add(a.staff_id); assignedStaff.push({ id: a.staff_id, name: nameById[a.staff_id] });
+    }
+  });
+  assignedStaff.sort((x, y) => String(x.name).localeCompare(String(y.name)));
+  if (!assignedStaff.length) {
+    staffBox.innerHTML = '<div class="muted small">No staff assigned for this night.</div>';
+  } else {
+    staffBox.innerHTML = assignedStaff.map(s =>
+      '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name) +
+        ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name) +
+        '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>').join('');
+    $$('[data-rotate-staff]').forEach(a => {
+      a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation();
+        rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
+    });
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
