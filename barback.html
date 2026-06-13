@@ -1958,14 +1958,13 @@ function setPickedItem(it) {
   }
   state.selectedItemId = it.id;
   state.selectedItemName = it.name;
-  // QTY default — every newly-picked item starts at qty=1, so qty can never
-  // carry over from a previous item (covers both add-then-select and
-  // change-qty-then-switch-item-without-adding). The post-add handler also
-  // resets to 1; this guarantees it at the item-select boundary too.
-  if ($('qty-input')) $('qty-input').value = '1';
+  // NOTE: do NOT reset qty here. Resetting on item-select wiped an
+  // operator-entered qty when the item was picked/re-picked AFTER setting
+  // qty (caused drafts to save qty=1). Qty is reset to 1 ONLY in the
+  // post-add handler, after the draft row is created with the entered qty.
   $('picked-item').style.display = 'block';
   $('picked-item').innerHTML = '✓ <b>' + esc(it.name || '?') + '</b>' +
-    (it.size ? ' · ' + esc(it.size) : '') +
+    (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
     (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
   $('search-results').style.display = 'none';
   $('search-input').value = '';
@@ -2210,7 +2209,7 @@ function showBrowseList() {
   b.items.forEach((it, i) => {
     rows.push('<div class="item-row" data-id="' + esc(it.id) + '">' +
       (i < b.recentCount ? '<span class="browse-recent">★</span> ' : '') +
-      esc(it.name || '?') + (it.size ? ' · ' + esc(it.size) : '') +
+      esc(it.name || '?') + (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
       (it.sku ? '<span class="sku">' + esc(it.sku) + '</span>' : '') +
     '</div>');
   });
@@ -2233,7 +2232,7 @@ function searchItems(q) {
   } else {
     $('search-results').innerHTML = matches.map(it =>
       '<div class="item-row" data-id="' + esc(it.id) + '">' +
-        esc(it.name || '?') + (it.size ? ' · ' + esc(it.size) : '') +
+        esc(it.name || '?') + (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
         (it.sku ? '<span class="sku">' + esc(it.sku) + '</span>' : '') +
       '</div>'
     ).join('');
@@ -2289,7 +2288,7 @@ function _bmCardHtml(it, isRecent) {
   return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '">' +
     (isRecent ? '<span class="bm-star" aria-hidden="true">★</span>' : '') +
     '<span class="bm-name">' + esc(it.name || '?') + '</span>' +
-    (it.size ? '<span class="bm-size">' + esc(it.size) + '</span>' : '') +
+    (itemSizeLabel(it) ? '<span class="bm-size">' + esc(itemSizeLabel(it)) + '</span>' : '') +
     (it.sku  ? '<span class="bm-sku">'  + esc(it.sku)  + '</span>' : '') +
   '</div>';
 }
@@ -3336,6 +3335,17 @@ function nonNegNum(v) { const n = parseFloat(v); return (isFinite(n) && n >= 0) 
 // Bottle volume in ml from the catalog item. Prefers a numeric bottle_size_ml if
 // the catalog ever provides one; otherwise parses the human size string
 // ("750ml", "1.14 L", or a bare "1140"). Returns null when not derivable.
+// Display label for an item's bottle size. Prefers the structured
+// bottle_size_ml (source of truth) over the legacy free-text size/unit_size,
+// which can be stale (e.g. Finlandia unit_size "750ml" while bottle_size_ml
+// is 1140). Falls back to size only when bottle_size_ml is absent — so items
+// that carry only the legacy size string are unaffected.
+function itemSizeLabel(it) {
+  if (!it) return '';
+  const ml = nonNegNum(it.bottle_size_ml);
+  if (ml != null && ml > 0) return Math.round(ml) + 'ml';
+  return it.size ? String(it.size) : '';
+}
 function parseBottleSizeMl(item) {
   if (!item) return null;
   const direct = nonNegNum(item.bottle_size_ml);
@@ -4549,7 +4559,7 @@ function onQueueEdit(ce) {
   const it   = (cache.items || []).find(x => x.id === q.item_id);
   form.innerHTML =
     '<div class="muted small" style="margin-bottom:6px;">Edit queued transaction · item: ' +
-      esc(it ? (it.name + (it.size ? (' · ' + it.size) : '')) : q.item_id.slice(0,8)) + '</div>' +
+      esc(it ? (it.name + (itemSizeLabel(it) ? (' · ' + itemSizeLabel(it)) : '')) : q.item_id.slice(0,8)) + '</div>' +
     '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:center;">' +
       '<label class="small">Action</label>' +
       '<select class="qe-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
@@ -4737,7 +4747,7 @@ function onDraftEdit(ce) {
   const it   = (cache.items || []).find(x => x.id === d.item_id);
   form.innerHTML =
     '<div class="muted small" style="margin-bottom:6px;">Edit draft · item: ' +
-      esc(it ? (it.name + (it.size ? (' · ' + it.size) : '')) : (d.item_name || d.item_id.slice(0,8))) + '</div>' +
+      esc(it ? (it.name + (itemSizeLabel(it) ? (' · ' + itemSizeLabel(it)) : '')) : (d.item_name || d.item_id.slice(0,8))) + '</div>' +
     '<div style="display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:center;">' +
       '<label class="small">Action</label>' +
       '<select class="de-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
