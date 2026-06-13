@@ -452,6 +452,25 @@
       <select id="bar-pick"><option value="">(no bar)</option></select>
     </div>
 
+    <!-- Opening / Multi-Bar mode (barback only; hidden in VIP/Table mode and
+         when ≤1 assigned bar). Adds the same item+qty to several assigned
+         bars in one entry — one draft row per bar. Frontend-only. -->
+    <div class="row" id="multibar-row" style="display:none;">
+      <div class="checkbox-row" style="padding-bottom:2px;">
+        <input type="checkbox" id="multibar-toggle">
+        <label for="multibar-toggle" style="margin:0;letter-spacing:normal;color:#cbd5e1;">📦 Opening / Multi-Bar — add to several bars at once</label>
+      </div>
+      <div id="multibar-panel" style="display:none;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+          <button type="button" id="multibar-all" class="browse-btn" style="margin:0;">Select all assigned bars</button>
+          <button type="button" id="multibar-none" class="browse-btn" style="margin:0;">Clear</button>
+          <span id="multibar-count" class="small" style="color:#fbbf24;font-weight:700;">0 bars selected</span>
+        </div>
+        <div id="multibar-list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <div class="muted small" style="margin-top:4px;">Opening items only. PARTIAL bottles must be added one bar at a time.</div>
+      </div>
+    </div>
+
     <div class="row">
       <label>SCAN OR SEARCH ITEM</label>
       <div class="recent-chips" id="recent-items-chips" style="display:none;"></div>
@@ -1431,6 +1450,8 @@ const state = {
   staffId: null,
   staffName: null,
   staffRole: null,        // comma-separated staff.role from login bundle → operator mode
+  multiBarMode: false,    // Opening / Multi-Bar mode (barback only)
+  multiBars: [],          // selected assigned bar_ids for multi-bar add
   selectedAction: null,
   selectedItemId: null,
   selectedItemName: null,
@@ -1813,6 +1834,10 @@ function enterMain() {
     // already shows the locked-in bar name.
     $('bar-pick-row').style.display = 'none';
   }
+
+  // Opening / Multi-Bar UI — shown only for a barback session with >1
+  // assigned bar; hidden in VIP/Table mode and single-bar sessions.
+  try { renderMultiBarUI(); } catch (_) {}
 
   // Restore rapid-mode preference
   const prefs = Prefs.get();
@@ -3573,6 +3598,79 @@ function addToReview(payload) {
 // ════════════════════════════════════════════════════════════════════
 //  Save button (manual flow)
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  Opening / Multi-Bar mode (PLAN-2026-06-13) — barback only, frontend-only
+// ════════════════════════════════════════════════════════════════════
+// Adds the same item+qty to several ASSIGNED bars in one tap (one draft row
+// per bar) via the existing addToReview/Drafts/Submit-All path — no backend
+// change. Hidden in VIP/Table mode and when ≤1 assigned bar.
+function multiBarAssignedBars() { return reviewSessionBars(); }   // session's allowed bars
+function multiBarEligible() {
+  return getCurrentUserRole() === 'barback' && multiBarAssignedBars().length > 1;
+}
+function multiBarActive() {
+  return !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
+}
+function syncAddButtonLabel() {
+  const btn = $('save-btn'); if (!btn || btn.disabled) return;
+  const n = (state.multiBars || []).length;
+  btn.textContent = (state.multiBarMode && n > 0)
+    ? ('➕ ADD TO REVIEW FOR ' + n + ' BAR' + (n !== 1 ? 'S' : ''))
+    : '➕ ADD TO REVIEW';
+}
+function updateMultiBarCount() {
+  const n = (state.multiBars || []).length;
+  if ($('multibar-count')) $('multibar-count').textContent = n + ' bar' + (n !== 1 ? 's' : '') + ' selected';
+  syncAddButtonLabel();
+}
+function renderMultiBarUI() {
+  const row = $('multibar-row'); if (!row) return;
+  if (!multiBarEligible()) {                 // not barback OR ≤1 bar → hide + force off
+    row.style.display = 'none';
+    state.multiBarMode = false; state.multiBars = [];
+    if ($('multibar-toggle')) $('multibar-toggle').checked = false;
+    if ($('multibar-panel')) $('multibar-panel').style.display = 'none';
+    syncAddButtonLabel();
+    return;
+  }
+  row.style.display = '';
+  const bars = multiBarAssignedBars();
+  const allowed = new Set(bars.map(b => b.id));
+  state.multiBars = (state.multiBars || []).filter(id => allowed.has(id));   // drop any non-assigned
+  const sel = new Set(state.multiBars);
+  $('multibar-list').innerHTML = bars.map(b =>
+    '<label style="display:inline-flex;align-items:center;gap:5px;padding:6px 10px;background:#1f2937;' +
+      'border:1px solid #374151;border-radius:6px;font-size:13px;color:#e5e7eb;cursor:pointer;">' +
+      '<input type="checkbox" class="mb-bar" value="' + esc(b.id) + '"' + (sel.has(b.id) ? ' checked' : '') + '> ' +
+      esc(b.name || '?') + '</label>').join('');
+  Array.from($('multibar-list').querySelectorAll('.mb-bar')).forEach(cb => {
+    cb.addEventListener('change', () => {
+      const s = new Set(state.multiBars || []);
+      if (cb.checked) s.add(cb.value); else s.delete(cb.value);
+      state.multiBars = Array.from(s);
+      updateMultiBarCount();
+    });
+  });
+  if ($('multibar-panel')) $('multibar-panel').style.display = state.multiBarMode ? '' : 'none';
+  updateMultiBarCount();
+}
+if ($('multibar-toggle')) $('multibar-toggle').addEventListener('change', (e) => {
+  state.multiBarMode = !!e.target.checked && multiBarEligible();
+  if ($('multibar-panel')) $('multibar-panel').style.display = state.multiBarMode ? '' : 'none';
+  if ($('bar-pick-row')) {   // hide single-bar picker while multi-bar is ON
+    const hasMany = $('bar-pick') && $('bar-pick').options.length > 1;
+    $('bar-pick-row').style.display = state.multiBarMode ? 'none' : (hasMany ? '' : 'none');
+  }
+  if (!state.multiBarMode) state.multiBars = [];
+  renderMultiBarUI();
+});
+if ($('multibar-all')) $('multibar-all').addEventListener('click', () => {
+  state.multiBars = multiBarAssignedBars().map(b => b.id); renderMultiBarUI();
+});
+if ($('multibar-none')) $('multibar-none').addEventListener('click', () => {
+  state.multiBars = []; renderMultiBarUI();
+});
+
 $('save-btn').addEventListener('click', async () => {
   clearStatus('save-status');
   if (!state.tokenPayload) { statusOn('save-status','Session lost — log in again','err'); return; }
@@ -3586,6 +3684,18 @@ $('save-btn').addEventListener('click', async () => {
   }
   if (state.selectedAction === 'TAKEN' && qty !== Math.floor(qty)) {
     showOverlay('BAD QTY', 'TAKEN qty must be a whole number (bottles)', 'err'); Feedback.warn(); return;
+  }
+
+  // Opening / Multi-Bar guards (barback only) — checked BEFORE weight rules so
+  // the PARTIAL message is authoritative. PARTIAL is single-bar only (one
+  // weight can't represent N bars); require ≥1 selected bar when ON.
+  if (state.multiBarMode && getCurrentUserRole() === 'barback') {
+    if ((state.multiBars || []).length === 0) {
+      showOverlay('PICK BARS', 'Select at least one bar, or turn off Multi-Bar.', 'err'); Feedback.warn(); return;
+    }
+    if ($('bottle-state-select').value === 'PARTIAL') {
+      showOverlay('ONE BAR FOR PARTIAL', 'PARTIAL bottles can only be added to one bar at a time.', 'err'); Feedback.warn(); return;
+    }
   }
 
   // Manual Scale MVP — weight is OPTIONAL: a blank field keeps the
@@ -3610,6 +3720,7 @@ $('save-btn').addEventListener('click', async () => {
     statusOn('save-status', '⚠ Duplicate suppressed (same item + qty within 1.5 s)', 'warn');
     return;
   }
+  const _multi = multiBarActive();
 
   // PLAN-2026-06-05 — Review-First: SAVE button now ADDS TO REVIEW
   // instead of immediately calling eventsInsert. Drafts pile up in
@@ -3620,24 +3731,45 @@ $('save-btn').addEventListener('click', async () => {
   $('save-btn').textContent = '… ADDING';
 
   const _svProf = WeightProfiles.getForItem(profileKeyForSelectedItem());
-  const r = addToReview({
+  const _basePayload = {
     item_id: state.selectedItemId,
     item_name: state.selectedItemName,
     qty: qty,
     action: state.selectedAction,
-    bar_id: state.selectedBarId,
     notes: ($('notes-input').value || '').trim(),
     weight_g: $('weight-g-input').value,
     bottle_state: $('bottle-state-select').value,
     tare_weight_g: _svProf ? _svProf.tare_weight_g : null,     // Scale V2.1 (draft-only)
     full_weight_g: _svProf ? _svProf.full_weight_g : null,     // Scale V2.1 (draft-only)
     bottle_size_ml: parseBottleSizeMl(_selectedItemObj()),     // Scale V3 (draft-only)
-  });
+  };
+  let r, mbAdded = 0, mbFail = 0;
+  if (_multi) {
+    // Fan out: one draft row per selected ASSIGNED bar (assigned-only filter
+    // is a safety net). addToReview() mints a unique client_event_id each call.
+    const allowed = new Set(multiBarAssignedBars().map(b => b.id));
+    const targets = (state.multiBars || []).filter(id => allowed.has(id));
+    for (const bid of targets) {
+      const rr = addToReview({ ..._basePayload, bar_id: bid });
+      if (rr && rr.ok) mbAdded++; else mbFail++;
+    }
+    r = { ok: mbAdded > 0, error: mbFail ? (mbFail + ' bar(s) not added') : null };
+  } else {
+    r = addToReview({ ..._basePayload, bar_id: state.selectedBarId });
+  }
 
   $('save-btn').disabled = false;
-  $('save-btn').textContent = '➕ ADD TO REVIEW';
+  syncAddButtonLabel();
 
-  if (r.ok && r.staged) {
+  if (_multi && mbAdded > 0) {
+    Feedback.ok();
+    showOverlay('✓ ADDED FOR ' + mbAdded + ' BAR' + (mbAdded !== 1 ? 'S' : ''),
+      state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty +
+      (mbFail ? (' · ' + mbFail + ' failed') : ''), 'ok');
+    statusOn('save-status',
+      'Added to Review for ' + mbAdded + ' bar' + (mbAdded !== 1 ? 's' : '') +
+        ' — tap VIEW ALL to submit', 'ok');
+  } else if (r.ok && r.staged) {
     Feedback.ok();
     showOverlay('✓ STAGE SAVED', state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + qty, 'ok');
   } else if (r.ok) {
