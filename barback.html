@@ -202,6 +202,24 @@
     .bm-size { font-size:11px; color:#9ca3af; }
     .bm-sku { font-size:9.5px; color:#6b7280; font-variant-numeric:tabular-nums; word-break:break-all; }
     .bm-empty { grid-column:1 / -1; text-align:center; color:#6b7280; padding:30px 12px; font-size:13px; }
+    /* Scanner quantity confirmation sheet (mobile-friendly) */
+    .qty-modal { position:fixed; inset:0; z-index:360; background:rgba(0,0,0,0.78); display:none; align-items:flex-end; justify-content:center; }
+    .qty-modal.open { display:flex; }
+    .qty-sheet { width:100%; max-width:520px; background:#0f172a; border-top:1px solid #334155;
+                 border-radius:16px 16px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); }
+    .qty-sheet .qm-item { font-size:18px; font-weight:800; color:#f3f4f6; line-height:1.25; }
+    .qty-sheet .qm-meta { font-size:13px; color:#9ca3af; margin:4px 0 14px; }
+    .qty-sheet .qm-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+    .qty-sheet .qm-step { width:58px; height:58px; font-size:28px; font-weight:800; background:#1f2937; color:#fff;
+                          border:1px solid #374151; border-radius:10px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+    .qty-sheet .qm-input { flex:1; height:58px; font-size:30px; font-weight:800; text-align:center; background:#1f2937;
+                           color:#fff; border:1px solid #374151; border-radius:10px; }
+    .qty-sheet .qm-quick { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:14px; }
+    .qty-sheet .qm-quick button { padding:12px 0; font-size:16px; font-weight:700; background:#1f2937; color:#cbd5e1;
+                                  border:1px solid #374151; border-radius:8px; cursor:pointer; }
+    .qty-sheet .qm-quick button:active { background:#064e3b; color:#6ee7b7; }
+    .qty-sheet .qm-add, .qty-sheet .qm-cancel { width:100%; }
+    .qty-sheet .qm-cancel { margin-top:8px; }
     .bm-scope-warn { background:#3f2c0a; color:#fbbf24; border:1px solid #7a5a12; border-radius:6px;
                      padding:7px 9px; font-size:11px; font-weight:700; line-height:1.3; }
     .bm-debug { font-size:10px; color:#6b7280; letter-spacing:0.02em; }
@@ -728,6 +746,29 @@
   <div class="card">
     <div id="ok-overlay-msg">✓ SAVED</div>
     <div class="sub" id="ok-overlay-sub">—</div>
+  </div>
+</div>
+
+<!-- ===================== SCANNER QUANTITY CONFIRM (Phase 1) ===================== -->
+<div class="qty-modal" id="qty-modal" aria-hidden="true">
+  <div class="qty-sheet">
+    <div class="qm-item" id="qm-item">—</div>
+    <div class="qm-meta" id="qm-meta">—</div>
+    <div class="qm-row">
+      <button type="button" class="qm-step" id="qm-minus">−</button>
+      <input id="qm-input" class="qm-input" type="number" inputmode="numeric" pattern="[0-9]*" value="1" min="0" step="1">
+      <button type="button" class="qm-step" id="qm-plus">+</button>
+    </div>
+    <div class="qm-quick" id="qm-quick">
+      <button type="button" data-q="1">1</button>
+      <button type="button" data-q="2">2</button>
+      <button type="button" data-q="3">3</button>
+      <button type="button" data-q="4">4</button>
+      <button type="button" data-q="6">6</button>
+      <button type="button" data-q="12">12</button>
+    </div>
+    <button class="btn btn-success qm-add" id="qm-add">➕ ADD TO REVIEW</button>
+    <button class="btn btn-secondary qm-cancel" id="qm-cancel">Cancel</button>
   </div>
 </div>
 
@@ -1463,6 +1504,7 @@ const state = {
   staffRole: null,        // comma-separated staff.role from login bundle → operator mode
   multiBarMode: false,    // Opening / Multi-Bar mode (barback only)
   multiBars: [],          // selected assigned bar_ids for multi-bar add
+  qtyModalItem: null,     // item awaiting qty confirmation from a single scan
   selectedAction: null,
   selectedItemId: null,
   selectedItemName: null,
@@ -2746,7 +2788,7 @@ async function onBarcodeScanned(code, controls) {
     try {
       showScannerToast(
         (addRes && addRes.ok)
-          ? ('✓ ' + it.name + ' · qty 1' + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' added · ' + n + ' draft' + (n !== 1 ? 's' : ''))
+          ? ('✓ Rapid Mode: qty 1 added · ' + it.name + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''))
           : '⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name,
         (addRes && addRes.ok) ? 'ok' : 'warn'
       );
@@ -2756,45 +2798,31 @@ async function onBarcodeScanned(code, controls) {
     if (state.scannerClosing) return;
     state.scannerClosing = true;
     const requireWeight = shouldRequireWeightBeforeAdd();
-    let addRes = null, n = 0;
-    if (!requireWeight) {
-      // NORMAL single-scan — add via the SHARED core using the VISIBLE qty
-      // (not forced 1) + Multi-Bar fan-out. Then close. Wrapped so a throw
-      // can't bubble into the decode callback.
-      try { addRes = addCurrentSelectionToReview({ item: it }); }
-      catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
-      try { n = Drafts.count(); } catch (_) {}
-    }
-    // Brief toast inside the scanner before it closes — states the actual qty.
+    // Pre-checks that must block BEFORE asking quantity:
+    let blockMsg = null;
+    if (!state.selectedAction) blockMsg = 'Pick TAKEN or RETURN first';
+    else if (!requireWeight && state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length === 0)
+      blockMsg = 'Select at least one bar first';
     try {
       showScannerToast(
-        requireWeight
-          ? ('✓ ' + it.name + ' · Scanned — weigh, then ADD')
-          : ((addRes && addRes.ok)
-              ? ('✓ ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' added · ' + n + ' draft' + (n !== 1 ? 's' : ''))
-              : ('⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name)),
-        (requireWeight || (addRes && addRes.ok)) ? 'ok' : 'warn'
+        blockMsg ? ('⚠ ' + blockMsg)
+          : requireWeight ? ('✓ ' + it.name + ' · Scanned — weigh, then ADD')
+          : ('✓ ' + it.name + ' · set quantity…'),
+        blockMsg ? 'warn' : 'ok'
       );
     } catch (_) {}
-    // On a successful non-weight add, reset the visible qty to 1 for the next
-    // entry (mirrors the manual post-add reset).
-    if (!requireWeight && addRes && addRes.ok) {
-      try { $('qty-input').value = '1'; } catch (_) {}
-      try { $('bottle-state-select').value = 'UNOPENED'; } catch (_) {}   // default for opening
-    }
-    // Stop the camera + close after the brief toast, then route the operator:
-    // weight-required → PICK the item (enter weight, then ADD); normal → done.
+    // Close the camera, then route: blocked → message; weight → manual entry;
+    // NORMAL → open the qty confirmation sheet (NO auto-add).
     setTimeout(function () {
       if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
       try { closeScanner(); } catch (_) {}          // also stops the stream + ROI loop
-      if (requireWeight) {
+      if (blockMsg) {
+        try { statusOn('save-status', blockMsg, 'err'); } catch (_) {}
+      } else if (requireWeight) {
         try { setPickedItem(it); } catch (_) {}
         try { statusOn('save-status', '✓ Scanned: ' + it.name + ' — enter weight, then ADD TO REVIEW', 'ok'); } catch (_) {}
       } else {
-        try { statusOn('save-status',
-          (addRes && addRes.ok) ? ('✓ Added to Review: ' + it.name + ' · qty ' + addRes.qty + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' — tap VIEW REVIEW')
-                                : ('⚠ Not added: ' + it.name + ' — ' + ((addRes && addRes.error) || 'unknown')),
-          (addRes && addRes.ok) ? 'ok' : 'warn'); } catch (_) {}
+        try { openQtyModal(it); } catch (_) {}
       }
     }, SCAN_SUCCESS_CLOSE_MS);
   }
@@ -2808,6 +2836,66 @@ function showScannerToast(msg, level) {
   clearTimeout(t._timer);
   t._timer = setTimeout(() => { t.style.display = 'none'; }, 1400);
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  Scanner quantity confirmation sheet (PLAN-2026-06-14)
+// ════════════════════════════════════════════════════════════════════
+// Opened after a NORMAL (non-weight) single scan, with the camera already
+// closed (no dup-scan behind it). Confirms qty (default 1, never reuses the
+// stale main qty) then adds via the SHARED core. Multi-Bar fans out; Rapid/
+// HID bypass this and auto-add qty 1. Cancel adds nothing.
+function _qmSetQty(v) {
+  const el = $('qm-input'); if (!el) return;
+  let n = parseInt(v, 10); if (!isFinite(n) || n < 1) n = 1;
+  el.value = String(n);
+}
+function openQtyModal(it) {
+  if (!it) return;
+  state.qtyModalItem = it;
+  const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
+  if ($('qm-item')) $('qm-item').textContent = '✓ ' + (it.name || '?') + (sz ? ' · ' + sz : '');
+  const act = state.selectedAction || '(pick action)';
+  let barCtx;
+  if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
+    const nb = state.multiBars.length;
+    barCtx = 'Will add to ' + nb + ' bar' + (nb !== 1 ? 's' : '');
+  } else {
+    const b = (cache.bars || []).find(x => x.id === state.selectedBarId);
+    barCtx = b ? ('Bar: ' + (b.name || '?')) : 'Bar: (any)';
+  }
+  if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
+  _qmSetQty(1);   // default qty 1
+  const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
+}
+function closeQtyModal() {
+  state.qtyModalItem = null;
+  const ov = $('qty-modal'); if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+}
+function qtyModalAdd() {
+  const it = state.qtyModalItem;
+  if (!it) { closeQtyModal(); return; }
+  const qty = parseInt(($('qm-input') && $('qm-input').value) || '1', 10);
+  if (!isFinite(qty) || qty <= 0) { _qmSetQty(1); try { statusOn('save-status', 'Qty must be at least 1', 'err'); } catch (_) {} return; }
+  const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty });
+  if (!res || !res.ok) {
+    Feedback.warn();
+    showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
+    closeQtyModal();
+    return;
+  }
+  Feedback.ok();
+  const n = Drafts.count();
+  showOverlay('✓ ADDED TO REVIEW',
+    it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
+  statusOn('save-status',
+    'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
+  closeQtyModal();
+}
+if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
+if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
+$$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
+if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
+if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
 // PLAN-2026-06-09 (iPhone tuning) — best-effort camera track tuning. After the
 // stream starts, ask for continuous autofocus (and continuous auto-exposure)
