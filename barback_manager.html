@@ -973,19 +973,29 @@ async function afterSignedIn() {
 // keywords below after stripping non-letters, e.g. "server manager" →
 // "servermanager" → has "manager"). Plain bartender / server are excluded
 // unless their role string ALSO carries one of these keywords.
-function _roleNorm(s) { return (!s || s.active === false) ? null : String(s.role || '').toLowerCase().replace(/[^a-z]/g, ''); }
-// Bars/Barback link login-eligible: barback + manager-level.
-function canUseBarbackLink(s) {
-  const n = _roleNorm(s);
-  return !!n && ['barback', 'manager', 'admin', 'lead', 'supervisor'].some(k => n.indexOf(k) !== -1);
+// Combined, normalized role string from BOTH the staff record's role AND the
+// night assignment's role (lowercase, punctuation/spaces stripped). Either
+// source can carry the operational designation, e.g. a person whose
+// staff.role is "bartender" but who is assigned as a "table manager" tonight.
+function _roleBlob(staff, assignment) {
+  return [staff && staff.role, assignment && assignment.role]
+    .map(r => String(r || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
 }
-// VIP/Tables link login-eligible: server (incl. table server / server manager
-// via 'server') + manager-level ('manager' covers table/floor/server manager).
-function canUseVipLink(s) {
-  const n = _roleNorm(s);
-  return !!n && ['server', 'manager', 'admin', 'lead', 'supervisor'].some(k => n.indexOf(k) !== -1);
+// Barback / Bars login-eligible: barback + manager-level (manager/admin/lead/
+// supervisor). Excludes plain bartender/server unless also one of these.
+function canUseBarLink(staff, assignment) {
+  if (!staff || staff.active === false) return false;
+  const b = _roleBlob(staff, assignment);
+  return ['barback', 'manager', 'admin', 'lead', 'supervisor'].some(k => b.indexOf(k) !== -1);
 }
-function staffEligibleForMode(s, mode) { return mode === 'table' ? canUseVipLink(s) : canUseBarbackLink(s); }
+// VIP / Tables login-eligible: server / table / vip (covers table server, VIP
+// server, server manager, table manager) + manager-level. Excludes plain
+// barback/bartender unless also server/table/manager-level.
+function canUseTableLink(staff, assignment) {
+  if (!staff || staff.active === false) return false;
+  const b = _roleBlob(staff, assignment);
+  return ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].some(k => b.indexOf(k) !== -1);
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  Load venue context (nights, bars, staff) from DB
@@ -1152,7 +1162,8 @@ async function renderNightScoped(nightId) {
     const seen = new Set(); const eligible = [];
     assigns.forEach(a => {
       const s = byId[a.staff_id];
-      if (s && !seen.has(s.id) && staffEligibleForMode(s, mode)) { seen.add(s.id); eligible.push(s); }
+      const ok = (mode === 'table') ? canUseTableLink(s, a) : canUseBarLink(s, a);
+      if (s && !seen.has(s.id) && ok) { seen.add(s.id); eligible.push(s); }
     });
     eligible.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
     staffBox.innerHTML = eligible.length
