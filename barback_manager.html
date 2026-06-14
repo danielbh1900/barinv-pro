@@ -298,26 +298,34 @@
           <input id="c-nickname" type="text" placeholder="e.g. Sat May 13 — Main Bar">
         </div>
         <div class="row">
+          <label>LINK TYPE</label>
+          <select id="c-linktype">
+            <option value="bar" selected>Barback / Bars</option>
+            <option value="table">VIP / Tables</option>
+          </select>
+          <div class="small muted" id="c-linktype-help">Barbacks/managers operating bars + opening stock.</div>
+        </div>
+        <div class="row">
           <label>NIGHT</label>
           <select id="c-night"></select>
         </div>
         <div class="cols-2">
           <div>
             <div class="row">
-              <label>PRIMARY BAR (optional — leave blank for multi-bar)</label>
+              <label id="c-primary-label">PRIMARY BAR (optional — leave blank for multi-bar)</label>
               <select id="c-bar"><option value="">(any bar)</option></select>
             </div>
             <div class="row">
-              <label>ADDITIONAL BARS THE BARBACK CAN POST TO</label>
+              <label id="c-additional-label">ADDITIONAL BARS THE BARBACK CAN POST TO</label>
               <div class="multi-select" id="c-allowed-bars"></div>
-              <div class="small muted">Active bars for the selected night only. Leave all unchecked to lock the barback to the primary bar.</div>
+              <div class="small muted" id="c-additional-help">Active bars for the selected night only. Leave all unchecked to lock to the primary bar.</div>
             </div>
           </div>
           <div>
             <div class="row">
               <label>WHO CAN USE THIS LINK</label>
               <div class="multi-select" id="c-staff"></div>
-              <div class="small muted">Only selected-night barbacks/managers can log in with this link.</div>
+              <div class="small muted" id="c-staff-helper">Only selected-night barbacks/managers can log in with this link.</div>
             </div>
           </div>
         </div>
@@ -965,11 +973,19 @@ async function afterSignedIn() {
 // keywords below after stripping non-letters, e.g. "server manager" →
 // "servermanager" → has "manager"). Plain bartender / server are excluded
 // unless their role string ALSO carries one of these keywords.
+function _roleNorm(s) { return (!s || s.active === false) ? null : String(s.role || '').toLowerCase().replace(/[^a-z]/g, ''); }
+// Bars/Barback link login-eligible: barback + manager-level.
 function canUseBarbackLink(s) {
-  if (!s || s.active === false) return false;
-  const norm = String(s.role || '').toLowerCase().replace(/[^a-z]/g, '');
-  return ['barback', 'manager', 'admin', 'lead', 'supervisor'].some(k => norm.indexOf(k) !== -1);
+  const n = _roleNorm(s);
+  return !!n && ['barback', 'manager', 'admin', 'lead', 'supervisor'].some(k => n.indexOf(k) !== -1);
 }
+// VIP/Tables link login-eligible: server (incl. table server / server manager
+// via 'server') + manager-level ('manager' covers table/floor/server manager).
+function canUseVipLink(s) {
+  const n = _roleNorm(s);
+  return !!n && ['server', 'manager', 'admin', 'lead', 'supervisor'].some(k => n.indexOf(k) !== -1);
+}
+function staffEligibleForMode(s, mode) { return mode === 'table' ? canUseVipLink(s) : canUseBarbackLink(s); }
 
 // ════════════════════════════════════════════════════════════════════
 //  Load venue context (nights, bars, staff) from DB
@@ -1035,6 +1051,10 @@ async function loadVenueContext() {
     $('c-night')._wired = true;
     $('c-night').addEventListener('change', () => { renderNightScoped($('c-night').value); });
   }
+  if ($('c-linktype') && !$('c-linktype')._wired) {
+    $('c-linktype')._wired = true;
+    $('c-linktype').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+  }
   if (state.nights[0]) { try { await renderNightScoped(state.nights[0].id); } catch (_) {} }
 }
 
@@ -1072,9 +1092,33 @@ async function renderNightScoped(nightId) {
     assigns = (a || []).filter(x => x && !x.revoked);
   } catch (_) {}
 
-  // 3. Active operational bars = venue bars in night_bars AND bar_type 'bar'
+  // 3. Active areas for this night, filtered by the selected LINK TYPE:
+  //    Barback/Bars → bar_type 'bar'; VIP/Tables → 'table'/'vip'/'booth'.
+  const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
+  const wantTable = (mode === 'table');
+  const isAreaForMode = (bt) => wantTable
+    ? (['table', 'vip', 'booth'].indexOf(bt) >= 0)
+    : (bt === 'bar');
   const activeBars = (state.bars || []).filter(b =>
-    activeBarIds.has(b.id) && String(b.bar_type || '').toLowerCase() === 'bar');
+    activeBarIds.has(b.id) && isAreaForMode(String(b.bar_type || '').toLowerCase()));
+  // Mode-aware labels / helper text
+  try {
+    if ($('c-linktype-help')) $('c-linktype-help').textContent = wantTable
+      ? 'Servers/table managers operating VIP tables.'
+      : 'Barbacks/managers operating bars + opening stock.';
+    if ($('c-primary-label')) $('c-primary-label').textContent = wantTable
+      ? 'PRIMARY TABLE (optional — leave blank for multi-table)'
+      : 'PRIMARY BAR (optional — leave blank for multi-bar)';
+    if ($('c-additional-label')) $('c-additional-label').textContent = wantTable
+      ? 'ADDITIONAL TABLES THE SERVER CAN POST TO'
+      : 'ADDITIONAL BARS THE BARBACK CAN POST TO';
+    if ($('c-additional-help')) $('c-additional-help').textContent = wantTable
+      ? 'Active VIP tables for the selected night only. Leave all unchecked to lock to the primary table.'
+      : 'Active bars for the selected night only. Leave all unchecked to lock to the primary bar.';
+    if ($('c-staff-helper')) $('c-staff-helper').textContent = wantTable
+      ? 'Only selected-night servers/table managers can log in with this link.'
+      : 'Only selected-night barbacks/managers can log in with this link.';
+  } catch (_) {}
 
   // 4. bar_id -> assigned staff names (via allowed_bar_ids)
   const nameById = {}; (state.staffList || []).forEach(s => { nameById[s.id] = s.name || '?'; });
@@ -1089,33 +1133,36 @@ async function renderNightScoped(nightId) {
 
   // 5. Primary bar + additional bars (value = real bar_id; label adds name)
   if (!activeBars.length) {
-    barSel.innerHTML = '<option value="">(any bar)</option>';
-    allowedBox.innerHTML = '<div class="muted small">No active bars/tables configured for this night.</div>';
+    barSel.innerHTML = '<option value="">(any ' + (wantTable ? 'table' : 'bar') + ')</option>';
+    allowedBox.innerHTML = '<div class="muted small">No active ' + (wantTable ? 'tables / VIP areas' : 'bars') + ' configured for this night.</div>';
   } else {
-    barSel.innerHTML = '<option value="">(any bar)</option>' + activeBars.map(b =>
+    barSel.innerHTML = '<option value="">(any ' + (wantTable ? 'table' : 'bar') + ')</option>' + activeBars.map(b =>
       '<option value="' + esc(b.id) + '">' + esc(labelFor(b)) + '</option>').join('');
     allowedBox.innerHTML = activeBars.map(b =>
       '<label><input type="checkbox" value="' + esc(b.id) + '"> ' + esc(labelFor(b)) + '</label>').join('');
   }
 
   // RIGHT SIDE — WHO CAN USE THIS LINK = this night's non-revoked assignees
-  // INTERSECT login-eligible roles (canUseBarbackLink on the staff record).
-  // Not venue-wide; never falls back to all staff.
+  // INTERSECT login-eligible roles for the SELECTED LINK TYPE (bars → barback/
+  // manager-level; tables → server/table-manager/manager-level). Not venue-
+  // wide; never falls back to all staff. PIN is rotate-only (existing PIN is
+  // hashed/unreadable; a new PIN is shown once on rotation, never logged).
   if (staffBox) {
     const byId = {}; (state.staffList || []).forEach(s => { byId[s.id] = s; });
     const seen = new Set(); const eligible = [];
     assigns.forEach(a => {
       const s = byId[a.staff_id];
-      if (s && !seen.has(s.id) && canUseBarbackLink(s)) { seen.add(s.id); eligible.push(s); }
+      if (s && !seen.has(s.id) && staffEligibleForMode(s, mode)) { seen.add(s.id); eligible.push(s); }
     });
     eligible.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
     staffBox.innerHTML = eligible.length
       ? eligible.map(s =>
           '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+            ' <span style="color:#666;font-size:11px;margin-left:4px;">· PIN ••••••</span>' +
             ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
               '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>'
         ).join('')
-      : '<div class="muted small">No barback or manager-level staff assigned for this night.</div>';
+      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'barback / manager-level') + ' staff assigned for this night.</div>');
     $$('[data-rotate-staff]').forEach(a => {
       a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation();
         rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
