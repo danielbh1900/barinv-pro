@@ -1111,6 +1111,22 @@ async function renderNightScoped(nightId) {
     : (bt === 'bar');
   const activeBars = (state.bars || []).filter(b =>
     activeBarIds.has(b.id) && isAreaForMode(String(b.bar_type || '').toLowerCase()));
+
+  // Coverage helpers (PLAN-2026-06-15) — an assignment only counts for a link
+  // type if its allowed_bar_ids actually include at least one of THIS night's
+  // active areas of that type. A role keyword alone is NOT enough: e.g. a
+  // manager assigned only to VIP tables must NOT appear in the Barback/Bars
+  // staff list, and a barback assigned only to bars must NOT appear in VIP.
+  const barTypeById = {}; (state.bars || []).forEach(b => { barTypeById[b.id] = String(b.bar_type || '').toLowerCase(); });
+  const activeBarTypeIds = new Set();    // this night's active 'bar' areas
+  const activeTableTypeIds = new Set();  // this night's active 'table'/'vip'/'booth' areas
+  activeBarIds.forEach(id => {
+    const bt = barTypeById[id];
+    if (bt === 'bar') activeBarTypeIds.add(id);
+    else if (['table', 'vip', 'booth'].indexOf(bt) >= 0) activeTableTypeIds.add(id);
+  });
+  const hasBarCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeBarTypeIds.has(id));
+  const hasTableCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeTableTypeIds.has(id));
   // Mode-aware labels / helper text
   try {
     if ($('c-linktype-help')) $('c-linktype-help').textContent = wantTable
@@ -1138,8 +1154,16 @@ async function renderNightScoped(nightId) {
     (barStaff[bid] = barStaff[bid] || []);
     if (barStaff[bid].indexOf(nm) < 0) barStaff[bid].push(nm);
   }));
-  const labelFor = (b) => (b.name || '?') + ' — ' +
-    ((barStaff[b.id] && barStaff[b.id].length) ? barStaff[b.id].join(', ') : 'Unassigned');
+  // Compact area labels (PLAN-2026-06-15): 0 -> Unassigned, 1-3 -> names,
+  // >3 -> "Shared VIP pool (N)" (tables) / "N staff assigned" (bars). Keeps
+  // table rows readable when the whole server pool shares every table.
+  const compactNames = (arr) => {
+    const n = arr ? arr.length : 0;
+    if (n === 0) return 'Unassigned';
+    if (n <= 3) return arr.join(', ');
+    return wantTable ? ('Shared VIP pool (' + n + ')') : (n + ' staff assigned');
+  };
+  const labelFor = (b) => (b.name || '?') + ' — ' + compactNames(barStaff[b.id]);
 
   // 5. Primary bar + additional bars (value = real bar_id; label adds name)
   if (!activeBars.length) {
@@ -1162,18 +1186,22 @@ async function renderNightScoped(nightId) {
     const seen = new Set(); const eligible = [];
     assigns.forEach(a => {
       const s = byId[a.staff_id];
-      const ok = (mode === 'table') ? canUseTableLink(s, a) : canUseBarLink(s, a);
-      if (s && !seen.has(s.id) && ok) { seen.add(s.id); eligible.push(s); }
+      const roleOk = (mode === 'table') ? canUseTableLink(s, a) : canUseBarLink(s, a);
+      const covOk = (mode === 'table') ? hasTableCoverage(a) : hasBarCoverage(a);
+      if (s && !seen.has(s.id) && roleOk && covOk) { seen.add(s.id); eligible.push(s); }
     });
     eligible.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
-    staffBox.innerHTML = eligible.length
+    const eligCount = eligible.length
+      ? '<div class="small muted" style="margin-bottom:6px;">' + eligible.length + ' eligible staff</div>'
+      : '';
+    staffBox.innerHTML = eligCount + (eligible.length
       ? eligible.map(s =>
           '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
             ' <span style="color:#666;font-size:11px;margin-left:4px;">· PIN ••••••</span>' +
             ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
               '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>'
         ).join('')
-      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'barback / manager-level') + ' staff assigned for this night.</div>');
+      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'barback / manager-level') + ' staff assigned for this night.</div>'));
     $$('[data-rotate-staff]').forEach(a => {
       a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation();
         rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
