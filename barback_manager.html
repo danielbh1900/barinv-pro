@@ -378,6 +378,32 @@
           </div>
         </div>
       </div>
+
+      <!-- ─── STAFF ACCESS CODES (frontend-only; PLAN-2026-06-14) ─── -->
+      <div class="card" id="sac-card">
+        <h3>🔑 Staff access codes</h3>
+        <div class="status warn" style="margin:0 0 10px;">
+          Give each code only to the assigned employee for this night — not the venue room code.
+          PINs are secret and shown only once when regenerated.
+        </div>
+        <div class="small muted" id="sac-context" style="margin-bottom:8px;">For the NIGHT + LINK TYPE selected above.</div>
+        <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;">
+          <input id="sac-search" type="search" placeholder="search staff name…" style="flex:1;min-width:140px;padding:8px;font-size:13px;">
+          <select id="sac-filter" style="padding:8px;font-size:12px;">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="expired">Expired</option>
+            <option value="revoked">Revoked</option>
+            <option value="unused">Unused</option>
+            <option value="used">Used</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#bbb;text-transform:none;letter-spacing:normal;margin:0;">
+            <input type="checkbox" id="sac-show-all" style="width:auto;">show all eligible
+          </label>
+        </div>
+        <div id="sac-summary" class="small muted" style="margin:4px 0;"></div>
+        <div id="sac-list"><div class="muted small">Select a night.</div></div>
+      </div>
     </div>
 
     <!-- ─── SESSIONS TAB ─── -->
@@ -1059,13 +1085,14 @@ async function loadVenueContext() {
   // Scope bars + staff to the selected night, and re-scope when it changes.
   if ($('c-night') && !$('c-night')._wired) {
     $('c-night')._wired = true;
-    $('c-night').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+    $('c-night').addEventListener('change', () => { renderNightScoped($('c-night').value); renderStaffAccessCodes(); });
   }
   if ($('c-linktype') && !$('c-linktype')._wired) {
     $('c-linktype')._wired = true;
-    $('c-linktype').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+    $('c-linktype').addEventListener('change', () => { renderNightScoped($('c-night').value); renderStaffAccessCodes(); });
   }
   if (state.nights[0]) { try { await renderNightScoped(state.nights[0].id); } catch (_) {} }
+  try { await renderStaffAccessCodes(); } catch (_) {}
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1180,6 +1207,243 @@ async function renderNightScoped(nightId) {
     });
   }
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  STAFF ACCESS CODES card (PLAN-2026-06-14) — frontend-only, read-mostly.
+// ════════════════════════════════════════════════════════════════════
+// Driven by the SAME selected NIGHT (#c-night) + LINK TYPE (#c-linktype) as the
+// generate form. Lists this night's role-eligible assigned staff with a MASKED
+// access_code (read-only, ends only) and a masked PIN (•••••• — regenerate-only;
+// the real PIN is hashed server-side, shown ONCE on rotation, never logged).
+// Per-staff login count / last-used / status come from barback_sessions +
+// barback_audit_log (login_ok). No per-staff revoke/restore (backend gap —
+// today only whole-link/session revoke exists; see report). Reads only.
+let _sacLast = [];                       // cached rows for client-side filtering
+// Mask a stored access_code as e.g. "UH••••••43" (first2 + last2). Never the
+// full value, never logged. PINs are ALWAYS shown as •••••• here.
+function sacMaskCode(code) {
+  const c = String(code == null ? '' : code);
+  if (!c) return '—';
+  if (c.length <= 4) return '••••••';
+  return esc(c.slice(0, 2)) + '••••••' + esc(c.slice(-2));
+}
+async function loadStaffAccessCodes() {
+  const nightId = $('c-night') && $('c-night').value;
+  const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
+  const wantTable = (mode === 'table');
+  if ($('sac-context')) $('sac-context').textContent =
+    'Night above · ' + (wantTable ? 'VIP / Tables' : 'Barback / Bars') +
+    ' — give each code only to that employee for this night.';
+  if (!nightId) { _sacLast = []; return mode; }
+
+  // 1. Assignments for this night (incl. revoked, to surface REVOKED status).
+  let assigns = [];
+  try {
+    const { data } = await SB.from('night_staff_assignments')
+      .select('staff_id, role, allowed_bar_ids, revoked, access_code, assigned_area_name')
+      .eq('night_id', nightId).eq('venue_id', state.venueId);
+    assigns = data || [];
+  } catch (_) {}
+
+  // 2. Sessions (links) for this night → per-staff link status.
+  let sessions = [];
+  try {
+    const { data } = await SB.from('barback_sessions')
+      .select('id, allowed_staff, expires_at, revoked_at')
+      .eq('night_id', nightId);
+    sessions = data || [];
+  } catch (_) {}
+  const sessIds = sessions.map(s => s.id);
+
+  // 3. Audit login_ok for this night's sessions → per-staff count + last used.
+  const loginCount = {}, lastUsed = {};
+  if (sessIds.length) {
+    try {
+      const { data } = await SB.from('barback_audit_log')
+        .select('staff_id, action, created_at')
+        .in('session_id', sessIds).eq('action', 'login_ok').limit(2000);
+      (data || []).forEach(r => {
+        if (!r.staff_id) return;
+        loginCount[r.staff_id] = (loginCount[r.staff_id] || 0) + 1;
+        if (!lastUsed[r.staff_id] || new Date(r.created_at) > new Date(lastUsed[r.staff_id]))
+          lastUsed[r.staff_id] = r.created_at;
+      });
+    } catch (_) {}
+  }
+
+  // 4. Best-effort PIN presence (NON-secret columns only; degrade if RLS blocks).
+  //    Never selects pin_hash/pin_salt/pin_algo — only existence + timestamps.
+  const hasPin = {};
+  const staffIds = Array.from(new Set(assigns.map(a => a.staff_id).filter(Boolean)));
+  if (staffIds.length) {
+    try {
+      const { data, error } = await SB.from('barback_pins')
+        .select('staff_id, last_used_at, locked_until')
+        .in('staff_id', staffIds);
+      if (!error) (data || []).forEach(p => { hasPin[p.staff_id] = true; });
+    } catch (_) {}
+  }
+
+  // 5. Build per-staff rows (role-eligible for the selected link type).
+  const byId = {}; (state.staffList || []).forEach(s => { byId[s.id] = s; });
+  const barById = {}; (state.bars || []).forEach(b => { barById[b.id] = b; });
+  const isAreaForMode = (bt) => wantTable
+    ? (['table', 'vip', 'booth'].indexOf(bt) >= 0) : (bt === 'bar');
+  const now = Date.now();
+  const sessionClass = (s) => s.revoked_at ? 'revoked'
+    : (+new Date(s.expires_at) <= now ? 'expired' : 'active');
+
+  const seen = new Set();
+  const rows = [];
+  assigns.forEach(a => {
+    const s = byId[a.staff_id]; if (!s) return;
+    const ok = wantTable ? canUseTableLink(s, a) : canUseBarLink(s, a);
+    if (!ok || seen.has(s.id)) return;
+    seen.add(s.id);
+
+    const areaNames = (a.allowed_bar_ids || [])
+      .map(id => barById[id]).filter(Boolean)
+      .filter(b => isAreaForMode(String(b.bar_type || '').toLowerCase()))
+      .map(b => b.name);
+    const myStatuses = sessions
+      .filter(x => (x.allowed_staff || []).indexOf(s.id) >= 0)
+      .map(sessionClass);
+    let status;
+    if (a.revoked) status = 'revoked';
+    else if (myStatuses.indexOf('active') >= 0) status = 'active';
+    else if (myStatuses.length) status = (myStatuses.indexOf('revoked') >= 0 ? 'revoked' : 'expired');
+    else status = 'nolink';
+
+    rows.push({
+      staff_id: s.id, name: s.name || '?', role: a.role || s.role || '—', mode, status,
+      used: (loginCount[s.id] || 0) > 0, code_masked: sacMaskCode(a.access_code),
+      has_pin: !!hasPin[s.id], areas: areaNames, area_label: a.assigned_area_name || '',
+      logins: loginCount[s.id] || 0, last_used: lastUsed[s.id] || null,
+    });
+  });
+
+  if ($('sac-show-all') && $('sac-show-all').checked) {
+    (state.staffList || []).forEach(s => {
+      if (seen.has(s.id)) return;
+      const ok = wantTable ? canUseTableLink(s, null) : canUseBarLink(s, null);
+      if (!ok) return;
+      seen.add(s.id);
+      rows.push({
+        staff_id: s.id, name: s.name || '?', role: s.role || '—', mode,
+        status: 'unassigned', used: false, code_masked: '—', has_pin: !!hasPin[s.id],
+        areas: [], area_label: '', logins: 0, last_used: null,
+      });
+    });
+  }
+
+  rows.sort((x, y) => String(x.name).localeCompare(String(y.name)));
+  _sacLast = rows;
+  return mode;
+}
+
+function sacStatusPill(status) {
+  switch (status) {
+    case 'active':     return '<span class="pill active">ACTIVE</span>';
+    case 'expired':    return '<span class="pill expired">EXPIRED</span>';
+    case 'revoked':    return '<span class="pill revoked">REVOKED</span>';
+    case 'nolink':     return '<span class="pill expired">NO LINK YET</span>';
+    case 'unassigned': return '<span class="pill revoked">UNASSIGNED</span>';
+    default:           return '<span class="pill">' + esc(status) + '</span>';
+  }
+}
+
+// Re-filter + repaint from the cached rows (no DB hit) — used by search/filter.
+function sacPaint() {
+  const box = $('sac-list'); if (!box) return;
+  const wantTable = (($('c-linktype') && $('c-linktype').value) || 'bar') === 'table';
+  if (!($('c-night') && $('c-night').value)) {
+    box.innerHTML = '<div class="muted small">Select a night.</div>';
+    if ($('sac-summary')) $('sac-summary').textContent = '';
+    return;
+  }
+  const all = _sacLast;
+  const nActive = all.filter(r => r.status === 'active').length;
+  const nExpRev = all.filter(r => r.status === 'expired' || r.status === 'revoked').length;
+  const nUsed   = all.filter(r => r.used).length;
+  const nUnused = all.filter(r => !r.used && r.status !== 'unassigned').length;
+  if ($('sac-summary')) $('sac-summary').textContent =
+    all.length + ' staff · ' + nActive + ' active · ' + nExpRev + ' expired/revoked · ' +
+    nUsed + ' used · ' + nUnused + ' unused';
+
+  const q = (($('sac-search') && $('sac-search').value) || '').toLowerCase().trim();
+  const f = ($('sac-filter') && $('sac-filter').value) || 'all';
+  const rows = all.filter(r => {
+    if (q && String(r.name).toLowerCase().indexOf(q) < 0) return false;
+    if (f === 'all')    return true;
+    if (f === 'used')   return r.used;
+    if (f === 'unused') return !r.used && r.status !== 'unassigned';
+    return r.status === f;
+  });
+  if (!rows.length) { box.innerHTML = '<div class="muted small">No staff match.</div>'; return; }
+
+  box.innerHTML = rows.map(r => {
+    const dim = (r.status === 'revoked' || r.status === 'expired' || r.status === 'unassigned');
+    const areas = r.areas.length ? r.areas.map(esc).join(', ')
+      : (r.area_label ? esc(r.area_label) : '<span class="muted">no ' + (wantTable ? 'tables' : 'bars') + ' assigned</span>');
+    const pinBadge = r.has_pin ? '<span class="muted">PIN set</span>'
+      : '<span style="color:#fbbf24;">no PIN — regenerate to issue</span>';
+    return '<div class="session-row' + (dim ? ' revoked' : '') + '">' +
+      '<div class="meta">' +
+        sacStatusPill(r.status) + ' <b>' + esc(r.name) + '</b> ' +
+        '<span class="muted">· ' + esc(r.role) + ' · ' + (wantTable ? 'VIP/Tables' : 'Barback/Bars') + '</span><br>' +
+        '<span class="muted">code <span style="font-family:ui-monospace,monospace;color:#9ca3af;">' + r.code_masked +
+          '</span> · PIN <span style="font-family:ui-monospace,monospace;color:#9ca3af;">••••••</span> · ' + pinBadge + '</span><br>' +
+        '<span class="muted">areas: ' + areas + '</span><br>' +
+        '<span class="muted">' + r.logins + ' logins · ' +
+          (r.last_used ? 'last used ' + esc(fmtTime(r.last_used)) : 'never used') + '</span>' +
+      '</div>' +
+      '<div class="actions">' +
+        '<button class="btn btn-secondary" data-sac-regen="' + esc(r.staff_id) + '" data-sac-name="' + esc(r.name) + '">↻ REGEN PIN</button>' +
+        '<button class="btn btn-secondary" data-sac-logs="' + esc(r.staff_id) + '">📜 LOGS</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  $$('[data-sac-regen]').forEach(b => b.addEventListener('click', () =>
+    sacRegeneratePin(b.dataset.sacRegen, b.dataset.sacName)));
+  $$('[data-sac-logs]').forEach(b => b.addEventListener('click', () => {
+    if ($('audit-filter-staff')) $('audit-filter-staff').value = b.dataset.sacLogs;
+    showTab('audit');
+  }));
+}
+
+// Full refresh: query the DB for the selected night/link type, then paint.
+async function renderStaffAccessCodes() {
+  const box = $('sac-list'); if (!box) return;
+  box.innerHTML = '<div class="muted small">loading…</div>';
+  try { await loadStaffAccessCodes(); }
+  catch (e) { box.innerHTML = '<div class="status err">' + esc(e.message || e) + '</div>'; return; }
+  sacPaint();
+}
+
+// Regenerate a single staff PIN → shown ONCE, auto-copied to clipboard.
+// Reuses the existing barback-rotate-pin Edge Function. PIN never hits console.
+async function sacRegeneratePin(staffId, staffName) {
+  if (!confirm('Issue a NEW PIN for ' + (staffName || 'this staff') +
+      '?\n\nThe current PIN stops working immediately. The new PIN is shown ONCE.')) return;
+  try {
+    const res = await fnInvoke('barback-rotate-pin', { staff_id: staffId, venue_id: state.venueId, length: 4 });
+    const pin = res && res.pin;
+    let copied = false;
+    if (pin) { try { await navigator.clipboard.writeText(pin); copied = true; } catch (_) {} }
+    alert('NEW PIN for ' + ((res && res.staff_name) || staffName || '') + ': ' + pin +
+      (copied ? '\n\n(Copied to clipboard.) ' : '\n\n') +
+      'Give it ONLY to this employee — it will not be shown again.');
+    renderStaffAccessCodes();
+  } catch (e) {
+    alert('Regenerate failed: ' + (e.message || e));
+  }
+}
+
+// Card-local filters re-paint from cache; show-all changes the row set (re-query).
+$('sac-search')?.addEventListener('input', () => sacPaint());
+$('sac-filter')?.addEventListener('change', () => sacPaint());
+$('sac-show-all')?.addEventListener('change', () => renderStaffAccessCodes());
 
 // ════════════════════════════════════════════════════════════════════
 //  Tab switching
