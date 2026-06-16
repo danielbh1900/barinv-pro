@@ -903,6 +903,18 @@ const LS = {
   prodVenues:    'barinv_offline_venues_v1',
   prodCache:     (vid) => 'barinv_offline_cache_' + vid,
   cfgCandidates: ['barinv_supabase_config', 'barinv_cfg', 'cfg', 'supabase_config'],
+  // WEBLINK_HELPERS (storage micro-step, 2026-06-16) — keys centralized so each
+  // localStorage string is defined ONCE. Values are byte-identical to the prior
+  // inline literals; runtime keys unchanged. Removal: grep WEBLINK_HELPERS.
+  stageMode:           'barinv_barback_stage_mode',
+  pilotMode:           'barinv_barback_pilot_mode',
+  staleQuarantine:     'barinv_barback_stale_quarantine',
+  stageLog:            'barinv_barback_stage_log',
+  counters:            'barinv_barback_counters',
+  builderIssuer:       'barinv_barback_builder_issuer',
+  builderNick:         'barinv_barback_builder_nick',
+  publicBaseUrl:       'barinv_public_base_url',
+  outboxCorruptPrefix: 'barinv_barback_outbox_corrupt_',
 };
 const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
@@ -1371,7 +1383,7 @@ const Outbox = {
       // Quarantine corrupt outbox so the user doesn't silently lose anything
       try {
         const raw = localStorage.getItem(LS.outbox);
-        if (raw) localStorage.setItem('barinv_barback_outbox_corrupt_' + Date.now(), raw);
+        if (raw) localStorage.setItem(LS.outboxCorruptPrefix + Date.now(), raw);
       } catch (_) {}
       try { localStorage.setItem(LS.outbox, '[]'); } catch (_) {}
       console.warn('outbox corrupt, reset:', e && e.message);
@@ -5155,7 +5167,7 @@ function getBarinvPublicBaseUrl() {
   var DEFAULT_BASE = 'https://danielbh1900.github.io/barinv-pro';
   try {
     var raw = null;
-    try { raw = localStorage.getItem('barinv_public_base_url'); } catch (_) {}
+    try { raw = localStorage.getItem(LS.publicBaseUrl); } catch (_) {}
     if (typeof raw === 'string' && raw.length) {
       var trimmed = raw.trim().replace(/\/+$/, '');
       if (/^https?:\/\//i.test(trimmed)) {
@@ -5204,8 +5216,8 @@ function showBuilder() {
   $('b-staff').innerHTML = (cache.staff || []).map(s =>
     '<option value="' + esc(s.id) + '">' + esc(s.name || '?') + '</option>').join('');
   setExpiresQuick('end');
-  $('b-issuer').value = localStorage.getItem('barinv_barback_builder_issuer') || '';
-  $('b-nick').value   = localStorage.getItem('barinv_barback_builder_nick')   || '';
+  $('b-issuer').value = localStorage.getItem(LS.builderIssuer) || '';
+  $('b-nick').value   = localStorage.getItem(LS.builderNick)   || '';
   $('b-output-row').style.display = 'none';
   showScreen('screen-builder');
 }
@@ -5244,8 +5256,8 @@ $('b-build').addEventListener('click', async () => {
     issuer: issuer || null, nickname: nick || null,
     test_mode: true,
   };
-  if (issuer) localStorage.setItem('barinv_barback_builder_issuer', issuer);
-  if (nick)   localStorage.setItem('barinv_barback_builder_nick', nick);
+  if (issuer) localStorage.setItem(LS.builderIssuer, issuer);
+  if (nick)   localStorage.setItem(LS.builderNick, nick);
   const tok = base64UrlEncode(JSON.stringify(payload));
   // PLAN-QR-2026-06-03 Web-Barback: always use the canonical public
   // HTTPS base so the barback's personal phone (iPhone Camera, Android
@@ -5304,10 +5316,10 @@ const STAGING_MODE = (() => {
   try {
     const q = new URLSearchParams(window.location.search);
     if (q.get('stage') === '1') {
-      localStorage.setItem('barinv_barback_stage_mode', 'on');
+      localStorage.setItem(LS.stageMode, 'on');
       return true;
     }
-    return localStorage.getItem('barinv_barback_stage_mode') === 'on';
+    return localStorage.getItem(LS.stageMode) === 'on';
   } catch (_) { return false; }
 })();
 window.__BARBACK_STAGING = STAGING_MODE;
@@ -5353,14 +5365,14 @@ const LIVE_PILOT_MODE = (() => {
     if (STAGING_MODE) return false;     // staging trumps pilot
     const q = new URLSearchParams(window.location.search);
     if (q.get('pilot') === '1') {
-      localStorage.setItem('barinv_barback_pilot_mode', 'on');
+      localStorage.setItem(LS.pilotMode, 'on');
       return true;
     }
     if (q.get('pilot') === '0') {
-      localStorage.removeItem('barinv_barback_pilot_mode');
+      localStorage.removeItem(LS.pilotMode);
       return false;
     }
-    return localStorage.getItem('barinv_barback_pilot_mode') === 'on';
+    return localStorage.getItem(LS.pilotMode) === 'on';
   } catch (_) { return false; }
 })();
 window.__BARBACK_PILOT = LIVE_PILOT_MODE;
@@ -5522,7 +5534,7 @@ function startEventControlPolling() {
 }
 
 const StageLog = {
-  KEY: 'barinv_barback_stage_log',
+  KEY: LS.stageLog,
   load() {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); }
     catch (_) { return []; }
@@ -5575,7 +5587,7 @@ function maybeRunFakeInjection() {
 // own row).
 // ════════════════════════════════════════════════════════════════════
 const Telemetry = {
-  COUNT_KEY: 'barinv_barback_counters',
+  COUNT_KEY: LS.counters,
   loadCounters() {
     try {
       return JSON.parse(localStorage.getItem(this.COUNT_KEY) || '{"saved":0,"failed":0}');
@@ -5660,9 +5672,9 @@ function repairStaleOutbox() {
   if (stale > 0) {
     // Park stale entries under a quarantine key for later inspection
     try {
-      const stash = (JSON.parse(localStorage.getItem('barinv_barback_stale_quarantine') || '[]') || []);
+      const stash = (JSON.parse(localStorage.getItem(LS.staleQuarantine) || '[]') || []);
       stash.push({ at: Date.now(), entries: out.filter(e => (e.queued_at || 0) < cutoff) });
-      localStorage.setItem('barinv_barback_stale_quarantine', JSON.stringify(stash.slice(-3)));
+      localStorage.setItem(LS.staleQuarantine, JSON.stringify(stash.slice(-3)));
     } catch (_) {}
     Outbox.save(fresh);
     console.warn('[outbox-repair] quarantined', stale, 'stale entries (>7 days old)');
