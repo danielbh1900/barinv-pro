@@ -2100,6 +2100,13 @@ function getCurrentUserRole() {
 // Normalize an item's scope → 'bar' | 'both' | 'vip' | 'hidden' | ''
 // ('' = unknown/unscoped). Canonical field is service_mode; aliases are
 // accepted defensively so a renamed field can't silently bypass scope.
+// WEBLINK_HELPERS (Stage 1, 2026-06-16) — canonical service_mode scope tokens,
+// defined ONCE (disjoint groups). No behavior change: identical token sets.
+// Removal: grep WEBLINK_HELPERS.
+const SCOPE_BAR_ALIASES    = ['regular_bar', 'bar', 'bar_only'];
+const SCOPE_BOTH_ALIASES   = ['all_bars', 'both'];
+const SCOPE_VIP_ALIASES    = ['vip_only', 'vip', 'table_only', 'server_only'];
+const SCOPE_HIDDEN_ALIASES = ['hidden', 'disabled'];
 function normalizeItemScope(item) {
   if (!item) return '';
   const raw = String(
@@ -2109,10 +2116,10 @@ function normalizeItemScope(item) {
     item.item_scope   != null ? item.item_scope   : ''
   ).toLowerCase().trim();
   if (!raw) return '';
-  if (raw === 'regular_bar' || raw === 'bar' || raw === 'bar_only') return 'bar';
-  if (raw === 'all_bars'    || raw === 'both')                       return 'both';
-  if (raw === 'vip_only' || raw === 'vip' || raw === 'table_only' || raw === 'server_only') return 'vip';
-  if (raw === 'hidden' || raw === 'disabled') return 'hidden';
+  if (SCOPE_BAR_ALIASES.indexOf(raw) >= 0)    return 'bar';
+  if (SCOPE_BOTH_ALIASES.indexOf(raw) >= 0)   return 'both';
+  if (SCOPE_VIP_ALIASES.indexOf(raw) >= 0)    return 'vip';
+  if (SCOPE_HIDDEN_ALIASES.indexOf(raw) >= 0) return 'hidden';
   return '';   // unrecognized token → unscoped → fail-closed
 }
 
