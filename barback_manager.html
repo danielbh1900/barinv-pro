@@ -977,6 +977,16 @@ async function afterSignedIn() {
 // night assignment's role (lowercase, punctuation/spaces stripped). Either
 // source can carry the operational designation, e.g. a person whose
 // staff.role is "bartender" but who is assigned as a "table manager" tonight.
+// WEBLINK_HELPERS (Stage 1, 2026-06-16) — centralized constants/predicates so
+// the role-keyword lists and area-type lists are defined ONCE. No behavior
+// change: values are byte-identical to the previous inline literals.
+// Removal: grep WEBLINK_HELPERS.
+const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'manager', 'admin', 'lead', 'supervisor'];
+const TABLE_LINK_ROLE_KEYWORDS = ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'];
+const AREA_TABLE_TYPES         = ['table', 'vip', 'booth'];
+function isBarArea(bt)      { return String(bt || '').toLowerCase() === 'bar'; }
+function isTableArea(bt)    { return AREA_TABLE_TYPES.indexOf(String(bt || '').toLowerCase()) >= 0; }
+function isInternalArea(bt) { const t = String(bt || '').toLowerCase(); return !!t && !isBarArea(t) && !isTableArea(t); }
 function _roleBlob(staff, assignment) {
   return [staff && staff.role, assignment && assignment.role]
     .map(r => String(r || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
@@ -986,7 +996,7 @@ function _roleBlob(staff, assignment) {
 function canUseBarLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
   const b = _roleBlob(staff, assignment);
-  return ['barback', 'manager', 'admin', 'lead', 'supervisor'].some(k => b.indexOf(k) !== -1);
+  return BAR_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
 }
 // VIP / Tables login-eligible: server / table / vip (covers table server, VIP
 // server, server manager, table manager) + manager-level. Excludes plain
@@ -994,7 +1004,7 @@ function canUseBarLink(staff, assignment) {
 function canUseTableLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
   const b = _roleBlob(staff, assignment);
-  return ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].some(k => b.indexOf(k) !== -1);
+  return TABLE_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1106,9 +1116,7 @@ async function renderNightScoped(nightId) {
   //    Barback/Bars → bar_type 'bar'; VIP/Tables → 'table'/'vip'/'booth'.
   const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
   const wantTable = (mode === 'table');
-  const isAreaForMode = (bt) => wantTable
-    ? (['table', 'vip', 'booth'].indexOf(bt) >= 0)
-    : (bt === 'bar');
+  const isAreaForMode = (bt) => wantTable ? isTableArea(bt) : isBarArea(bt);
   const activeBars = (state.bars || []).filter(b =>
     activeBarIds.has(b.id) && isAreaForMode(String(b.bar_type || '').toLowerCase()));
 
@@ -1122,8 +1130,8 @@ async function renderNightScoped(nightId) {
   const activeTableTypeIds = new Set();  // this night's active 'table'/'vip'/'booth' areas
   activeBarIds.forEach(id => {
     const bt = barTypeById[id];
-    if (bt === 'bar') activeBarTypeIds.add(id);
-    else if (['table', 'vip', 'booth'].indexOf(bt) >= 0) activeTableTypeIds.add(id);
+    if (isBarArea(bt)) activeBarTypeIds.add(id);
+    else if (isTableArea(bt)) activeTableTypeIds.add(id);
   });
   const hasBarCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeBarTypeIds.has(id));
   const hasTableCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeTableTypeIds.has(id));
