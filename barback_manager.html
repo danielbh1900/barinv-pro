@@ -1312,6 +1312,7 @@ $('c-create').addEventListener('click', async () => {
       public_url_base: getBarinvPublicBaseUrl(),
     });
     state.lastCreate = res;
+    res._selectedStaff = allowedStaff;   // PLAN-2026-06-17 — selected staff for the PIN panel
     renderCreateResult(res);
     statusOn('c-status', '✓ Session created', 'ok');
     // Phase 6: if the manager checked LIVE PILOT MODE, mark the new
@@ -1351,17 +1352,58 @@ function renderCreateResult(res) {
   } catch (e) {
     $('qr-out').innerHTML = '<div style="color:#666;padding:18px;">QR unavailable</div>';
   }
-  // PIN list
-  const pins = res.pin_assignments || [];
-  if (!pins.length) {
-    $('c-pins').innerHTML = '<div class="muted small">No staff assigned to this session (any cached staff can sign in once a PIN is set per staff).</div>';
-  } else {
-    $('c-pins').innerHTML = pins.map(p => {
-      const pinHTML = p.pin ? '<span class="pin">' + esc(p.pin) + '</span>' : '<span class="muted">existing PIN</span>';
-      return '<div>' + esc(p.staff_name || p.staff_id.slice(0,8)) + ' — ' + pinHTML + '</div>';
-    }).join('');
-  }
+  // PIN ASSIGNMENTS — masked-by-default, per-row Reveal/Copy (PLAN-2026-06-17).
+  // Plaintext is shown ONLY when this generation/rotation actually returned it
+  // (res.pin_assignments[].pin). Existing PINs are hashed server-side and cannot
+  // be revealed unless rotated. PINs are never written to console.
+  renderPinAssignments(res);
   window.scrollTo({ top: $('c-result-card').offsetTop - 20, behavior: 'smooth' });
+}
+
+function _maskPin() { return '\u2022\u2022\u2022\u2022\u2022\u2022'; }
+function renderPinAssignments(res) {
+  const box = $('c-pins'); if (!box) return;
+  const pinByStaff = {};
+  ((res && res.pin_assignments) || []).forEach(p => { if (p && p.staff_id) pinByStaff[p.staff_id] = p; });
+  const nameById = {}; (state.staffList || []).forEach(s => { nameById[s.id] = s.name || ''; });
+  let sel = (res && Array.isArray(res._selectedStaff) && res._selectedStaff.length) ? res._selectedStaff.slice()
+          : (res && res.session && Array.isArray(res.session.allowed_staff)) ? res.session.allowed_staff.slice()
+          : [];
+  if (!sel.length && ((res && res.pin_assignments) || []).length) sel = res.pin_assignments.map(p => p.staff_id);
+  if (!sel.length) { box.innerHTML = '<div class="muted small">No staff selected for this link.</div>'; return; }
+  let anyExistingOnly = false;
+  const rows = sel.map(sid => {
+    const p = pinByStaff[sid];
+    const nm = esc(nameById[sid] || (p && p.staff_name) || String(sid).slice(0, 8));
+    if (p && p.pin) {
+      return '<div class="pin-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">' +
+        '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">' + nm + '</span>' +
+        '<span class="pin" data-pin-val="' + esc(p.pin) + '" data-shown="0">' + _maskPin() + '</span>' +
+        '<a href="#" class="pin-reveal" style="color:#fb923c;font-size:12px;text-decoration:underline;">Reveal</a>' +
+        '<a href="#" class="pin-copy" style="color:#60a5fa;font-size:12px;text-decoration:underline;">Copy</a>' +
+        '</div>';
+    }
+    anyExistingOnly = true;
+    return '<div class="pin-row" style="padding:3px 0;">' + nm +
+      ' \u2014 <span class="muted">PIN already set \u2014 Rotate PINs to reveal a new PIN</span></div>';
+  }).join('');
+  const note = anyExistingOnly
+    ? '<div class="muted small" style="margin-top:6px;">Existing PINs are hashed and cannot be revealed. Check \u201CRotate PINs\u201D before generating to issue new PINs you can reveal here.</div>'
+    : '';
+  box.innerHTML = rows + note;
+  box.querySelectorAll('.pin-reveal').forEach(a => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const row = a.closest('.pin-row'); const span = row && row.querySelector('.pin'); if (!span) return;
+    if (span.getAttribute('data-shown') === '1') { span.textContent = _maskPin(); span.setAttribute('data-shown', '0'); a.textContent = 'Reveal'; }
+    else { span.textContent = span.getAttribute('data-pin-val') || _maskPin(); span.setAttribute('data-shown', '1'); a.textContent = 'Hide'; }
+  }));
+  box.querySelectorAll('.pin-copy').forEach(a => a.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const row = a.closest('.pin-row'); const span = row && row.querySelector('.pin');
+    const val = span && span.getAttribute('data-pin-val'); if (!val) return;
+    try { await navigator.clipboard.writeText(val); a.textContent = 'Copied'; } catch (_) { a.textContent = 'Copy failed'; }
+    setTimeout(() => { a.textContent = 'Copy'; }, 1200);
+  }));
 }
 
 $('c-copy').addEventListener('click', async () => {
