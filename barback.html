@@ -781,6 +781,14 @@
       <div id="qm-weight-wrap" style="display:none;margin-top:6px;">
         <label for="qm-weight" style="font-size:11px;color:var(--muted);">Weight (g)</label>
         <input id="qm-weight" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 1674" autocomplete="off" style="width:100%;padding:10px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
+        <div id="qm-remaining" style="margin-top:6px;font-size:12px;color:#7dd3fc;"></div>
+        <div id="qm-profile-form" style="display:none;margin-top:6px;">
+          <div style="display:flex;gap:6px;">
+            <input id="qm-tare" type="number" inputmode="decimal" step="1" min="0" placeholder="Empty / tare (g)" autocomplete="off" style="flex:1;min-width:0;padding:8px;font-size:14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
+            <input id="qm-full" type="number" inputmode="decimal" step="1" min="0" placeholder="Full bottle (g)" autocomplete="off" style="flex:1;min-width:0;padding:8px;font-size:14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
+          </div>
+          <button type="button" id="qm-save-profile" style="margin-top:6px;width:100%;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Save profile for this item</button>
+        </div>
       </div>
       <div id="qm-partial-msg" style="display:none;font-size:11px;color:#fbbf24;margin-top:5px;"></div>
     </div>
@@ -2904,6 +2912,51 @@ function _qmSetState(stateVal) {
   const wrap = $('qm-weight-wrap'); if (wrap) wrap.style.display = (stateVal === 'PARTIAL') ? '' : 'none';
   if (stateVal !== 'PARTIAL') { const w = $('qm-weight'); if (w) w.value = ''; }
   else { const w = $('qm-weight'); if (w) { try { w.focus(); } catch (_) {} } }
+  try { _qmUpdateRemaining(); } catch (_) {}
+}
+// SCAN_SHEET_WEIGHT — live remaining-% estimate from the saved tare/full
+// profile (localStorage, no DB). Mirrors updateRemainingDisplay. If no profile,
+// shows compact tare/full inputs + Save. Never blocks Add (profile is optional).
+function _qmUpdateRemaining() {
+  const out = $('qm-remaining'); const form = $('qm-profile-form');
+  if (!out) return;
+  const it = state.qtyModalItem;
+  const bs = state.qmBottleState || 'NOT_WEIGHED';
+  if (!it || bs !== 'PARTIAL') { out.textContent = ''; if (form) form.style.display = 'none'; return; }
+  const w = normalizeWeightG(($('qm-weight') && $('qm-weight').value) || '');
+  const prof = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
+  if (!prof) {
+    out.textContent = 'Profile needed for remaining %';
+    out.style.color = '#fbbf24';
+    if (form) form.style.display = '';
+    return;
+  }
+  if (form) form.style.display = 'none';
+  if (w == null) { out.textContent = 'Using saved bottle profile \u00b7 enter weight for remaining %'; out.style.color = '#9ca3af'; return; }
+  const pct = WeightProfiles.calcRemaining(w, prof);
+  const liquid = deriveLiquidG(w, prof.tare_weight_g);
+  const rml = deriveRemainingMl(pct, parseBottleSizeMl(it));
+  const bits = ['Estimated remaining: ' + pct + '%'];
+  if (liquid != null) bits.push('Liquid ' + (Math.round(liquid * 10) / 10) + 'g');
+  if (rml != null) bits.push('~' + Math.round(rml) + ' ml');
+  bits.push('Using saved bottle profile');
+  let warn = '';
+  if (w < prof.tare_weight_g) warn = ' \u26a0 weight below tare \u2014 clamped to 0%';
+  else if (w > prof.full_weight_g) warn = ' \u26a0 weight above full \u2014 clamped to 100%';
+  out.textContent = bits.join(' \u00b7 ') + warn;
+  out.style.color = warn ? '#fbbf24' : '#7dd3fc';
+}
+function _qmSaveProfile() {
+  const it = state.qtyModalItem; if (!it) return;
+  const tare = ($('qm-tare') && $('qm-tare').value) || '';
+  const full = ($('qm-full') && $('qm-full').value) || '';
+  const res = WeightProfiles.setForItem(WeightProfiles.keyForItem(it), {
+    item_id: it.id || null, item_name: it.name || null,
+    tare_weight_g: tare, full_weight_g: full,
+  });
+  const out = $('qm-remaining');
+  if (!res || !res.ok) { if (out) { out.textContent = '\u26a0 ' + ((res && res.error) || 'could not save profile'); out.style.color = '#fbbf24'; } return; }
+  _qmUpdateRemaining();
 }
 function openQtyModal(it) {
   if (!it) return;
@@ -2929,6 +2982,8 @@ function openQtyModal(it) {
   const _qmMsg = $('qm-partial-msg');
   if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
   if ($('qm-weight')) $('qm-weight').value = '';
+  if ($('qm-tare')) $('qm-tare').value = '';
+  if ($('qm-full')) $('qm-full').value = '';
   _qmSetState('NOT_WEIGHED');
   const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
 }
@@ -2973,6 +3028,8 @@ if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parse
 if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
 $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
 $$('#qm-state-row .qm-state-btn').forEach(b => b.addEventListener('click', () => { if (!b.disabled) _qmSetState(b.getAttribute('data-state')); }));
+if ($('qm-weight')) $('qm-weight').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
+if ($('qm-save-profile')) $('qm-save-profile').addEventListener('click', () => { try { _qmSaveProfile(); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
