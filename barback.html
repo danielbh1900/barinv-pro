@@ -1847,17 +1847,17 @@ function enterMain() {
   // length) and we now fall back through them before showing
   // "(no night)" / "(any bar)".
   const cachedBars = (cache.bars || []).filter(b => b.active !== false);
-  let sessionBars = cachedBars;
-  if (Array.isArray(p.allowed_bars) && p.allowed_bars.length > 0) {
-    const allowed = new Set(p.allowed_bars);
-    if (p.bar_id) allowed.add(p.bar_id);
-    sessionBars = cachedBars.filter(b => allowed.has(b.id));
-  } else if (p.bar_id) {
-    sessionBars = cachedBars.filter(b => b.id === p.bar_id);
-  }
-
-  // Initial selection — primary bar_id wins; else first allowed bar.
-  state.selectedBarId = p.bar_id || (sessionBars[0] && sessionBars[0].id) || null;
+  // SESSION_SCOPE (PLAN-2026-06-17) — destinations come from the authoritative
+  // session scope (server allowed_bars > token), FAIL-CLOSED. Never default to
+  // every venue area (that was the scope leak: an empty token allowed_bars used
+  // to show all bars/tables/internal areas).
+  const sessionBars = getAllowedDestinationsForCurrentSession();
+  const _allowedIds = new Set(sessionBars.map(b => b.id));
+  // Initial selection — a primary bar only if it is actually allowed; else the
+  // first allowed bar; else none (picker hidden + add is blocked).
+  const _primary = (state.serverSession && state.serverSession.bar_id) || p.bar_id || null;
+  state.selectedBarId = (_primary && _allowedIds.has(_primary)) ? _primary
+                      : ((sessionBars[0] && sessionBars[0].id) || null);
 
   function renderWhoLine() {
     const selBar = state.selectedBarId
@@ -3596,6 +3596,13 @@ function addToReview(payload) {
   if (!isItemAllowedForRole(_scopeItem, getCurrentUserRole())) {
     return { ok:false, error: scopeBlockReason(_scopeItem) };
   }
+  // SESSION_SCOPE (PLAN-2026-06-17) — destination must be within this link's
+  // allowed bars/tables. A non-null bar_id outside the allowed set is rejected
+  // on EVERY path (manual / scanner / rapid / draft edit / staging). bar_id may
+  // be null (legacy "any"); RLS WITH CHECK still enforces server-side.
+  if (payload.bar_id && !isAreaAllowedForSession(payload.bar_id)) {
+    return { ok:false, error: 'That bar/table is not in this link\u2019s allowed areas.' };
+  }
   // Defensive qty guard. Every caller path (manual SAVE button,
   // rapid-mode scanner, HID scanner) is supposed to validate before
   // calling, but a single hard guard here means qty=0 / NaN can never
@@ -4405,17 +4412,43 @@ function normalizeAllowedBars(value) {
 // CHECK clause would still reject such a row, but we want the
 // safety enforced client-side too so the operator can see the
 // "locked" state and never gets a confusing rejection at sync time.
-function reviewSessionBars() {
-  const p = (state && state.tokenPayload) || {};
-  const cachedBars = (cache.bars || []).filter(b => b.active !== false);
-  const allowed = normalizeAllowedBars(p.allowed_bars);
-  if (p.bar_id) allowed.add(p.bar_id);
-  if (allowed.size > 0) {
-    return cachedBars.filter(b => allowed.has(b.id));
+// SESSION_SCOPE (PLAN-2026-06-17) — authoritative allowed-area IDs for this
+// session. Priority: the SERVER-validated login session
+// (state.serverSession.allowed_bars, the array barback-pin-login returns from
+// the barback_sessions row) OVER the URL-token payload allowed_bars (+ primary
+// bar_id). FAIL-CLOSED: returns an empty Set when no scope is known — NEVER
+// broadens to all venue areas. Used by the destination picker, the queue-edit
+// picker, multi-bar, and the add guard.
+function getSessionAllowedAreaIds() {
+  const ids = new Set();
+  const ss = (state && state.serverSession) || null;
+  const ssAllowed = ss ? normalizeAllowedBars(ss.allowed_bars) : new Set();
+  if (ssAllowed.size) {
+    ssAllowed.forEach(id => ids.add(id));
+    if (ss.bar_id) ids.add(ss.bar_id);
+    return ids;
   }
-  // No allowed list AND no primary bar — session-scope is unknown.
-  // Return empty so the caller can lock bar editing safely.
-  return [];
+  // Fall back to the URL-token payload only when the server returned no scope.
+  const p = (state && state.tokenPayload) || {};
+  normalizeAllowedBars(p.allowed_bars).forEach(id => ids.add(id));
+  if (p.bar_id) ids.add(p.bar_id);
+  return ids;
+}
+function isAreaAllowedForSession(areaId) {
+  if (!areaId) return false;
+  const ids = getSessionAllowedAreaIds();
+  return ids.size > 0 && ids.has(areaId);
+}
+function getAllowedDestinationsForCurrentSession() {
+  const ids = getSessionAllowedAreaIds();
+  if (!ids.size) return [];
+  return (cache.bars || []).filter(b => b.active !== false && ids.has(b.id));
+}
+// Bars/tables the operator may pick during a queued-row edit / multi-bar.
+// Sourced from getSessionAllowedAreaIds (server scope > token), fail-closed:
+// an empty result means "lock destination editing", never "all venue areas".
+function reviewSessionBars() {
+  return getAllowedDestinationsForCurrentSession();
 }
 
 function renderReview() {
