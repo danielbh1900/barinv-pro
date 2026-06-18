@@ -2897,8 +2897,8 @@ function _qmSetQty(v) {
 // confirmation sheet. PARTIAL reveals a grams input; PARTIAL is blocked while
 // Multi-Bar is on (one bar at a time). Manual grams only (no BLE in this phase).
 function _qmSetState(stateVal) {
-  const multi = !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
-  if (stateVal === 'PARTIAL' && multi) {
+  const blockPartial = multiBarDestCount() > 1;   // >1 destination → PARTIAL not allowed (single-bar only)
+  if (stateVal === 'PARTIAL' && blockPartial) {
     const m = $('qm-partial-msg'); if (m) { m.textContent = 'Partial bottles must be added one bar at a time.'; m.style.display = ''; }
     return;
   }
@@ -2976,7 +2976,7 @@ function openQtyModal(it) {
   _qmSetQty(1);   // default qty 1
   // SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — reset bottle-state/weight section.
   state.qmBottleState = 'NOT_WEIGHED';
-  const _qmMulti = !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
+  const _qmMulti = multiBarDestCount() > 1;   // disable PARTIAL only when >1 destination, not on the checkbox alone
   const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
   if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
   const _qmMsg = $('qm-partial-msg');
@@ -3857,6 +3857,15 @@ function multiBarEligible() {
 function multiBarActive() {
   return !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
 }
+// SCAN_SHEET_WEIGHT — effective Multi-Bar destination count (allowed bars only,
+// matching the fan-out in addCurrentSelectionToReview). PARTIAL is single-
+// destination only, so this — NOT the checkbox — drives the Partial guard:
+// >1 destination blocks PARTIAL; exactly 1 allows it even with Multi-Bar ON.
+function multiBarDestCount() {
+  if (!(state.multiBarMode && getCurrentUserRole() === 'barback')) return 0;
+  const allowed = new Set(multiBarAssignedBars().map(b => b.id));
+  return (state.multiBars || []).filter(id => allowed.has(id)).length;
+}
 // Single source of truth for the Add button: state.multiBars.length.
 // Multi-Bar ON + 0 bars → disabled "SELECT BARS FIRST"; ON + N → "FOR N BARS";
 // OFF → "ADD TO REVIEW". (No disabled-guard — this owns the disabled state.)
@@ -3961,7 +3970,7 @@ function addCurrentSelectionToReview(opts) {
   const multi = multiBarActive();
   if (state.multiBarMode && getCurrentUserRole() === 'barback') {
     if ((state.multiBars || []).length === 0) return { ok:false, error:'Select at least one bar, or turn off Multi-Bar' };
-    if (bottleState === 'PARTIAL') return { ok:false, partial:true, error:'PARTIAL bottles can only be added to one bar at a time' };
+    if (bottleState === 'PARTIAL' && multiBarDestCount() > 1) return { ok:false, partial:true, error:'PARTIAL bottles can only be added to one bar at a time' };
   }
   const weightRaw = (opts.weightOverride != null) ? String(opts.weightOverride).trim() : (($('weight-g-input') && $('weight-g-input').value) || '').trim();
   if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'Weight (grams) must be a positive number, or leave it blank' };
