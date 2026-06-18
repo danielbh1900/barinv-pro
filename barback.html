@@ -206,7 +206,11 @@
     .qty-modal { position:fixed; inset:0; z-index:360; background:rgba(0,0,0,0.78); display:none; align-items:flex-end; justify-content:center; }
     .qty-modal.open { display:flex; }
     .qty-sheet { width:100%; max-width:520px; background:#0f172a; border-top:1px solid #334155;
-                 border-radius:16px 16px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); }
+                 border-radius:16px 16px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+                 /* ANDROID_COMPAT (2026-06-17) — scroll sheet content so the ADD button
+                    stays reachable above the on-screen keyboard. 92dvh tracks the
+                    keyboard-reduced viewport where supported; 90vh is the fallback. */
+                 max-height:90vh; max-height:92dvh; overflow-y:auto; -webkit-overflow-scrolling:touch; }
     .qty-sheet .qm-item { font-size:18px; font-weight:800; color:#f3f4f6; line-height:1.25; }
     .qty-sheet .qm-meta { font-size:13px; color:#9ca3af; margin:4px 0 14px; }
     .qty-sheet .qm-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
