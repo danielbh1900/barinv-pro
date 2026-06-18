@@ -767,6 +767,19 @@
       <button type="button" data-q="6">6</button>
       <button type="button" data-q="12">12</button>
     </div>
+    <div class="qm-state-section" id="qm-state-section" style="margin:8px 0 2px;">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:0.04em;margin-bottom:4px;">BOTTLE STATE</div>
+      <div class="qm-state-row" id="qm-state-row" style="display:flex;gap:6px;">
+        <button type="button" class="qm-state-btn" data-state="NOT_WEIGHED" style="flex:1;padding:9px 4px;font-size:12px;border:1px solid #374151;border-radius:6px;background:#1f2937;color:#cbd5e1;cursor:pointer;">Not weighed</button>
+        <button type="button" class="qm-state-btn" data-state="UNOPENED" style="flex:1;padding:9px 4px;font-size:12px;border:1px solid #374151;border-radius:6px;background:#1f2937;color:#cbd5e1;cursor:pointer;">Unopened</button>
+        <button type="button" class="qm-state-btn" data-state="PARTIAL" style="flex:1;padding:9px 4px;font-size:12px;border:1px solid #374151;border-radius:6px;background:#1f2937;color:#cbd5e1;cursor:pointer;">Partial / weighed</button>
+      </div>
+      <div id="qm-weight-wrap" style="display:none;margin-top:6px;">
+        <label for="qm-weight" style="font-size:11px;color:var(--muted);">Weight (g)</label>
+        <input id="qm-weight" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 1674" autocomplete="off" style="width:100%;padding:10px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
+      </div>
+      <div id="qm-partial-msg" style="display:none;font-size:11px;color:#fbbf24;margin-top:5px;"></div>
+    </div>
     <button class="btn btn-success qm-add" id="qm-add">➕ ADD TO REVIEW</button>
     <button class="btn btn-secondary qm-cancel" id="qm-cancel">Cancel</button>
   </div>
@@ -2868,6 +2881,26 @@ function _qmSetQty(v) {
   let n = parseInt(v, 10); if (!isFinite(n) || n < 1) n = 1;
   el.value = String(n);
 }
+// SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — bottle-state selector inside the scan
+// confirmation sheet. PARTIAL reveals a grams input; PARTIAL is blocked while
+// Multi-Bar is on (one bar at a time). Manual grams only (no BLE in this phase).
+function _qmSetState(stateVal) {
+  const multi = !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
+  if (stateVal === 'PARTIAL' && multi) {
+    const m = $('qm-partial-msg'); if (m) { m.textContent = 'Partial bottles must be added one bar at a time.'; m.style.display = ''; }
+    return;
+  }
+  state.qmBottleState = stateVal;
+  ($$('#qm-state-row .qm-state-btn') || []).forEach(b => {
+    const on = b.getAttribute('data-state') === stateVal;
+    b.style.background = on ? 'var(--a)' : '#1f2937';
+    b.style.color = on ? '#000' : '#cbd5e1';
+    b.style.fontWeight = on ? '700' : '500';
+  });
+  const wrap = $('qm-weight-wrap'); if (wrap) wrap.style.display = (stateVal === 'PARTIAL') ? '' : 'none';
+  if (stateVal !== 'PARTIAL') { const w = $('qm-weight'); if (w) w.value = ''; }
+  else { const w = $('qm-weight'); if (w) { try { w.focus(); } catch (_) {} } }
+}
 function openQtyModal(it) {
   if (!it) return;
   state.qtyModalItem = it;
@@ -2884,6 +2917,15 @@ function openQtyModal(it) {
   }
   if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
   _qmSetQty(1);   // default qty 1
+  // SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — reset bottle-state/weight section.
+  state.qmBottleState = 'NOT_WEIGHED';
+  const _qmMulti = !!(state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0);
+  const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
+  if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
+  const _qmMsg = $('qm-partial-msg');
+  if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
+  if ($('qm-weight')) $('qm-weight').value = '';
+  _qmSetState('NOT_WEIGHED');
   const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
 }
 function closeQtyModal() {
@@ -2895,7 +2937,20 @@ function qtyModalAdd() {
   if (!it) { closeQtyModal(); return; }
   const qty = parseInt(($('qm-input') && $('qm-input').value) || '1', 10);
   if (!isFinite(qty) || qty <= 0) { _qmSetQty(1); try { statusOn('save-status', 'Qty must be at least 1', 'err'); } catch (_) {} return; }
-  const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty });
+  // SCAN_SHEET_WEIGHT — bottle state + manual weight from the sheet.
+  const bs = state.qmBottleState || 'NOT_WEIGHED';
+  let weightOverride = '';
+  if (bs === 'PARTIAL') {
+    const wraw = (($('qm-weight') && $('qm-weight').value) || '').trim();
+    if (!(parseFloat(wraw) > 0)) {
+      try { statusOn('save-status', 'Partial bottle requires a weight in grams', 'err'); } catch (_) {}
+      const m = $('qm-partial-msg'); if (m) { m.textContent = 'Enter the bottle weight in grams (e.g. 1674).'; m.style.display = ''; }
+      try { const w = $('qm-weight'); if (w) w.focus(); } catch (_) {}
+      return;   // block — do not add
+    }
+    weightOverride = wraw;
+  }
+  const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty, bottleStateOverride: bs, weightOverride: weightOverride });
   if (!res || !res.ok) {
     Feedback.warn();
     showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
@@ -2913,6 +2968,7 @@ function qtyModalAdd() {
 if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
 if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
 $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
+$$('#qm-state-row .qm-state-btn').forEach(b => b.addEventListener('click', () => { if (!b.disabled) _qmSetState(b.getAttribute('data-state')); }));
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
@@ -3839,14 +3895,14 @@ function addCurrentSelectionToReview(opts) {
     return { ok:false, error:'TAKEN qty must be a whole number (bottles)' };
   }
 
-  const bottleState = ($('bottle-state-select') && $('bottle-state-select').value) || 'UNOPENED';
+  const bottleState = (opts.bottleStateOverride != null) ? opts.bottleStateOverride : (($('bottle-state-select') && $('bottle-state-select').value) || 'UNOPENED');
   // Multi-Bar guards (barback only) — PARTIAL is single-bar only.
   const multi = multiBarActive();
   if (state.multiBarMode && getCurrentUserRole() === 'barback') {
     if ((state.multiBars || []).length === 0) return { ok:false, error:'Select at least one bar, or turn off Multi-Bar' };
     if (bottleState === 'PARTIAL') return { ok:false, partial:true, error:'PARTIAL bottles can only be added to one bar at a time' };
   }
-  const weightRaw = (($('weight-g-input') && $('weight-g-input').value) || '').trim();
+  const weightRaw = (opts.weightOverride != null) ? String(opts.weightOverride).trim() : (($('weight-g-input') && $('weight-g-input').value) || '').trim();
   if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'Weight (grams) must be a positive number, or leave it blank' };
   if (bottleState === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'PARTIAL bottle requires weight in grams' };
 
@@ -3854,7 +3910,7 @@ function addCurrentSelectionToReview(opts) {
   const base = {
     item_id: itemId, item_name: itemName, qty: qty, action: state.selectedAction,
     notes: (($('notes-input') && $('notes-input').value) || '').trim(),
-    weight_g: ($('weight-g-input') && $('weight-g-input').value) || '',
+    weight_g: weightRaw,
     bottle_state: bottleState,
     tare_weight_g: _svProf ? _svProf.tare_weight_g : null,
     full_weight_g: _svProf ? _svProf.full_weight_g : null,
