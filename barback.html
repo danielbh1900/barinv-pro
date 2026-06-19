@@ -804,6 +804,16 @@
             <button type="button" id="qm-cancel-edit" style="display:none;flex:1;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Cancel edit</button>
           </div>
         </div>
+        <!-- SCALE_BLE — capability-gated Web Bluetooth (Android/desktop Chrome). Hidden where unsupported (e.g. iPhone). Auto-fills Weight (g) only; never submits. -->
+        <div id="qm-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <span id="qm-ble-status" style="font-size:12px;color:#9ca3af;">Scale: Not connected</span>
+            <button type="button" id="qm-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
+          </div>
+          <div id="qm-ble-live" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">—</div>
+          <button type="button" id="qm-ble-use" style="display:none;margin-top:6px;width:100%;padding:8px;font-size:13px;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
+          <div id="qm-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
+        </div>
       </div>
       <div id="qm-partial-msg" style="display:none;font-size:11px;color:#fbbf24;margin-top:5px;"></div>
     </div>
@@ -2925,6 +2935,7 @@ function _qmSetState(stateVal) {
     b.style.fontWeight = on ? '700' : '500';
   });
   const wrap = $('qm-weight-wrap'); if (wrap) wrap.style.display = (stateVal === 'PARTIAL') ? '' : 'none';
+  const _bleEl = $('qm-ble'); if (_bleEl) _bleEl.style.display = (stateVal === 'PARTIAL' && bleScale && bleScale.supported) ? '' : 'none';   // SCALE_BLE — capability-gated
   if (stateVal !== 'PARTIAL') { const w = $('qm-weight'); if (w) w.value = ''; }
   else { const w = $('qm-weight'); if (w) { try { w.focus(); } catch (_) {} } }
   try { _qmUpdateRemaining(); } catch (_) {}
@@ -3150,6 +3161,116 @@ function qtyModalAdd() {
     'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
   closeQtyModal();
 }
+// ════════════════════════════════════════════════════════════════════
+//  SCALE_BLE — capability-gated Web Bluetooth prototype (Android / desktop
+//  Chrome). Reuses the VALIDATED QN-KS decoder (service FFF0 / notify FFF1,
+//  18-byte frame, conditional divisor: low-range ÷10 default, high-range ÷1).
+//  iPhone/iOS browsers have no navigator.bluetooth → the UI never appears and
+//  none of this runs. Auto-fills ONLY the Weight (g) input on an explicit
+//  "Use latest stable weight" tap; never submits, never writes DB. Manual
+//  entry + DB/local profiles remain untouched fallbacks.
+// ════════════════════════════════════════════════════════════════════
+var SCALE_BLE_SVC = '0000fff0-0000-1000-8000-00805f9b34fb';
+var SCALE_BLE_CHR = '0000fff1-0000-1000-8000-00805f9b34fb';
+var bleScale = { supported: false, device: null, server: null, char: null, connected: false, latest: null };
+
+// Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
+// Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
+// divisor, rangeMode, stable, naiveDiv10, checksum, expected, reason }.
+function _bleDecodeFrame(bytes) {
+  var r = { confidence: 'unknown', reason: null, length: (bytes ? bytes.length : 0),
+            grams: null, raw: null, divisor: null, rangeMode: null, stable: null,
+            naiveDiv10: null, checksum: null, expected: null };
+  if (!bytes || bytes.length !== 18) { r.reason = 'length-mismatch'; return r; }
+  if (!(bytes[0] === 0x10 && bytes[1] === 0x12 && bytes[2] === 0x00 && bytes[3] === 0x6c)) { r.reason = 'header-mismatch'; return r; }
+  var raw = (bytes[9] << 8) | bytes[10];
+  var div = 10, mode = 'low-range';
+  if (bytes[8] === 0xe8 && bytes[11] === 0x3e && bytes[15] === 0x02 && raw >= 1000 && raw <= 10000) { div = 1; mode = 'high-range'; }
+  var sum = 0; for (var i = 0; i < 17; i++) sum = (sum + bytes[i]) & 0xff;
+  r.raw = raw; r.divisor = div; r.rangeMode = mode; r.grams = raw / div; r.naiveDiv10 = raw / 10;
+  r.stable = bytes[16] === 1; r.checksum = bytes[17]; r.expected = sum;
+  if (sum !== bytes[17]) { r.confidence = 'low'; r.reason = 'checksum-mismatch'; return r; }
+  r.confidence = 'high'; r.reason = 'ok'; return r;
+}
+function _bleHex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; } return s; }
+function _bleStatus(t) { var el = $('qm-ble-status'); if (el) el.textContent = t; }
+function _bleSetConnected(name) {
+  bleScale.connected = true;
+  _bleStatus('Scale: connected' + (name ? ' · ' + name : ''));
+  var b = $('qm-ble-connect'); if (b) b.textContent = 'Disconnect';
+}
+function _bleSetDisconnected() {
+  bleScale.connected = false; bleScale.latest = null;
+  var b = $('qm-ble-connect'); if (b) b.textContent = '📶 Connect scale';
+  var live = $('qm-ble-live'); if (live) { live.style.display = 'none'; live.textContent = '—'; }
+  var use = $('qm-ble-use'); if (use) use.style.display = 'none';
+  var dbg = $('qm-ble-debug'); if (dbg) dbg.style.display = 'none';
+}
+function _bleOnFrame(ev) {
+  try {
+    var dv = ev && ev.target && ev.target.value; if (!dv) return;
+    var n = dv.byteLength, bytes = new Uint8Array(n);
+    for (var i = 0; i < n; i++) bytes[i] = dv.getUint8(i);
+    var r = _bleDecodeFrame(bytes);
+    var dbg = $('qm-ble-debug');
+    if (r.confidence === 'high') {
+      bleScale.latest = { grams: r.grams, stable: r.stable };
+      var live = $('qm-ble-live');
+      if (live) { live.textContent = r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : ''); live.style.display = ''; }
+      var use = $('qm-ble-use'); if (use) use.style.display = '';
+      if (dbg) { var d = _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor; if (r.rangeMode === 'high-range') d += ' (÷10 would misread ' + r.naiveDiv10 + 'g)'; dbg.textContent = d; dbg.style.display = ''; }
+    } else if (dbg) {
+      dbg.textContent = 'frame ignored (' + (r.reason || 'low-confidence') + ')'; dbg.style.display = '';
+    }
+  } catch (_) { /* never break manual entry */ }
+}
+function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _bleSetDisconnected(); _bleStatus('Scale: Not connected'); }
+async function _bleConnect() {
+  if (!navigator.bluetooth) return;
+  try {
+    _bleStatus('Scale: requesting…');
+    var device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SCALE_BLE_SVC] }], optionalServices: [SCALE_BLE_SVC] });
+    bleScale.device = device;
+    device.addEventListener('gattserverdisconnected', _bleOnDisconnect);
+    _bleStatus('Scale: connecting…');
+    var server = await device.gatt.connect(); bleScale.server = server;
+    var service = await server.getPrimaryService(SCALE_BLE_SVC);
+    var ch = await service.getCharacteristic(SCALE_BLE_CHR);
+    await ch.startNotifications();
+    ch.addEventListener('characteristicvaluechanged', _bleOnFrame);
+    bleScale.char = ch;
+    _bleSetConnected(device.name || '');
+  } catch (e) {
+    if (e && e.name === 'NotFoundError') { _bleStatus('Scale: Not connected'); }   // user cancelled the chooser
+    else { _bleStatus('Scale: connect failed — manual entry still works'); }
+    _bleSetDisconnected();
+  }
+}
+function _bleDisconnect() {
+  try { if (bleScale.device && bleScale.device.gatt && bleScale.device.gatt.connected) bleScale.device.gatt.disconnect(); } catch (_) {}
+  _bleOnDisconnect();
+}
+function _bleUseLatest() {
+  if (!bleScale.latest) return;
+  var w = $('qm-weight'); if (!w) return;
+  w.value = String(bleScale.latest.grams);
+  try { _qmUpdateRemaining(); } catch (_) {}
+  try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+}
+// Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
+// so supported stays false and the UI never shows (and never errors).
+(function _bleInitSupport() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.bluetooth) { bleScale.supported = false; return; }
+    bleScale.supported = true;   // bluetooth object present → treat as supported
+    if (navigator.bluetooth.getAvailability) {
+      navigator.bluetooth.getAvailability().then(function (a) {
+        bleScale.supported = !!a;
+        var el = $('qm-ble'); if (el && state.qmBottleState === 'PARTIAL') el.style.display = bleScale.supported ? '' : 'none';
+      }).catch(function () {});
+    }
+  } catch (_) { bleScale.supported = false; }
+})();
 if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
 if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
 $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
@@ -3161,6 +3282,8 @@ if ($('qm-reset-profile')) $('qm-reset-profile').addEventListener('click', () =>
 if ($('qm-cancel-edit')) $('qm-cancel-edit').addEventListener('click', () => { try { _qmCancelEdit(); } catch (_) {} });
 if ($('qm-tare')) $('qm-tare').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
 if ($('qm-full')) $('qm-full').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
+if ($('qm-ble-connect')) $('qm-ble-connect').addEventListener('click', () => { try { if (bleScale.connected) _bleDisconnect(); else _bleConnect(); } catch (_) {} });
+if ($('qm-ble-use')) $('qm-ble-use').addEventListener('click', () => { try { _bleUseLatest(); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
