@@ -782,12 +782,27 @@
         <label for="qm-weight" style="font-size:11px;color:var(--muted);">Weight (g)</label>
         <input id="qm-weight" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 1674" autocomplete="off" style="width:100%;padding:10px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
         <div id="qm-remaining" style="margin-top:6px;font-size:12px;color:#7dd3fc;"></div>
+        <!-- SCALE_PROFILE_EDIT — summary + edit/reset for an existing saved profile -->
+        <div id="qm-profile-summary" style="display:none;margin-top:6px;font-size:12px;">
+          <div style="color:#9ca3af;">Using saved bottle profile</div>
+          <div style="display:flex;gap:12px;margin-top:2px;color:#cbd5e1;font-family:'Fira Mono',monospace;">
+            <span id="qm-prof-tare-lbl">Tare: —</span>
+            <span id="qm-prof-full-lbl">Full: —</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:6px;">
+            <button type="button" id="qm-edit-profile" style="flex:1;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Edit profile</button>
+            <button type="button" id="qm-reset-profile" style="flex:1;padding:8px;font-size:13px;background:#1f2937;color:#fca5a5;border:1px solid #4b5563;border-radius:6px;cursor:pointer;">Reset saved profile</button>
+          </div>
+        </div>
         <div id="qm-profile-form" style="display:none;margin-top:6px;">
           <div style="display:flex;gap:6px;">
             <input id="qm-tare" type="number" inputmode="decimal" step="1" min="0" placeholder="Empty / tare (g)" autocomplete="off" style="flex:1;min-width:0;padding:8px;font-size:14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
             <input id="qm-full" type="number" inputmode="decimal" step="1" min="0" placeholder="Full bottle (g)" autocomplete="off" style="flex:1;min-width:0;padding:8px;font-size:14px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
           </div>
-          <button type="button" id="qm-save-profile" style="margin-top:6px;width:100%;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Save profile for this item</button>
+          <div style="display:flex;gap:6px;margin-top:6px;">
+            <button type="button" id="qm-save-profile" style="flex:1;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Save profile for this item</button>
+            <button type="button" id="qm-cancel-edit" style="display:none;flex:1;padding:8px;font-size:13px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Cancel edit</button>
+          </div>
         </div>
       </div>
       <div id="qm-partial-msg" style="display:none;font-size:11px;color:#fbbf24;margin-top:5px;"></div>
@@ -2918,20 +2933,41 @@ function _qmSetState(stateVal) {
 // profile (localStorage, no DB). Mirrors updateRemainingDisplay. If no profile,
 // shows compact tare/full inputs + Save. Never blocks Add (profile is optional).
 function _qmUpdateRemaining() {
-  const out = $('qm-remaining'); const form = $('qm-profile-form');
+  const out = $('qm-remaining'); const form = $('qm-profile-form'); const summary = $('qm-profile-summary');
+  const hide = (el) => { if (el) el.style.display = 'none'; };
+  const show = (el) => { if (el) el.style.display = ''; };
   if (!out) return;
   const it = state.qtyModalItem;
   const bs = state.qmBottleState || 'NOT_WEIGHED';
-  if (!it || bs !== 'PARTIAL') { out.textContent = ''; if (form) form.style.display = 'none'; return; }
+  if (!it || bs !== 'PARTIAL') { out.textContent = ''; hide(form); hide(summary); return; }
   const w = normalizeWeightG(($('qm-weight') && $('qm-weight').value) || '');
   const prof = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
-  if (!prof) {
-    out.textContent = 'Profile needed for remaining %';
-    out.style.color = '#fbbf24';
-    if (form) form.style.display = '';
-    return;
+  const editing = !!state.qmProfileEditing;
+
+  // SCALE_PROFILE_EDIT \u2014 which control is visible:
+  //  no profile            \u2192 create form (no Cancel)
+  //  profile + editing      \u2192 edit form (Cancel shown, Save relabelled)
+  //  profile + not editing  \u2192 summary (Tare/Full + Edit/Reset)
+  if (!prof || editing) {
+    show(form); hide(summary);
+    const cancelBtn = $('qm-cancel-edit'); if (cancelBtn) cancelBtn.style.display = (prof && editing) ? '' : 'none';
+    const saveBtn = $('qm-save-profile'); if (saveBtn) saveBtn.textContent = (prof && editing) ? 'Save profile' : 'Save profile for this item';
+  } else {
+    hide(form); show(summary);
+    const ts = $('qm-prof-tare-lbl'), fs = $('qm-prof-full-lbl');
+    if (ts) ts.textContent = 'Tare: ' + prof.tare_weight_g + 'g';
+    if (fs) fs.textContent = 'Full: ' + prof.full_weight_g + 'g';
   }
-  if (form) form.style.display = 'none';
+
+  // When the tare/full form is open, prefer a live preview from the TYPED
+  // (unsaved) values so edits recalculate immediately. Display only.
+  if (!prof || editing) {
+    if (_qmFormPreview(it, w)) return;
+    if (!prof) { out.textContent = 'Profile needed for remaining %'; out.style.color = '#fbbf24'; return; }
+    // editing with no usable typed values yet \u2192 fall through to saved estimate
+  }
+
+  // Saved-profile estimate (existing behavior).
   if (w == null) { out.textContent = 'Using saved bottle profile \u00b7 enter weight for remaining %'; out.style.color = '#9ca3af'; return; }
   const pct = WeightProfiles.calcRemaining(w, prof);
   const liquid = deriveLiquidG(w, prof.tare_weight_g);
@@ -2946,6 +2982,30 @@ function _qmUpdateRemaining() {
   out.textContent = bits.join(' \u00b7 ') + warn;
   out.style.color = warn ? '#fbbf24' : '#7dd3fc';
 }
+// SCALE_PROFILE_EDIT \u2014 live remaining-% preview from the TYPED tare/full in the
+// profile form (never persists). Returns true if it rendered, false if the
+// typed values aren't usable yet (caller then shows its own fallback text).
+function _qmFormPreview(it, w) {
+  const out = $('qm-remaining'); if (!out || !it) return false;
+  const t = normalizeWeightG(($('qm-tare') && $('qm-tare').value) || '');
+  const f = normalizeWeightG(($('qm-full') && $('qm-full').value) || '');
+  if (t == null || f == null) return false;     // not enough typed yet
+  if (f <= t) { out.textContent = 'Full bottle weight must be greater than tare'; out.style.color = '#fbbf24'; return true; }
+  if (w == null) { out.textContent = 'Preview profile \u00b7 enter weight for remaining %'; out.style.color = '#9ca3af'; return true; }
+  const pct = WeightProfiles.calcRemaining(w, { tare_weight_g: t, full_weight_g: f });
+  const liquid = deriveLiquidG(w, t);
+  const rml = deriveRemainingMl(pct, parseBottleSizeMl(it));
+  const bits = ['Preview remaining: ' + pct + '%'];
+  if (liquid != null) bits.push('Liquid ' + (Math.round(liquid * 10) / 10) + 'g');
+  if (rml != null) bits.push('~' + Math.round(rml) + ' ml');
+  bits.push('unsaved \u2014 tap Save');
+  let warn = '';
+  if (w < t) warn = ' \u26a0 weight below tare \u2014 clamped to 0%';
+  else if (w > f) warn = ' \u26a0 weight above full \u2014 clamped to 100%';
+  out.textContent = bits.join(' \u00b7 ') + warn;
+  out.style.color = warn ? '#fbbf24' : '#7dd3fc';
+  return true;
+}
 function _qmSaveProfile() {
   const it = state.qtyModalItem; if (!it) return;
   const tare = ($('qm-tare') && $('qm-tare').value) || '';
@@ -2956,6 +3016,37 @@ function _qmSaveProfile() {
   });
   const out = $('qm-remaining');
   if (!res || !res.ok) { if (out) { out.textContent = '\u26a0 ' + ((res && res.error) || 'could not save profile'); out.style.color = '#fbbf24'; } return; }
+  state.qmProfileEditing = false;   // saved \u2192 return to summary view
+  _qmUpdateRemaining();
+}
+// SCALE_PROFILE_EDIT \u2014 reveal the edit form prefilled with the saved profile.
+function _qmEditProfile() {
+  const it = state.qtyModalItem; if (!it) return;
+  const prof = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
+  if (!prof) { state.qmProfileEditing = false; _qmUpdateRemaining(); return; }
+  if ($('qm-tare')) $('qm-tare').value = prof.tare_weight_g;
+  if ($('qm-full')) $('qm-full').value = prof.full_weight_g;
+  state.qmProfileEditing = true;
+  _qmUpdateRemaining();
+  try { const t = $('qm-tare'); if (t) t.focus(); } catch (_) {}
+}
+// Discard unsaved edits, return to the saved summary.
+function _qmCancelEdit() {
+  state.qmProfileEditing = false;
+  if ($('qm-tare')) $('qm-tare').value = '';
+  if ($('qm-full')) $('qm-full').value = '';
+  _qmUpdateRemaining();
+}
+// Remove the saved profile for this item (with confirm), back to profile-needed.
+function _qmResetProfile() {
+  const it = state.qtyModalItem; if (!it) return;
+  let ok = true;
+  try { ok = window.confirm('Reset saved profile for this item? Tare/full will be cleared.'); } catch (_) { ok = true; }
+  if (!ok) return;
+  WeightProfiles.removeForItem(WeightProfiles.keyForItem(it));
+  state.qmProfileEditing = false;
+  if ($('qm-tare')) $('qm-tare').value = '';
+  if ($('qm-full')) $('qm-full').value = '';
   _qmUpdateRemaining();
 }
 function openQtyModal(it) {
@@ -2984,6 +3075,7 @@ function openQtyModal(it) {
   if ($('qm-weight')) $('qm-weight').value = '';
   if ($('qm-tare')) $('qm-tare').value = '';
   if ($('qm-full')) $('qm-full').value = '';
+  state.qmProfileEditing = false;   // SCALE_PROFILE_EDIT — start in summary/create view
   _qmSetState('NOT_WEIGHED');
   const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
 }
@@ -3030,6 +3122,11 @@ $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(
 $$('#qm-state-row .qm-state-btn').forEach(b => b.addEventListener('click', () => { if (!b.disabled) _qmSetState(b.getAttribute('data-state')); }));
 if ($('qm-weight')) $('qm-weight').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
 if ($('qm-save-profile')) $('qm-save-profile').addEventListener('click', () => { try { _qmSaveProfile(); } catch (_) {} });
+if ($('qm-edit-profile')) $('qm-edit-profile').addEventListener('click', () => { try { _qmEditProfile(); } catch (_) {} });
+if ($('qm-reset-profile')) $('qm-reset-profile').addEventListener('click', () => { try { _qmResetProfile(); } catch (_) {} });
+if ($('qm-cancel-edit')) $('qm-cancel-edit').addEventListener('click', () => { try { _qmCancelEdit(); } catch (_) {} });
+if ($('qm-tare')) $('qm-tare').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
+if ($('qm-full')) $('qm-full').addEventListener('input', () => { try { _qmUpdateRemaining(); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
@@ -3516,6 +3613,14 @@ const WeightProfiles = {
       source: 'local_manual_profile',
     };
     return this.save(m) ? { ok: true, profile: m[key] } : { ok: false, error: 'could not save (storage)' };
+  },
+  // SCALE_PROFILE_EDIT — remove a saved profile (localStorage only, no DB).
+  removeForItem(key) {
+    if (!key) return false;
+    const m = this.load();
+    if (!(key in m)) return false;
+    delete m[key];
+    return this.save(m);
   },
   // Integer 0–100, or null if profile/weight invalid. Clamped at both ends.
   calcRemaining(weight_g, profile) {
