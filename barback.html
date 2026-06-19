@@ -784,7 +784,7 @@
         <div id="qm-remaining" style="margin-top:6px;font-size:12px;color:#7dd3fc;"></div>
         <!-- SCALE_PROFILE_EDIT — summary + edit/reset for an existing saved profile -->
         <div id="qm-profile-summary" style="display:none;margin-top:6px;font-size:12px;">
-          <div style="color:#9ca3af;">Using saved bottle profile</div>
+          <div id="qm-prof-source-lbl" style="color:#9ca3af;">Using saved bottle profile</div>
           <div style="display:flex;gap:12px;margin-top:2px;color:#cbd5e1;font-family:'Fira Mono',monospace;">
             <span id="qm-prof-tare-lbl">Tare: —</span>
             <span id="qm-prof-full-lbl">Full: —</span>
@@ -2932,6 +2932,26 @@ function _qmSetState(stateVal) {
 // SCAN_SHEET_WEIGHT — live remaining-% estimate from the saved tare/full
 // profile (localStorage, no DB). Mirrors updateRemainingDisplay. If no profile,
 // shows compact tare/full inputs + Save. Never blocks Add (profile is optional).
+// DB_PROFILE \u2014 bottle profile straight from the login-bundle item
+// (items.empty_bottle_weight_g / full_bottle_weight_g \u2014 may arrive as strings,
+// normalizeWeightG coerces). Read-only; null unless both present and full > tare.
+function dbProfileForItem(it) {
+  if (!it) return null;
+  const tare = normalizeWeightG(it.empty_bottle_weight_g);
+  const full = normalizeWeightG(it.full_bottle_weight_g);
+  if (tare == null || full == null || full <= tare) return null;
+  return { tare_weight_g: tare, full_weight_g: full, source: 'db_item_profile' };
+}
+// DB_PROFILE \u2014 effective profile + source for an item. A local override wins
+// when present (operator edits create a local override); otherwise the DB
+// profile; otherwise none. Priority: local override > DB > manual entry.
+function resolveBottleProfile(it) {
+  const local = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
+  if (local) return { profile: local, source: 'local' };
+  const db = dbProfileForItem(it);
+  if (db) return { profile: db, source: 'db' };
+  return { profile: null, source: null };
+}
 function _qmUpdateRemaining() {
   const out = $('qm-remaining'); const form = $('qm-profile-form'); const summary = $('qm-profile-summary');
   const hide = (el) => { if (el) el.style.display = 'none'; };
@@ -2941,22 +2961,29 @@ function _qmUpdateRemaining() {
   const bs = state.qmBottleState || 'NOT_WEIGHED';
   if (!it || bs !== 'PARTIAL') { out.textContent = ''; hide(form); hide(summary); return; }
   const w = normalizeWeightG(($('qm-weight') && $('qm-weight').value) || '');
-  const prof = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
+  const resolved = resolveBottleProfile(it);   // DB_PROFILE \u2014 DB or local override
+  const prof = resolved.profile;
+  const src = resolved.source;                  // 'db' | 'local' | null
+  const hasLocal = src === 'local';
+  const srcLabel = (src === 'db') ? 'Using DB bottle profile' : 'Using local profile';
   const editing = !!state.qmProfileEditing;
 
   // SCALE_PROFILE_EDIT \u2014 which control is visible:
   //  no profile            \u2192 create form (no Cancel)
   //  profile + editing      \u2192 edit form (Cancel shown, Save relabelled)
-  //  profile + not editing  \u2192 summary (Tare/Full + Edit/Reset)
+  //  profile + not editing  \u2192 summary (source label + Tare/Full + Edit/Reset)
   if (!prof || editing) {
     show(form); hide(summary);
     const cancelBtn = $('qm-cancel-edit'); if (cancelBtn) cancelBtn.style.display = (prof && editing) ? '' : 'none';
     const saveBtn = $('qm-save-profile'); if (saveBtn) saveBtn.textContent = (prof && editing) ? 'Save profile' : 'Save profile for this item';
   } else {
     hide(form); show(summary);
+    const sl = $('qm-prof-source-lbl'); if (sl) sl.textContent = srcLabel;
     const ts = $('qm-prof-tare-lbl'), fs = $('qm-prof-full-lbl');
     if (ts) ts.textContent = 'Tare: ' + prof.tare_weight_g + 'g';
     if (fs) fs.textContent = 'Full: ' + prof.full_weight_g + 'g';
+    // Reset affects a LOCAL override only \u2014 hide it for a pure DB profile.
+    const resetBtn = $('qm-reset-profile'); if (resetBtn) resetBtn.style.display = hasLocal ? '' : 'none';
   }
 
   // When the tare/full form is open, prefer a live preview from the TYPED
@@ -2967,15 +2994,15 @@ function _qmUpdateRemaining() {
     // editing with no usable typed values yet \u2192 fall through to saved estimate
   }
 
-  // Saved-profile estimate (existing behavior).
-  if (w == null) { out.textContent = 'Using saved bottle profile \u00b7 enter weight for remaining %'; out.style.color = '#9ca3af'; return; }
+  // Resolved-profile estimate (DB or local).
+  if (w == null) { out.textContent = srcLabel + ' \u00b7 enter weight for remaining %'; out.style.color = '#9ca3af'; return; }
   const pct = WeightProfiles.calcRemaining(w, prof);
   const liquid = deriveLiquidG(w, prof.tare_weight_g);
   const rml = deriveRemainingMl(pct, parseBottleSizeMl(it));
   const bits = ['Estimated remaining: ' + pct + '%'];
   if (liquid != null) bits.push('Liquid ' + (Math.round(liquid * 10) / 10) + 'g');
   if (rml != null) bits.push('~' + Math.round(rml) + ' ml');
-  bits.push('Using saved bottle profile');
+  bits.push(srcLabel);
   let warn = '';
   if (w < prof.tare_weight_g) warn = ' \u26a0 weight below tare \u2014 clamped to 0%';
   else if (w > prof.full_weight_g) warn = ' \u26a0 weight above full \u2014 clamped to 100%';
@@ -3022,7 +3049,9 @@ function _qmSaveProfile() {
 // SCALE_PROFILE_EDIT \u2014 reveal the edit form prefilled with the saved profile.
 function _qmEditProfile() {
   const it = state.qtyModalItem; if (!it) return;
-  const prof = WeightProfiles.getForItem(WeightProfiles.keyForItem(it));
+  // Prefill from the effective profile (DB or local). Editing always saves a
+  // LOCAL override — the DB row is never written from here.
+  const prof = resolveBottleProfile(it).profile;
   if (!prof) { state.qmProfileEditing = false; _qmUpdateRemaining(); return; }
   if ($('qm-tare')) $('qm-tare').value = prof.tare_weight_g;
   if ($('qm-full')) $('qm-full').value = prof.full_weight_g;
@@ -3037,11 +3066,16 @@ function _qmCancelEdit() {
   if ($('qm-full')) $('qm-full').value = '';
   _qmUpdateRemaining();
 }
-// Remove the saved profile for this item (with confirm), back to profile-needed.
+// Remove the LOCAL override for this item (with confirm). Falls back to the DB
+// profile if one exists, else to the profile-needed form. Never deletes DB data.
 function _qmResetProfile() {
   const it = state.qtyModalItem; if (!it) return;
+  const hasDb = !!dbProfileForItem(it);
+  const msg = hasDb
+    ? 'Reset local override for this item? It will fall back to the saved DB bottle profile.'
+    : 'Reset local profile for this item? Tare/full will be cleared.';
   let ok = true;
-  try { ok = window.confirm('Reset saved profile for this item? Tare/full will be cleared.'); } catch (_) { ok = true; }
+  try { ok = window.confirm(msg); } catch (_) { ok = true; }
   if (!ok) return;
   WeightProfiles.removeForItem(WeightProfiles.keyForItem(it));
   state.qmProfileEditing = false;
@@ -4081,7 +4115,10 @@ function addCurrentSelectionToReview(opts) {
   if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'Weight (grams) must be a positive number, or leave it blank' };
   if (bottleState === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'PARTIAL bottle requires weight in grams' };
 
-  const _svProf = WeightProfiles.getForItem(WeightProfiles.keyForItem(itemObj));
+  // DB_PROFILE — store the effective tare/full (local override > DB) on the
+  // draft so buildProfileNotes emits TARE/FULL/REMAINING_PERCENT/LIQUID/ML even
+  // when only a DB profile exists. No DB write; submit payload schema unchanged.
+  const _svProf = resolveBottleProfile(itemObj).profile;
   const base = {
     item_id: itemId, item_name: itemName, qty: qty, action: state.selectedAction,
     notes: (($('notes-input') && $('notes-input').value) || '').trim(),
