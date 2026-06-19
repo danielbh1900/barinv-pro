@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QN-KS / Arboleaf Scale Decoder Lab</title>
+<!--
+  scale_decoder_lab.html — ISOLATED diagnostic harness. NOT production.
+  - Not linked from barback.html (the operator page) or barback_manager.html.
+  - No BLE / Web Bluetooth. No permission prompts. No DB / Supabase. No tokens.
+  - Pure offline hex-frame decoder for the Arboleaf / QN-KS BLE scale.
+
+  Decoder logic is a faithful port of the VALIDATED iOS baseline decoder
+  (BARINV-PRO-IOS-zip3-baseline/www/qnksDecoder.js, SPEC v0.3-high-range-
+  conditional), which was validated against 0 / 100 / 323 / 669.5 g captures
+  plus the labelled 1674 g high-range frame. The divisor is CONDITIONAL:
+    - default low-range:  grams = raw / 10   (confirmed by sub-1000 g calibration)
+    - high-range:         grams = raw / 1    (only under a strict byte signature)
+  The sample 1674 g frame hits the high-range path, so it is NOT divided by 10.
+-->
+<style>
+  :root { --bg:#0b0f14; --s2:#11161d; --s3:#1b2330; --line:#2a3340; --a:#ff8c00; --a2:#00d4aa; --muted:#8a97a6; --err:#ff5d5d; --warn:#ffc24b; --ok:#36d399; --txt:#e6edf3; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; line-height:1.45; padding:18px; }
+  h1 { font-size:18px; margin:0 0 2px; letter-spacing:0.02em; }
+  h1 .tag { color:var(--a); }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .card { background:var(--s2); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
+  label { display:block; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  textarea { width:100%; min-height:60px; resize:vertical; background:var(--s3); color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:10px; font-family:"Fira Mono",ui-monospace,Menlo,monospace; font-size:14px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  button { background:var(--a); color:#000; border:none; border-radius:7px; padding:10px 14px; font-weight:700; font-size:13px; cursor:pointer; }
+  button.ghost { background:var(--s3); color:var(--txt); border:1px solid var(--line); font-weight:600; }
+  .reminder { font-size:12px; color:var(--muted); margin-top:10px; }
+  .reminder b { color:var(--a2); font-family:"Fira Mono",monospace; }
+  .grams { font-size:34px; font-weight:800; font-family:"Fira Mono",monospace; }
+  .grams.ok { color:var(--ok); } .grams.bad { color:var(--err); }
+  .kv { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; font-size:13px; margin-top:8px; }
+  .kv .k { color:var(--muted); }
+  .kv .v { font-family:"Fira Mono",monospace; }
+  table.bytes { border-collapse:collapse; width:100%; margin-top:8px; font-family:"Fira Mono",monospace; font-size:12px; }
+  table.bytes th, table.bytes td { border:1px solid var(--line); padding:4px 6px; text-align:center; }
+  table.bytes th { color:var(--muted); font-weight:600; }
+  td.hi { background:rgba(255,140,0,0.18); color:var(--a); font-weight:700; }
+  td.sig { background:rgba(0,212,170,0.14); color:var(--a2); }
+  .banner { border-radius:7px; padding:9px 11px; font-size:13px; margin-top:10px; }
+  .banner.warn { background:rgba(255,194,75,0.12); border:1px solid var(--warn); color:var(--warn); }
+  .banner.info { background:rgba(0,212,170,0.10); border:1px solid var(--a2); color:var(--a2); }
+  .banner.err  { background:rgba(255,93,93,0.12); border:1px solid var(--err); color:var(--err); }
+  code { font-family:"Fira Mono",monospace; }
+  #tests .t { font-size:12px; font-family:"Fira Mono",monospace; padding:2px 0; }
+  #tests .pass { color:var(--ok); } #tests .fail { color:var(--err); }
+  .foot { color:var(--muted); font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+  <h1>QN-KS / Arboleaf Scale <span class="tag">Decoder Lab</span></h1>
+  <div class="sub">Isolated hex-frame decoder &middot; no BLE &middot; no DB &middot; no production behavior. Service <b>FFF0</b> / notify characteristic <b>FFF1</b>, 18-byte frame.</div>
+
+  <div class="card">
+    <label for="hex">Hex frame (18 bytes &middot; spaces/colons ok)</label>
+    <textarea id="hex" spellcheck="false" autocapitalize="off" autocomplete="off">1012006c01020501e8068a3e1f02580200c8</textarea>
+    <div class="row">
+      <button id="decodeBtn">Decode</button>
+      <button class="ghost" id="sampleBtn">Load sample 1674 g frame</button>
+      <button class="ghost" id="lowBtn">Load low-range 100 g frame</button>
+      <button class="ghost" id="clearBtn">Clear</button>
+    </div>
+    <div class="reminder">Reminder &middot; BLE service <b>FFF0</b> &middot; notify characteristic <b>FFF1</b> &middot; weight = <code>(byte9 &lt;&lt; 8) | byte10</code> (u16 big-endian).</div>
+  </div>
+
+  <div class="card" id="out"><div class="foot">Press <b>Decode</b> to analyze the frame above.</div></div>
+
+  <div class="card">
+    <label>Self-tests (run on load)</label>
+    <div id="tests"></div>
+  </div>
+
+  <!-- ===================== DECODER (faithful port of qnksDecoder.js) ===================== -->
+  <script id="qnks-decoder">
+  (function (root) {
+    'use strict';
+    var HEADER = [0x10, 0x12, 0x00, 0x6c];
+    var FRAME_LEN = 18;
+    var WEIGHT_OFFSET = 9;     // bytes 9..10 = u16BE weight (raw)
+    var STATUS_OFFSET = 8;     // byte 8 = flag/status register
+    var B11_OFFSET    = 11;
+    var UNIT_OFFSET   = 15;    // byte 15 = presumed unit code
+    var STABLE_OFFSET = 16;    // byte 16 = presumed stable flag (1==stable — HYPOTHESIS)
+    var CHECKSUM_OFFSET = 17;  // byte 17 = sum(bytes[0..16]) & 0xFF
+
+    // Conditional divisor (DECODER_HIGH_RANGE_V1). Default low-range ÷10;
+    // high-range ÷1 ONLY under the strict signature below. Any unseen mode
+    // falls back to low-range (fail-safe — never over-reports a big number).
+    var LO_DIVISOR = 10, HI_DIVISOR = 1;
+    var HI_STATUS_BYTE = 0xe8, HI_B11 = 0x3e, HI_UNIT = 0x02;
+    var HI_RAW_MIN = 1000, HI_RAW_MAX = 10000;
+
+    function pickDivisor(bytes, raw) {
+      if (bytes[STATUS_OFFSET] === HI_STATUS_BYTE &&
+          bytes[B11_OFFSET]    === HI_B11 &&
+          bytes[UNIT_OFFSET]   === HI_UNIT &&
+          raw >= HI_RAW_MIN && raw <= HI_RAW_MAX) {
+        return { value: HI_DIVISOR, mode: 'high-range' };
+      }
+      return { value: LO_DIVISOR, mode: 'low-range' };
+    }
+
+    function hexToBytes(hex) {
+      var compact = String(hex || '').replace(/[^0-9a-fA-F]/g, '');
+      if (!compact || compact.length % 2) return null;       // null => invalid/odd
+      var out = new Uint8Array(compact.length / 2);
+      for (var i = 0; i < out.length; i++) out[i] = parseInt(compact.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    }
+    function hadNonHex(hex) { return /[^0-9a-fA-F\s:,-]/.test(String(hex || '')); }
+    function checksumOf(bytes) {
+      var s = 0; for (var i = 0; i < CHECKSUM_OFFSET; i++) s = (s + bytes[i]) & 0xff; return s;
+    }
+    function headerMatches(bytes) {
+      for (var i = 0; i < HEADER.length; i++) if (bytes[i] !== HEADER[i]) return false; return true;
+    }
+
+    // Returns a stable-shaped record. Never throws.
+    function decode(hex) {
+      var res = {
+        ok:false, confidence:'unknown', reason:null,
+        rawHex:String(hex||''), bytes:null, length:0,
+        headerOk:false, raw:null, divisor:null, rangeMode:null,
+        grams:null, naiveDiv10:null, stable:null, unit:null,
+        statusByte:null, byte9:null, byte10:null, byte11:null,
+        checksum:null, checksumExpected:null
+      };
+      if (hadNonHex(hex)) { res.reason = 'invalid-hex (non-hex characters)'; return res; }
+      var bytes = hexToBytes(hex);
+      if (bytes === null) { res.reason = 'invalid-hex (odd length / empty)'; return res; }
+      res.bytes = bytes; res.length = bytes.length;
+      if (bytes.length !== FRAME_LEN) { res.reason = 'length-mismatch (' + bytes.length + ' != 18)'; return res; }
+      res.headerOk = headerMatches(bytes);
+      if (!res.headerOk) { res.reason = 'header-mismatch (expect 10 12 00 6c)'; return res; }
+
+      var raw = (bytes[WEIGHT_OFFSET] << 8) | bytes[WEIGHT_OFFSET + 1];
+      var d = pickDivisor(bytes, raw);
+      res.raw = raw;
+      res.divisor = d.value;
+      res.rangeMode = d.mode;
+      res.grams = raw / d.value;
+      res.naiveDiv10 = raw / 10;
+      res.stable = bytes[STABLE_OFFSET] === 1;
+      res.unit = bytes[UNIT_OFFSET];
+      res.statusByte = bytes[STATUS_OFFSET];
+      res.byte9 = bytes[WEIGHT_OFFSET];
+      res.byte10 = bytes[WEIGHT_OFFSET + 1];
+      res.byte11 = bytes[B11_OFFSET];
+      res.checksum = bytes[CHECKSUM_OFFSET];
+      res.checksumExpected = checksumOf(bytes);
+      if (res.checksum !== res.checksumExpected) {
+        res.confidence = 'low'; res.reason = 'checksum-mismatch (' + res.checksum + ' != ' + res.checksumExpected + ')';
+        return res;
+      }
+      res.ok = true; res.confidence = 'high'; res.reason = 'ok';
+      return res;
+    }
+
+    var SPEC = {
+      version:'0.3-high-range-conditional (lab port)',
+      service:'fff0', characteristic:'fff1', frameLength:18,
+      header:'10 12 00 6c', weight:'(b9<<8)|b10 u16be',
+      loDivisor:LO_DIVISOR, hiDivisor:HI_DIVISOR,
+      highRangeRule:'b8===0xe8 && b11===0x3e && b15===0x02 && raw in [1000,10000]',
+      checksum:'sum(bytes[0..16]) & 0xFF',
+      source:'iOS baseline qnksDecoder.js (validated 0/100/323/669.5 g + 1674 g)'
+    };
+    var SAMPLE = '1012006c01020501e8068a3e1f02580200c8';   // expected 1674 g (high-range)
+    var SAMPLE_LOW = '1012006c01020501e003e83e1f025802011c'; // expected 100 g (low-range ÷10)
+
+    var api = { decode:decode, pickDivisor:pickDivisor, checksumOf:checksumOf, hexToBytes:hexToBytes, SPEC:SPEC, SAMPLE:SAMPLE, SAMPLE_LOW:SAMPLE_LOW };
+    if (typeof module !== 'undefined' && module.exports) module.exports = api;
+    root.QnksLab = api;
+  })(typeof window !== 'undefined' ? window : globalThis);
+  </script>
+
+  <!-- ===================== UI (browser only) ===================== -->
+  <script id="qnks-ui">
+  (function () {
+    if (typeof document === 'undefined') return;
+    var Q = window.QnksLab;
+    var $ = function (id) { return document.getElementById(id); };
+
+    function esc(s) { return String(s).replace(/[&<>]/g, function (c) { return { '&':'&amp;','<':'&lt;','>':'&gt;' }[c]; }); }
+    function hx(n) { return (n == null) ? '—' : '0x' + ('0' + n.toString(16)).slice(-2); }
+
+    function byteTable(r) {
+      if (!r.bytes) return '';
+      var hdr = '<tr><th>pos</th>', val = '<tr><th>hex</th>';
+      for (var i = 0; i < r.bytes.length; i++) {
+        var cls = (i === 9 || i === 10) ? 'hi' : ((i === 8 || i === 11 || i === 15 || i === 16 || i === 17) ? 'sig' : '');
+        hdr += '<th>' + i + '</th>';
+        val += '<td class="' + cls + '">' + ('0' + r.bytes[i].toString(16)).slice(-2) + '</td>';
+      }
+      return '<table class="bytes">' + hdr + '</tr>' + val + '</tr></table>'
+        + '<div class="foot">Orange = weight bytes b9/b10. Teal = signature/meta bytes (b8 status, b11, b15 unit, b16 stable, b17 checksum).</div>';
+    }
+
+    function render(r) {
+      var out = $('out');
+      if (!r.ok && r.confidence !== 'low') {
+        out.innerHTML = '<div class="banner err">✗ ' + esc(r.reason) + '</div>'
+          + '<div class="kv"><div class="k">Frame length</div><div class="v">' + r.length + ' bytes</div></div>'
+          + byteTable(r);
+        return;
+      }
+      var gramsCls = r.ok ? 'ok' : 'bad';
+      var html = '';
+      html += '<div class="grams ' + gramsCls + '">' + r.grams + ' g</div>';
+      html += '<div class="foot">confidence: <b>' + esc(r.confidence) + '</b> · ' + esc(r.reason) + '</div>';
+      html += byteTable(r);
+      html += '<div class="kv">'
+        + '<div class="k">Frame length</div><div class="v">' + r.length + ' bytes ' + (r.length === 18 ? '✓' : '✗') + '</div>'
+        + '<div class="k">Header (b0..b3)</div><div class="v">10 12 00 6c ' + (r.headerOk ? '✓' : '✗') + '</div>'
+        + '<div class="k">b9 / b10</div><div class="v">' + hx(r.byte9) + ' / ' + hx(r.byte10) + '</div>'
+        + '<div class="k">raw = (b9&lt;&lt;8)|b10</div><div class="v">' + r.raw + '</div>'
+        + '<div class="k">range mode</div><div class="v">' + esc(r.rangeMode) + ' (÷' + r.divisor + ')</div>'
+        + '<div class="k">final grams</div><div class="v">' + r.grams + ' g</div>'
+        + '<div class="k">status byte b8</div><div class="v">' + hx(r.statusByte) + '</div>'
+        + '<div class="k">unit byte b15</div><div class="v">' + hx(r.unit) + '</div>'
+        + '<div class="k">stable byte b16</div><div class="v">' + hx(r.bytes[16]) + ' → ' + (r.stable ? 'stable' : 'unstable') + '</div>'
+        + '<div class="k">checksum b17</div><div class="v">' + hx(r.checksum) + ' (expected ' + hx(r.checksumExpected) + ') ' + (r.checksum === r.checksumExpected ? '✓' : '✗') + '</div>'
+        + '</div>';
+
+      if (r.rangeMode === 'high-range') {
+        html += '<div class="banner info">High-range signature matched (b8=0xe8, b11=0x3e, b15=0x02, raw 1000–10000). '
+          + '<b>Do not divide by 10 for this verified frame path</b> → ' + r.grams + ' g.</div>';
+        html += '<div class="banner warn">⚠ A naïve <code>raw/10</code> here would report <b>' + r.naiveDiv10 + ' g</b> — this is the known legacy bug (1674 g shown as 167.4 g). Avoid it.</div>';
+      } else {
+        html += '<div class="banner info">Low-range (default): <code>grams = raw / 10</code>, confirmed by the 0/100/323/669.5 g calibration. '
+          + 'Here raw ' + r.raw + ' → <b>' + r.grams + ' g</b>. (A blanket "never ÷10" rule would wrongly report ' + r.raw + ' g.)</div>';
+      }
+      out.innerHTML = html;
+    }
+
+    function decodeNow() { render(Q.decode($('hex').value)); }
+
+    $('decodeBtn').addEventListener('click', decodeNow);
+    $('sampleBtn').addEventListener('click', function () { $('hex').value = Q.SAMPLE; decodeNow(); });
+    $('lowBtn').addEventListener('click', function () { $('hex').value = Q.SAMPLE_LOW; decodeNow(); });
+    $('clearBtn').addEventListener('click', function () { $('hex').value = ''; $('out').innerHTML = '<div class="foot">Cleared.</div>'; });
+
+    // ---- self-tests (visible on load) ----
+    function runTests() {
+      var t = [];
+      function ck(name, cond) { t.push({ name:name, pass:!!cond }); }
+      var s = Q.decode(Q.SAMPLE);
+      ck('sample frame decodes to 1674 g', s.ok && s.grams === 1674);
+      ck('sample is high-range (÷1, not ÷10)', s.rangeMode === 'high-range' && s.divisor === 1);
+      ck('sample checksum valid (high confidence)', s.confidence === 'high' && s.checksum === s.checksumExpected);
+      ck('naïve raw/10 warning value is 167.4', s.naiveDiv10 === 167.4);
+      var lo = Q.decode(Q.SAMPLE_LOW);
+      ck('low-range frame decodes to 100 g (÷10)', lo.ok && lo.grams === 100 && lo.rangeMode === 'low-range');
+      ck('invalid hex rejected', Q.decode('zzzz nope!!').reason.indexOf('invalid-hex') === 0);
+      ck('odd-length hex rejected', Q.decode('1012006c0102050').reason.indexOf('invalid-hex') === 0);
+      ck('wrong length (not 18) flagged', Q.decode('1012006c').reason.indexOf('length-mismatch') === 0);
+      ck('header mismatch flagged (18 bytes, bad header)', Q.decode('0012006c01020501e8068a3e1f02580200c8').reason.indexOf('header-mismatch') === 0);
+
+      var pass = t.filter(function (x) { return x.pass; }).length;
+      $('tests').innerHTML = t.map(function (x) {
+        return '<div class="t ' + (x.pass ? 'pass' : 'fail') + '">' + (x.pass ? '✓ PASS' : '✗ FAIL') + ' — ' + esc(x.name) + '</div>';
+      }).join('') + '<div class="t ' + (pass === t.length ? 'pass' : 'fail') + '">' + pass + '/' + t.length + ' passed</div>';
+    }
+
+    runTests();
+    decodeNow();
+  })();
+  </script>
+</body>
+</html>
