@@ -3260,7 +3260,7 @@ var bleScale = { supported: false, device: null, server: null, char: null, conne
 // divisor, rangeMode, stable, naiveDiv10, checksum, expected, reason }.
 function _bleDecodeFrame(bytes) {
   var r = { confidence: 'unknown', reason: null, length: (bytes ? bytes.length : 0),
-            grams: null, raw: null, divisor: null, rangeMode: null, stable: null,
+            grams: null, raw: null, divisor: null, rangeMode: null, stable: null, hwStable: null,
             naiveDiv10: null, checksum: null, expected: null };
   if (!bytes || bytes.length !== 18) { r.reason = 'length-mismatch'; return r; }
   if (!(bytes[0] === 0x10 && bytes[1] === 0x12 && bytes[2] === 0x00 && bytes[3] === 0x6c)) { r.reason = 'header-mismatch'; return r; }
@@ -3269,10 +3269,32 @@ function _bleDecodeFrame(bytes) {
   if (bytes[8] === 0xe8 && bytes[11] === 0x3e && bytes[15] === 0x02 && raw >= 1000 && raw <= 10000) { div = 1; mode = 'high-range'; }
   var sum = 0; for (var i = 0; i < 17; i++) sum = (sum + bytes[i]) & 0xff;
   r.raw = raw; r.divisor = div; r.rangeMode = mode; r.grams = raw / div; r.naiveDiv10 = raw / 10;
-  r.stable = bytes[16] === 1; r.checksum = bytes[17]; r.expected = sum;
+  // b16 is NOT a reliable hardware stable flag on QN-KS — it reads 0x00 even on
+  // confirmed-steady frames (the validated 1674 g sample has b16=0x00). Record it
+  // for diagnostics only; real stability is derived in software (_bleSoftStable).
+  r.hwStable = bytes[16] === 1; r.stable = r.hwStable; r.checksum = bytes[17]; r.expected = sum;
   if (sum !== bytes[17]) { r.confidence = 'low'; r.reason = 'checksum-mismatch'; return r; }
   r.confidence = 'high'; r.reason = 'ok'; return r;
 }
+// ── Software stability (QN-KS) ──────────────────────────────────────────────
+// The QN-KS/Arboleaf scale does not expose a usable hardware "stable" bit over
+// FFF1 (b16 stays 0x00 even on dead-steady readings), so — exactly like the
+// native iOS arboleafScaleService — a reading is treated as stable once enough
+// recent high-confidence samples sit inside a tight peak-to-peak band. This
+// unblocks "Use latest stable weight" without ever freezing on a missing flag.
+var _bleStab = { buf: [], windowMs: 1000, rangeG: 2, minSamp: 4 };   // ~1 s of ≤2 g-spread samples
+function _bleSoftStable(grams, nowMs) {
+  if (typeof grams !== 'number' || !isFinite(grams)) return false;   // ignore null/NaN
+  var b = _bleStab.buf;
+  b.push({ ms: nowMs, grams: grams });
+  var cutoff = nowMs - _bleStab.windowMs;
+  while (b.length && b[0].ms < cutoff) b.shift();                     // bounded, time-windowed
+  if (b.length < _bleStab.minSamp) return false;
+  var lo = Infinity, hi = -Infinity;
+  for (var i = 0; i < b.length; i++) { if (b[i].grams < lo) lo = b[i].grams; if (b[i].grams > hi) hi = b[i].grams; }
+  return (hi - lo) <= _bleStab.rangeG;
+}
+function _bleStabReset() { _bleStab.buf.length = 0; }
 function _bleHex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; } return s; }
 // SCALE_BLE diagnostics — browser/device detection for the visible panel so the
 // user can screenshot exactly why a connection isn't available.
@@ -3326,6 +3348,7 @@ function _bleSetConnected(name) {
 }
 function _bleSetDisconnected() {
   bleScale.connected = false; bleScale.latest = null; bleScale.name = ''; bleScale.gotFrame = false;
+  try { _bleStabReset(); } catch (_) {}   // clear software-stability history for the next session
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
     var p = _BLE_SURFACES[i];
     var live = $(p + '-live');
@@ -3349,10 +3372,17 @@ function _bleOnFrame(ev) {
     var isHigh = (r.confidence === 'high'), liveTxt = '', dbgTxt = '';
     var devPfx = bleScale.name ? bleScale.name + ' · ' : '';
     if (isHigh) {
-      bleScale.latest = { grams: r.grams, stable: r.stable };
+      // QN-KS has no trustworthy hardware stable bit → derive stability in software.
+      var nowMs = Date.now();
+      var swStable = _bleSoftStable(r.grams, nowMs);
+      r.stable = r.hwStable || swStable;                 // final stable used by UI + publish
+      bleScale.latest = { grams: r.grams, stable: r.stable, ts: nowMs };
       try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — relay to listeners (station mode only)
-      liveTxt = 'Live weight: ' + r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
-      dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '');
+      var stableTxt = r.stable ? ('stable · ' + (r.hwStable ? 'scale' : 'software')) : 'unstable';
+      liveTxt = 'Live weight: ' + r.grams + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
+      var b16hex = '0x' + (bytes[16] < 16 ? '0' : '') + bytes[16].toString(16);
+      dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '')
+             + ' · b16=' + b16hex + ' hw:' + (r.hwStable ? 'yes' : 'no') + ' sw:' + (swStable ? 'yes' : 'no') + ' → ' + (r.stable ? 'STABLE' : 'unstable');
     } else {
       dbgTxt = devPfx + 'frame ignored: ' + (r.reason || 'low-confidence') + ' [' + r.confidence + ']';
     }
