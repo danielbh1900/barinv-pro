@@ -528,6 +528,8 @@
         <button type="button" id="rf-ble-use" style="display:none;margin-top:6px;width:100%;padding:8px;font-size:13px;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
         <div id="rf-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
       </div>
+      <!-- SCALE_BLE — iPhone/unsupported-browser manual hint (RETURN). Shown when Web Bluetooth is unavailable. -->
+      <div id="rf-ble-hint" style="display:none;margin-top:8px;font-size:11px;color:#9ca3af;line-height:1.4;">📱 Scale connection is available on Android Chrome. On iPhone, enter return grams in QTY manually.</div>
     </div>
 
     <!-- Manual Scale MVP — optional weight + bottle state. Stored in the
@@ -824,6 +826,8 @@
           <button type="button" id="qm-ble-use" style="display:none;margin-top:6px;width:100%;padding:8px;font-size:13px;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
           <div id="qm-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
         </div>
+        <!-- SCALE_BLE — iPhone/unsupported-browser manual hint (Partial). Shown when Web Bluetooth is unavailable. -->
+        <div id="qm-ble-hint" style="display:none;margin-top:8px;font-size:11px;color:#9ca3af;line-height:1.4;">📱 Scale connection is available on Android Chrome. On iPhone, enter grams manually above.</div>
       </div>
       <div id="qm-partial-msg" style="display:none;font-size:11px;color:#fbbf24;margin-top:5px;"></div>
     </div>
@@ -2014,8 +2018,10 @@ function applyActionTint() {
   // SCALE_BLE — RETURN-form scale row: capability-gated, RETURN only. Hidden on
   // iPhone (no Web Bluetooth) and for TAKEN. typeof guard: bleScale may not be
   // assigned yet on the very first init call (var-hoisted as undefined).
-  var _rfBle = $('rf-ble');
-  if (_rfBle) _rfBle.style.display = (state.selectedAction === 'RETURNED' && typeof bleScale !== 'undefined' && bleScale && bleScale.supported) ? '' : 'none';
+  var _rfRet = (state.selectedAction === 'RETURNED');
+  var _rfSup = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported);
+  var _rfBle = $('rf-ble'); if (_rfBle) _rfBle.style.display = (_rfRet && _rfSup) ? '' : 'none';                // connect widget (Android/desktop Chrome)
+  var _rfHint = $('rf-ble-hint'); if (_rfHint) _rfHint.style.display = (_rfRet && !_rfSup) ? '' : 'none';       // manual hint (iPhone)
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2950,7 +2956,11 @@ function _qmSetState(stateVal) {
     b.style.fontWeight = on ? '700' : '500';
   });
   const wrap = $('qm-weight-wrap'); if (wrap) wrap.style.display = (stateVal === 'PARTIAL') ? '' : 'none';
-  const _bleEl = $('qm-ble'); if (_bleEl) _bleEl.style.display = (stateVal === 'PARTIAL' && bleScale && bleScale.supported) ? '' : 'none';   // SCALE_BLE — capability-gated
+  // SCALE_BLE — capability-gated. Android/desktop Chrome → connect widget; iPhone (unsupported) → manual hint.
+  const _blePartial = (stateVal === 'PARTIAL');
+  const _bleSup = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported);
+  const _bleEl = $('qm-ble'); if (_bleEl) _bleEl.style.display = (_blePartial && _bleSup) ? '' : 'none';
+  const _bleHintEl = $('qm-ble-hint'); if (_bleHintEl) _bleHintEl.style.display = (_blePartial && !_bleSup) ? '' : 'none';
   if (stateVal !== 'PARTIAL') { const w = $('qm-weight'); if (w) w.value = ''; }
   else { const w = $('qm-weight'); if (w) { try { w.focus(); } catch (_) {} } }
   try { _qmUpdateRemaining(); } catch (_) {}
@@ -3239,7 +3249,7 @@ function _bleOnFrame(ev) {
     var isHigh = (r.confidence === 'high'), liveTxt = '', dbgTxt = '';
     if (isHigh) {
       bleScale.latest = { grams: r.grams, stable: r.stable };
-      liveTxt = r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
+      liveTxt = 'Live weight: ' + r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
       dbgTxt = _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '');
     } else {
       dbgTxt = 'frame ignored (' + (r.reason || 'low-confidence') + ')';
@@ -3306,8 +3316,10 @@ function _bleUseLatestReturn() {
     if (navigator.bluetooth.getAvailability) {
       navigator.bluetooth.getAvailability().then(function (a) {
         bleScale.supported = !!a;
-        var qel = $('qm-ble'); if (qel && state.qmBottleState === 'PARTIAL') qel.style.display = bleScale.supported ? '' : 'none';
-        try { applyActionTint(); } catch (_) {}   // re-evaluate the RETURN-form scale row
+        var _p = (state.qmBottleState === 'PARTIAL');
+        var qel = $('qm-ble'); if (qel) qel.style.display = (_p && bleScale.supported) ? '' : 'none';
+        var qh = $('qm-ble-hint'); if (qh) qh.style.display = (_p && !bleScale.supported) ? '' : 'none';
+        try { applyActionTint(); } catch (_) {}   // re-evaluate the RETURN-form scale row + hint
       }).catch(function () {});
     }
   } catch (_) { bleScale.supported = false; }
