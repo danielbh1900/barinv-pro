@@ -3629,6 +3629,30 @@ function _bridgeApplyWeight(p, source) {
     else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
   }
 }
+// Receiver — NO fresh weight this poll. Show WHY (from the Edge `reason`) so the
+// operator isn't staring at a blank dash, and make sure a stale reading can never
+// be recorded: clear bleScale.latest and disable the Use button. A fresh weight on
+// the next poll re-enables everything via _bridgeApplyWeight.
+//   expired → a station published but stopped >TTL ago (laptop closed / scale dropped);
+//             `stale` carries the last reading + age, shown greyed-out, NOT usable.
+//   no_row  → no station has published for THIS venue+night — almost always the two
+//             devices are logged into different nights, or the station never started.
+function _bridgeShowNoWeight(reason, stale) {
+  bridge.latest = null; bleScale.latest = null;
+  var w = $('bridge-weight'), u = $('bridge-update'), s = $('bridge-station'), use = $('bridge-use');
+  if (reason === 'expired' && stale && typeof stale.grams === 'number') {
+    if (w) w.textContent = 'Latest station weight: ' + stale.grams + ' g · STALE (' + stale.age_sec + 's old) — station stopped publishing';
+    if (u) u.textContent = 'Restart the laptop Scale Station and reconnect the scale';
+    if (s) s.textContent = 'Station: ' + (stale.station_id || '?') + ' (stale)';
+  } else if (reason === 'no_row') {
+    if (w) w.textContent = 'Latest station weight: — · no station publishing for this event';
+    if (u) u.textContent = 'Check the laptop Scale Station is running AND on the SAME night as this device';
+    if (s) s.textContent = 'Station: —';
+  } else {
+    if (w) w.textContent = 'Latest station weight: — (' + (reason || 'no weight') + ')';
+  }
+  if (use) { use.disabled = true; use.style.opacity = '0.55'; use.textContent = 'Waiting for fresh stable weight…'; }
+}
 // HTTP bridge (polling fallback) — authenticated POST to the barback-scale-bridge
 // Edge function with the barback JWT. Edge derives venue/night from the JWT claims.
 async function _bridgeHttp(action, extra) {
@@ -3658,12 +3682,23 @@ async function _bridgePollLatest() {
   var r = await _bridgeHttp('latest', {});
   bridge.lastPollTs = _bridgeNow();
   if (!r) { bridge.lastPollStatus = 'error'; bridge.lastPollErr = 'no response'; }
-  else if (r.error) { bridge.lastPollStatus = 'error'; bridge.lastPollErr = String(r.error).slice(0, 60); }
+  else if (r.error) {
+    // Edge auth/scope failures (token_invalid / wrong role / token missing
+    // venue/night) arrive here — surface the reason so it's not mistaken for
+    // a missing-weight condition.
+    bridge.lastPollStatus = 'error'; bridge.lastPollErr = String(r.code || r.error).slice(0, 60);
+  }
   else if (r.ok && r.weight && typeof r.weight.grams === 'number') {
-    bridge.lastPollStatus = 'ok'; bridge.lastPollErr = null;
+    bridge.lastPollStatus = 'fresh'; bridge.lastPollErr = null;
     bridge.pollRx = (bridge.pollRx || 0) + 1;
     _bridgeApplyWeight(r.weight, 'poll');
-  } else { bridge.lastPollStatus = 'no_weight'; bridge.lastPollErr = null; }
+  } else {
+    // No fresh weight. r.reason ('no_row' | 'expired') tells the operator WHY.
+    var reason = (r && r.reason) ? String(r.reason) : 'no_weight';
+    bridge.lastPollStatus = reason;
+    bridge.lastPollErr = (reason === 'expired' && r.stale) ? ('stale ' + r.stale.age_sec + 's') : null;
+    try { _bridgeShowNoWeight(reason, r && r.stale); } catch (_) {}
+  }
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeListen() {
