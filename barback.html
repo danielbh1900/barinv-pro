@@ -519,6 +519,7 @@
           <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;">Station: publishing…</div>
           <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Connect the scale above first, then start the station to share its weight with iPhone barbacks on this event.</div>
         </div>
+        <div id="bridge-diag" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #2a3340;font-family:'Fira Mono',monospace;font-size:10px;color:#6b7280;line-height:1.55;white-space:pre-wrap;word-break:break-all;"></div>
       </div>
     </div>
 
@@ -3494,7 +3495,8 @@ function _bleUseLatestMain() {
 //  removed (only if WE loaded it) so the page's event-insert path (SB =
 //  buildSupabaseClient → needs window.supabase) is provably unaffected.
 // ════════════════════════════════════════════════════════════════════
-var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0 };
+var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0,
+  subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '' };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
@@ -3503,6 +3505,26 @@ function _bridgeScope() {
   return (venue && night) ? { venue: venue, night: night, topic: 'scale:' + venue + ':' + night } : null;
 }
 function _bridgeStatus(msg) { var el = $('bridge-status'); if (el) el.textContent = msg; }
+function _bridgeNow() { try { return new Date().toTimeString().slice(0, 8); } catch (_) { return '—'; } }
+// Masked/short channel so laptop and iPhone can be compared without exposing full ids.
+function _bridgeChanShort() {
+  var sc = _bridgeScope(); if (!sc) return '(no event scope)';
+  return 'scale:…' + String(sc.venue).slice(-6) + ':…' + String(sc.night).slice(-6);
+}
+// SCALE_BRIDGE diagnostics — channel, subscribe status, publish/receive counters.
+function _bridgeRenderDiag() {
+  var el = $('bridge-diag'); if (!el) return;
+  var lines = [
+    'Channel: ' + _bridgeChanShort(),
+    'Sub: ' + (bridge.subStatus || '—') + ' · Rx: ' + bridge.rxCount + (bridge.lastRxTs ? (' · last ' + bridge.lastRxTs) : ''),
+  ];
+  var sl = 'Station: ' + (bridge.publishing ? ('ON · ' + (bridge.stationId || '')) : 'off') + ' · Pub: ' + bridge.pubCount;
+  if (bridge.lastPubTs) sl += ' · last ' + bridge.lastPubTs + ' · ' + bridge.lastPubGrams + 'g ' + (bridge.lastPubStable ? 'stable' : 'unstable');
+  lines.push(sl);
+  if (bridge.pubError) lines.push('⚠ Publish: ' + bridge.pubError);
+  el.textContent = lines.join('\n');
+  el.style.display = '';
+}
 function _bridgeStationId() {
   if (bridge.stationId) return bridge.stationId;
   var tp = state.tokenPayload || {};
@@ -3543,6 +3565,7 @@ async function _bridgeEnsureChannel() {
       var ch = c.channel(scope.topic, { config: { broadcast: { self: false } } });
       ch.on('broadcast', { event: 'scale_weight' }, function (m) { try { _bridgeOnMessage(m && m.payload); } catch (_) {} });
       ch.subscribe(function (st) {
+        bridge.subStatus = st; try { _bridgeRenderDiag(); } catch (_) {}   // SUBSCRIBED / CHANNEL_ERROR / TIMED_OUT / CLOSED
         if (st === 'SUBSCRIBED' && !settled) { settled = true; bridge.channel = ch; resolve(ch); }
         else if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') && !settled) { settled = true; resolve(null); }
       });
@@ -3554,6 +3577,7 @@ async function _bridgeEnsureChannel() {
 function _bridgeOnMessage(p) {
   if (!p || typeof p.grams !== 'number') return;
   if (bridge.publishing && !bridge.listening) return;   // a pure station ignores remote weights
+  bridge.rxCount = (bridge.rxCount || 0) + 1; bridge.lastRxTs = _bridgeNow(); try { _bridgeRenderDiag(); } catch (_) {}
   bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '' };
   bleScale.latest = { grams: p.grams, stable: !!p.stable };
   var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable');
@@ -3568,7 +3592,7 @@ function _bridgeOnMessage(p) {
 }
 async function _bridgeListen() {
   if (bridge.listening) { _bridgeStopListen(); return; }
-  _bridgeStatus('Bridge: connecting…');
+  _bridgeStatus('Bridge: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
   var ch = await _bridgeEnsureChannel();
   if (!ch) return;   // status already set
   bridge.listening = true;
@@ -3586,11 +3610,11 @@ function _bridgeStopListen() {
 async function _bridgeStartStation() {
   if (bridge.publishing) { _bridgeStopStation(); return; }
   if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then Start Scale Station'); return; }
-  _bridgeStatus('Scale station: connecting…');
+  _bridgeStatus('Scale station: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
   var ch = await _bridgeEnsureChannel();
   if (!ch) return;
   bridge.publishing = true;
-  _bridgeStatus('Scale station: publishing · ' + _bridgeStationId());
+  _bridgeStatus('Scale station: publishing · ' + _bridgeStationId()); try { _bridgeRenderDiag(); } catch (_) {}
   var b = $('bridge-start-station'); if (b) b.textContent = 'Stop Scale Station';
   var ss = $('bridge-station-status'); if (ss) ss.style.display = '';
 }
@@ -3614,13 +3638,17 @@ function _bridgeMaybePublish(r, hex) {
   var now = Date.now();
   if (now - bridge.lastSent < 250) return;
   bridge.lastSent = now;
+  bridge.pubCount = (bridge.pubCount || 0) + 1; bridge.lastPubTs = _bridgeNow(); bridge.lastPubGrams = r.grams; bridge.lastPubStable = !!r.stable;
   try {
-    bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
+    var sp = bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
       type: 'scale_weight', source: 'scale_station', station_id: _bridgeStationId(),
       item_context: null, grams: r.grams, stable: !!r.stable, raw_hex: hex,
       decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString()
     } });
-  } catch (_) { /* never break weighing */ }
+    // channel.send resolves 'ok' | 'error' | 'timed out' — surface non-ok as the publish error.
+    if (sp && sp.then) { sp.then(function (st2) { bridge.pubError = (st2 === 'ok') ? null : ('send → ' + st2); try { _bridgeRenderDiag(); } catch (_) {} }).catch(function (e) { bridge.pubError = 'send err: ' + (e && e.name || 'unknown'); try { _bridgeRenderDiag(); } catch (_) {} }); }
+  } catch (e) { bridge.pubError = 'send threw: ' + (e && e.name || 'err'); /* never break weighing */ }
+  try { _bridgeRenderDiag(); } catch (_) {}
 }
 function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
 if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
