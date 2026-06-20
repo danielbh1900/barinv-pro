@@ -488,6 +488,17 @@
           Browser BLE: <span id="diag-ble">—</span> · Secure: <span id="diag-secure">—</span> · Device: <span id="diag-device">—</span><br>
           Mode: <span id="main-ble-mode">not connected</span>
         </div>
+        <!-- SCALE_OFFSET — station-side calibration. correctedGrams = raw + offset. Display/fill/publish use corrected; raw stays in diagnostics. -->
+        <div id="scale-offset-box" style="margin-top:8px;padding:8px;border:1px dashed #374151;border-radius:6px;background:#0b1220;">
+          <div style="font-size:11px;color:#9ca3af;">⚙️ Calibration · <span id="scale-offset-label">Scale offset: 0g</span></div>
+          <div id="scale-offset-warn" style="display:none;margin-top:3px;font-size:11px;font-weight:700;color:#f59e0b;"></div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center;">
+            <input id="scale-known-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Known real weight (g)" autocomplete="off" style="flex:1;min-width:120px;padding:7px;font-size:13px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;box-sizing:border-box;">
+            <button type="button" id="scale-set-known" style="padding:7px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Set known weight</button>
+            <button type="button" id="scale-zero" style="padding:7px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Zero current reading</button>
+            <button type="button" id="scale-clear-offset" style="padding:7px 10px;font-size:12px;background:#1f2937;color:#9ca3af;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Clear offset</button>
+          </div>
+        </div>
       </div>
       <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
         <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale connection</div>
@@ -595,6 +606,8 @@
     <div class="row">
       <label>⚖️ WEIGHT (grams · optional · manual scale)</label>
       <input id="weight-g-input" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 642" autocomplete="off">
+      <!-- PARTIAL UX — fill WEIGHT from the connected scale without scrolling back to the scale panel. Corrected grams; enabled only when stable. -->
+      <button type="button" id="weight-use-scale" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">⚖️ Use current scale weight</button>
       <div id="remaining-display" class="small" style="margin-top:4px;min-height:14px;color:#7dd3fc;"></div>
     </div>
 
@@ -618,8 +631,8 @@
           <input id="profile-full-input" type="number" inputmode="decimal" step="1" min="0" placeholder="Full (g)" autocomplete="off" style="width:100%;padding:10px;font-size:15px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
-          <button type="button" id="use-tare-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as TARE</button>
-          <button type="button" id="use-full-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use weight as FULL</button>
+          <button type="button" id="use-tare-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use current as EMPTY/TARE</button>
+          <button type="button" id="use-full-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;">Use current as SEALED FULL</button>
           <button type="button" id="save-profile-btn" style="flex:1;min-width:120px;padding:8px;font-size:12px;font-weight:800;background:#22c55e;color:#000;border:none;border-radius:6px;cursor:pointer;letter-spacing:0.03em;">💾 Save Profile</button>
         </div>
         <div id="profile-status" class="small" style="margin-top:4px;min-height:14px;color:#9ca3af;"></div>
@@ -3297,6 +3310,33 @@ function _bleSoftStable(grams, nowMs) {
 }
 function _bleStabReset() { _bleStab.buf.length = 0; }
 function _bleHex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; } return s; }
+// ── SCALE_OFFSET — station-side calibration ─────────────────────────────────
+// correctedGrams = rawDecodedGrams + offset. The high-range ÷1 decoder and the
+// software-stability algorithm stay on RAW grams (movement/noise detection must
+// not be skewed by a constant offset); only DISPLAY, field-fill, bleScale.latest,
+// and bridge publish use corrected grams. Raw stays visible in diagnostics.
+// Persisted local-only (this device's scale), never sent to the DB.
+var SCALE_OFFSET_LS = 'barback_scale_offset_g';
+function _scaleOffset() { try { var v = parseFloat(localStorage.getItem(SCALE_OFFSET_LS)); return isFinite(v) ? Math.round(v) : 0; } catch (_) { return 0; } }
+function _scaleSetOffset(g) {
+  try {
+    if (!isFinite(g) || Math.round(g) === 0) localStorage.removeItem(SCALE_OFFSET_LS);
+    else localStorage.setItem(SCALE_OFFSET_LS, String(Math.round(g)));
+  } catch (_) {}
+  try { _scaleRenderOffsetUI(); } catch (_) {}
+}
+function _scaleCorrect(rawG) { return (typeof rawG === 'number' && isFinite(rawG)) ? (rawG + _scaleOffset()) : rawG; }
+function _scaleCurrentRaw() { return (typeof bleScale !== 'undefined' && bleScale && typeof bleScale.raw === 'number' && isFinite(bleScale.raw)) ? bleScale.raw : null; }
+function _scaleFmtOff(o) { return (o > 0 ? '+' : '') + o + 'g'; }
+function _scaleRenderOffsetUI() {
+  var off = _scaleOffset();
+  var lbl = $('scale-offset-label'); if (lbl) lbl.textContent = 'Scale offset: ' + _scaleFmtOff(off);
+  var warn = $('scale-offset-warn');
+  if (warn) {
+    if (off !== 0) { warn.style.display = ''; warn.textContent = '⚠ Using correction offset ' + _scaleFmtOff(off); }
+    else { warn.style.display = 'none'; warn.textContent = ''; }
+  }
+}
 // SCALE_BLE diagnostics — browser/device detection for the visible panel so the
 // user can screenshot exactly why a connection isn't available.
 function _bleDeviceType() {
@@ -3346,6 +3386,7 @@ function _bleSetConnected(name) {
     var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = 'Disconnect';
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = 'none';   // hide fallback once connected
   }
+  try { _weightUseScaleSync(); } catch (_) {}
 }
 function _bleSetDisconnected() {
   bleScale.connected = false; bleScale.latest = null; bleScale.name = ''; bleScale.gotFrame = false;
@@ -3362,6 +3403,7 @@ function _bleSetDisconnected() {
   }
   _bleResetButtons();
   _bleSetMode('not connected');
+  try { _weightUseScaleSync(); } catch (_) {}
 }
 function _bleOnFrame(ev) {
   try {
@@ -3375,14 +3417,19 @@ function _bleOnFrame(ev) {
     if (isHigh) {
       // QN-KS has no trustworthy hardware stable bit → derive stability in software.
       var nowMs = Date.now();
-      var swStable = _bleSoftStable(r.grams, nowMs);
+      var swStable = _bleSoftStable(r.grams, nowMs);     // stability on RAW grams (never offset)
       r.stable = r.hwStable || swStable;                 // final stable used by UI + publish
-      bleScale.latest = { grams: r.grams, stable: r.stable, ts: nowMs };
-      try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — relay to listeners (station mode only)
+      // SCALE_OFFSET — raw stays for stability/diagnostics; corrected drives display/fill/publish.
+      var rawG = r.grams, off = _scaleOffset(), corrG = rawG + off;
+      bleScale.raw = rawG;
+      bleScale.latest = { grams: corrG, raw: rawG, stable: r.stable, ts: nowMs };
+      try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — publishes corrected grams (applies offset internally)
       var stableTxt = r.stable ? ('stable · ' + (r.hwStable ? 'scale' : 'software')) : 'unstable';
-      liveTxt = 'Live weight: ' + r.grams + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
+      liveTxt = 'Live weight: ' + corrG + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '')
+              + (off !== 0 ? (' · corrected from raw ' + rawG + 'g · offset ' + _scaleFmtOff(off)) : '');
       var b16hex = '0x' + (bytes[16] < 16 ? '0' : '') + bytes[16].toString(16);
       dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '')
+             + (off !== 0 ? (' · offset ' + _scaleFmtOff(off) + ' → corrected ' + corrG + 'g') : '')
              + ' · b16=' + b16hex + ' hw:' + (r.hwStable ? 'yes' : 'no') + ' sw:' + (swStable ? 'yes' : 'no') + ' → ' + (r.stable ? 'STABLE' : 'unstable');
     } else {
       dbgTxt = devPfx + 'frame ignored: ' + (r.reason || 'low-confidence') + ' [' + r.confidence + ']';
@@ -3402,6 +3449,7 @@ function _bleOnFrame(ev) {
       }
       if (dbg) { dbg.textContent = dbgTxt; dbg.style.display = ''; }
     }
+    try { _weightUseScaleSync(); } catch (_) {}   // PARTIAL UX — keep in-flow Use-scale button in sync
   } catch (_) { /* never break manual entry */ }
 }
 function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _bleSetDisconnected(); _bleStatus('Not connected'); _bleClearDbg(); }
@@ -3493,6 +3541,28 @@ function _bleUseLatestMain() {
     try { updateRemainingDisplay(); } catch (_) {}
     try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
   }
+}
+// PARTIAL UX — keep the in-flow "Use current scale weight" button (next to the
+// WEIGHT field) in sync: visible when a station scale is connected here, enabled
+// only on a stable reading. Called from _bleOnFrame and connect/disconnect.
+function _weightUseScaleSync() {
+  var btn = $('weight-use-scale'); if (!btn) return;
+  var connected = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported && bleScale.connected);
+  var hasStable = connected && !!(bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number');
+  btn.style.display = connected ? '' : 'none';
+  btn.disabled = !hasStable;
+  btn.style.opacity = hasStable ? '1' : '0.55';
+  btn.textContent = hasStable ? ('⚖️ Use current scale weight (' + bleScale.latest.grams + ' g)') : 'Waiting for stable scale weight…';
+}
+// Fill the WEIGHT (g) field with the CORRECTED stable grams + recalc remaining %.
+// Works for TAKEN/PARTIAL bottles sent to a bar; never submits, never writes DB.
+function _weightUseScaleFill() {
+  if (!(typeof bleScale !== 'undefined' && bleScale && bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number')) return;
+  var w = $('weight-g-input'); if (!w) return;
+  w.value = String(bleScale.latest.grams);   // corrected grams
+  try { updateRemainingDisplay(); } catch (_) {}
+  try { statusOn('save-status', 'Filled WEIGHT with ' + bleScale.latest.grams + ' g — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { Feedback.ok(); } catch (_) {}
 }
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
 // so supported stays false and the UI never shows (and never errors).
@@ -3780,13 +3850,16 @@ function _bridgeMaybePublish(r, hex) {
   var now = Date.now();
   if (now - bridge.lastSent < 250) return;
   bridge.lastSent = now;
-  bridge.pubCount = (bridge.pubCount || 0) + 1; bridge.lastPubTs = _bridgeNow(); bridge.lastPubGrams = r.grams; bridge.lastPubStable = !!r.stable;
+  // SCALE_OFFSET — publish CORRECTED grams (what iPhone/iPad receivers consume);
+  // raw_hex + decoder_confidence stay raw for diagnostics.
+  var pubG = _scaleCorrect(r.grams);
+  bridge.pubCount = (bridge.pubCount || 0) + 1; bridge.lastPubTs = _bridgeNow(); bridge.lastPubGrams = pubG; bridge.lastPubStable = !!r.stable;
   // Realtime broadcast — best-effort, only when a channel is live (laptop receivers).
   if (bridge.channel) {
     try {
       var sp = bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
         type: 'scale_weight', source: 'scale_station', station_id: _bridgeStationId(),
-        item_context: null, grams: r.grams, stable: !!r.stable, raw_hex: hex,
+        item_context: null, grams: pubG, stable: !!r.stable, raw_hex: hex,
         decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString()
       } });
       // channel.send resolves 'ok' | 'error' | 'timed out' — surface non-ok as the publish error.
@@ -3795,10 +3868,36 @@ function _bridgeMaybePublish(r, hex) {
   }
   // PRIMARY path — publish over HTTPS to the Edge endpoint, independent of Realtime.
   // This is what reaches iPhone/iPad (which poll over HTTPS and cannot do Realtime/BLE).
-  try { _bridgeHttpPublish({ station_id: _bridgeStationId(), grams: r.grams, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() }); } catch (_) {}
+  try { _bridgeHttpPublish({ station_id: _bridgeStationId(), grams: pubG, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() }); } catch (_) {}
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
+// SCALE_OFFSET — wire the calibration controls (station panel). Persist to
+// localStorage; corrected grams flow automatically via _scaleCorrect / _bleOnFrame.
+(function _wireScaleOffset() {
+  try {
+    if ($('scale-set-known')) $('scale-set-known').addEventListener('click', function () {
+      var raw = _scaleCurrentRaw();
+      var known = parseFloat(($('scale-known-input') && $('scale-known-input').value) || '');
+      if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
+      if (!isFinite(known) || known < 0) { try { statusOn('save-status', 'Enter the real known weight in grams first', 'warn'); } catch (_) {} return; }
+      _scaleSetOffset(known - raw);
+      try { statusOn('save-status', 'Offset set to ' + _scaleFmtOff(_scaleOffset()) + ' (known ' + Math.round(known) + 'g − raw ' + Math.round(raw) + 'g)', 'ok'); } catch (_) {}
+    });
+    if ($('scale-zero')) $('scale-zero').addEventListener('click', function () {
+      var raw = _scaleCurrentRaw();
+      if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
+      _scaleSetOffset(-raw);
+      try { statusOn('save-status', 'Zeroed current reading — offset ' + _scaleFmtOff(_scaleOffset()), 'ok'); } catch (_) {}
+    });
+    if ($('scale-clear-offset')) $('scale-clear-offset').addEventListener('click', function () {
+      _scaleSetOffset(0);
+      if ($('scale-known-input')) $('scale-known-input').value = '';
+      try { statusOn('save-status', 'Offset cleared — showing raw scale grams', 'ok'); } catch (_) {}
+    });
+    _scaleRenderOffsetUI();
+  } catch (_) {}
+})();
 if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
 if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
 $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
@@ -4464,6 +4563,17 @@ function saveWeightProfileFromInputs() {
   const key = WeightProfiles.keyForItem(item);
   const st = $('profile-status');
   if (!key) { if (st) { st.textContent = 'Pick an item first'; st.style.color = '#fca5a5'; } return; }
+  // PROFILE_SAFETY — soft guard against saving a PARTIAL bottle's gross weight as
+  // the empty/tare. An empty bottle is well under the full weight; if tare is
+  // suspiciously close to full (≥75%), warn before saving (confirm to override,
+  // never hard-block). The existing setForItem hard-rejects tare ≥ full.
+  const _tareN = normalizeWeightG(($('profile-tare-input') && $('profile-tare-input').value) || '');
+  const _fullN = normalizeWeightG(($('profile-full-input') && $('profile-full-input').value) || '');
+  if (_tareN != null && _fullN != null && _tareN >= _fullN * 0.75) {
+    if (!window.confirm('TARE (' + Math.round(_tareN) + 'g) looks too high compared to FULL (' + Math.round(_fullN) + 'g). An empty bottle is normally well under 75% of the full weight — did you accidentally use a PARTIAL bottle’s gross weight as the tare? Save anyway?')) {
+      if (st) { st.textContent = 'Save cancelled — check empty bottle (tare) weight'; st.style.color = '#fbbf24'; } return;
+    }
+  }
   const res = WeightProfiles.setForItem(key, {
     item_id: (item && item.id) || null,
     item_name: (item && item.name) || state.selectedItemName || null,
@@ -4480,6 +4590,10 @@ function saveWeightProfileFromInputs() {
   try {
     if ($('save-profile-btn')) $('save-profile-btn').addEventListener('click', saveWeightProfileFromInputs);
     if ($('use-tare-btn')) $('use-tare-btn').addEventListener('click', function () {
+      // PROFILE_SAFETY — block accidentally saving a PARTIAL bottle's gross weight
+      // as the empty/tare. Warn + confirm when the current bottle is PARTIAL.
+      var bs = ($('bottle-state-select') && $('bottle-state-select').value) || '';
+      if (bs === 'PARTIAL' && !window.confirm('This bottle is marked PARTIAL. Do not save a partial bottle’s gross weight as EMPTY/TARE. Continue only if the bottle is actually empty.')) return;
       const w = ($('weight-g-input') && $('weight-g-input').value) || '';
       if ($('profile-tare-input')) $('profile-tare-input').value = w;
     });
@@ -4487,7 +4601,9 @@ function saveWeightProfileFromInputs() {
       const w = ($('weight-g-input') && $('weight-g-input').value) || '';
       if ($('profile-full-input')) $('profile-full-input').value = w;
     });
+    if ($('weight-use-scale')) $('weight-use-scale').addEventListener('click', _weightUseScaleFill);   // PARTIAL UX — fill WEIGHT from scale
     if ($('weight-g-input')) $('weight-g-input').addEventListener('input', updateRemainingDisplay);
+    try { _weightUseScaleSync(); } catch (_) {}
   } catch (_) {}
 })();
 
@@ -4777,7 +4893,7 @@ function addCurrentSelectionToReview(opts) {
   }
   const weightRaw = (opts.weightOverride != null) ? String(opts.weightOverride).trim() : (($('weight-g-input') && $('weight-g-input').value) || '').trim();
   if (weightRaw !== '' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'Weight (grams) must be a positive number, or leave it blank' };
-  if (bottleState === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'PARTIAL bottle requires weight in grams' };
+  if (bottleState === 'PARTIAL' && !(parseFloat(weightRaw) > 0)) return { ok:false, error:'PARTIAL bottle requires current gross weight. Tap "Use current scale weight" or enter grams manually.' };
 
   // DB_PROFILE — store the effective tare/full (local override > DB) on the
   // draft so buildProfileNotes emits TARE/FULL/REMAINING_PERCENT/LIQUID/ML even
@@ -5938,7 +6054,7 @@ function onDraftEditSave(ce, form) {
   const weight_g = normalizeWeightG(weightRaw);
   const bottle_state = normalizeBottleState(sEl ? sEl.value : 'NOT_WEIGHED', weight_g);
   if (bottle_state === 'PARTIAL' && weight_g == null) {
-    statusOn('review-status', 'PARTIAL bottle requires weight in grams', 'err'); return;
+    statusOn('review-status', 'PARTIAL bottle requires current gross weight. Tap "Use current scale weight" or enter grams manually.', 'err'); return;
   }
   const measurement_source = (weight_g != null || bottle_state !== 'NOT_WEIGHED') ? 'manual_scale_mvp' : null;
   // Scale V2.1 — recompute remaining % from the draft's stored TARE profile after
