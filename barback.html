@@ -484,8 +484,23 @@
         <div id="main-ble-live" style="margin-top:6px;font-size:14px;font-family:'Fira Mono',monospace;color:#7dd3fc;">Live weight: —</div>
         <button type="button" id="main-ble-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
         <div id="main-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
+        <div id="main-ble-diag" style="margin-top:6px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;line-height:1.5;">
+          Browser BLE: <span id="diag-ble">—</span> · Secure: <span id="diag-secure">—</span> · Device: <span id="diag-device">—</span><br>
+          Mode: <span id="main-ble-mode">not connected</span>
+        </div>
       </div>
-      <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:8px;border:1px solid #374151;border-radius:8px;background:#0f1620;">📱 Scale connection works on Android Chrome. On iPhone, use manual grams or the Android scale station.</div>
+      <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
+        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale connection</div>
+        <div style="margin-top:3px;">This browser does not expose Web Bluetooth.</div>
+        <ul style="margin:6px 0 0;padding-left:16px;">
+          <li>Direct scale connection works in <b>Android Chrome / Desktop Chrome</b>.</li>
+          <li>On iPhone Safari/Chrome, use <b>manual grams</b> or an <b>Android scale station</b>.</li>
+          <li>Optional iPhone test: try a <b>WebBLE browser (Bluefy / WebBLE)</b>. If it exposes <code>navigator.bluetooth</code>, the <b>Connect Scale</b> button will appear here.</li>
+        </ul>
+        <div style="margin-top:6px;font-family:'Fira Mono',monospace;font-size:10px;color:#6b7280;line-height:1.5;">
+          navigator.bluetooth: <span id="diag-ble2">missing</span> · secure context: <span id="diag-secure2">—</span> · device: <span id="diag-device2">—</span>
+        </div>
+      </div>
     </div>
 
     <div class="row">
@@ -3239,6 +3254,27 @@ function _bleDecodeFrame(bytes) {
   r.confidence = 'high'; r.reason = 'ok'; return r;
 }
 function _bleHex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; } return s; }
+// SCALE_BLE diagnostics — browser/device detection for the visible panel so the
+// user can screenshot exactly why a connection isn't available.
+function _bleDeviceType() {
+  try {
+    var ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1)) return 'iPad';
+    if (/iPhone|iPod/i.test(ua)) return 'iPhone';
+    if (/Android/i.test(ua)) return 'Android';
+    return 'Desktop';
+  } catch (_) { return 'Unknown'; }
+}
+function _bleSecure() { try { return (typeof window !== 'undefined' && window.isSecureContext) ? 'yes' : 'no'; } catch (_) { return '?'; } }
+function _bleSetMode(m) { var el = $('main-ble-mode'); if (el) el.textContent = m; }
+// Populate the diagnostic spans in BOTH the supported panel and the unsupported note.
+function _bleApplyDiag() {
+  var hasBle = !!(typeof navigator !== 'undefined' && navigator.bluetooth);
+  var bleTxt = hasBle ? 'available' : 'missing', secTxt = _bleSecure(), devTxt = _bleDeviceType();
+  var set = function (id, v) { var e = $(id); if (e) e.textContent = v; };
+  set('diag-ble', bleTxt); set('diag-secure', secTxt); set('diag-device', devTxt);
+  set('diag-ble2', bleTxt); set('diag-secure2', secTxt); set('diag-device2', devTxt);
+}
 var _BLE_SURFACES = ['main-ble', 'qm-ble', 'rf-ble'];   // visible main panel + scan-sheet (TAKEN/Partial) + RETURN form; one shared connection drives all three
 function _bleStatus(msg) {
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
@@ -3281,6 +3317,7 @@ function _bleSetDisconnected() {
     // debug intentionally left as-is so connect errors stay visible.
   }
   _bleResetButtons();
+  _bleSetMode('not connected');
 }
 function _bleOnFrame(ev) {
   try {
@@ -3288,7 +3325,7 @@ function _bleOnFrame(ev) {
     var n = dv.byteLength, bytes = new Uint8Array(n);
     for (var i = 0; i < n; i++) bytes[i] = dv.getUint8(i);
     var r = _bleDecodeFrame(bytes);
-    if (!bleScale.gotFrame) { bleScale.gotFrame = true; _bleStatus('connected' + (bleScale.name ? ' · ' + bleScale.name : '')); }   // clear "waiting…"
+    if (!bleScale.gotFrame) { bleScale.gotFrame = true; _bleStatus('connected' + (bleScale.name ? ' · ' + bleScale.name : '')); _bleSetMode('last frame decoded'); }   // clear "waiting…"
     var isHigh = (r.confidence === 'high'), liveTxt = '', dbgTxt = '';
     var devPfx = bleScale.name ? bleScale.name + ' · ' : '';
     if (isHigh) {
@@ -3317,6 +3354,7 @@ async function _bleConnect(allDevices) {
   if (!navigator.bluetooth) return;
   try {
     _bleStatus('opening device chooser…');
+    _bleSetMode(allDevices ? 'chooser all devices' : 'chooser filtered FFF0');
     _bleDbg('stage: chooser' + (allDevices ? ' (all BLE devices)' : ' (FFF0 scales)'));
     var opts = allDevices
       ? { acceptAllDevices: true, optionalServices: [SCALE_BLE_SVC] }
@@ -3325,36 +3363,42 @@ async function _bleConnect(allDevices) {
     bleScale.device = device;
     device.addEventListener('gattserverdisconnected', _bleOnDisconnect);
     _bleStatus('connecting…');
+    _bleSetMode('connecting');
     _bleDbg('stage: connecting · ' + (device.name || 'device'));
     var server = await device.gatt.connect(); bleScale.server = server;
     var service;
     try { service = await server.getPrimaryService(SCALE_BLE_SVC); }
     catch (svcErr) {
       _bleStatus('Selected device does not expose scale service FFF0');
+      _bleSetMode('not connected (no FFF0)');
       _bleDbg('FFF0 not found on "' + (device.name || 'device') + '" — pick the scale, or use “all BLE devices” (' + (svcErr && svcErr.name || 'error') + ')');
       try { if (device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
       bleScale.connected = false; _bleResetButtons();
       return;
     }
+    _bleSetMode('service FFF0 found');
     _bleDbg('stage: service FFF0 found · ' + (device.name || 'device'));
     var ch;
     try { ch = await service.getCharacteristic(SCALE_BLE_CHR); }
     catch (chErr) {
       _bleStatus('Scale service found but notify characteristic FFF1 is missing');
+      _bleSetMode('not connected (no FFF1)');
       _bleDbg('FFF1 not found (' + (chErr && chErr.name || 'error') + ')');
       try { if (device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
       bleScale.connected = false; _bleResetButtons();
       return;
     }
+    _bleSetMode('characteristic FFF1 found');
     _bleDbg('stage: characteristic FFF1 found');
     await ch.startNotifications();
     ch.addEventListener('characteristicvaluechanged', _bleOnFrame);
     bleScale.char = ch; bleScale.gotFrame = false;
     _bleSetConnected(device.name || '');
+    _bleSetMode('notifications started — waiting for frames');
     _bleDbg('stage: notifications started — waiting for frames · ' + (device.name || 'device'));
   } catch (e) {
-    if (e && e.name === 'NotFoundError') { _bleStatus('Not connected'); _bleDbg('no device selected (cancelled or none found)'); }
-    else { _bleStatus('connect failed — manual entry still works'); _bleDbg('connect error: ' + (e && e.name || 'unknown')); }
+    if (e && e.name === 'NotFoundError') { _bleStatus('Not connected'); _bleSetMode('not connected'); _bleDbg('no device selected (cancelled or none found)'); }
+    else { _bleStatus('connect failed — manual entry still works'); _bleSetMode('not connected'); _bleDbg('connect error: ' + (e && e.name || 'unknown')); }
     _bleSetDisconnected();
   }
 }
@@ -3403,11 +3447,12 @@ function _bleUseLatestMain() {
     bleScale.supported = !!(typeof navigator !== 'undefined' && navigator.bluetooth);
     var mp = $('main-ble'); if (mp) mp.style.display = bleScale.supported ? '' : 'none';
     var mh = $('main-ble-hint'); if (mh) mh.style.display = bleScale.supported ? 'none' : '';
+    try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
-    // Soft, NON-hiding availability hint surfaced in the main debug line only.
+    // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
     if (bleScale.supported && navigator.bluetooth.getAvailability) {
       navigator.bluetooth.getAvailability().then(function (a) {
-        if (!a) { var d = $('main-ble-debug'); if (d) { d.textContent = 'note: Bluetooth may be off — tap Connect Scale and enable it if prompted'; d.style.display = ''; } }
+        if (!a) { var d = $('main-ble-debug'); if (d) { d.textContent = 'Bluetooth may be off or unavailable — tap Connect Scale and enable if prompted'; d.style.display = ''; } }
       }).catch(function () {});
     }
   } catch (_) { bleScale.supported = false; }
