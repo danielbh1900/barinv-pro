@@ -469,6 +469,25 @@
 
   <div class="wrap">
 
+    <!-- SCALE_BLE — visible, direction-neutral main Scale panel. Shown whenever
+         navigator.bluetooth exists (NOT gated on getAvailability). iPhone/iOS shows
+         the manual note. "Use latest stable weight" fills the context-appropriate
+         field (RETURN → QTY grams; otherwise Weight (g)); never submits. -->
+    <div class="row" id="main-scale-row">
+      <label>SCALE</label>
+      <div id="main-ble" style="display:none;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span id="main-ble-status" style="font-size:13px;color:#9ca3af;">Scale: Not connected</span>
+          <button type="button" id="main-ble-connect" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect Scale</button>
+        </div>
+        <button type="button" id="main-ble-all" style="margin-top:4px;background:none;border:none;color:#6ea8fe;font-size:11px;text-decoration:underline;cursor:pointer;padding:2px 0;">Can't find scale? Try all BLE devices</button>
+        <div id="main-ble-live" style="margin-top:6px;font-size:14px;font-family:'Fira Mono',monospace;color:#7dd3fc;">Live weight: —</div>
+        <button type="button" id="main-ble-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
+        <div id="main-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
+      </div>
+      <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:8px;border:1px solid #374151;border-radius:8px;background:#0f1620;">📱 Scale connection works on Android Chrome. On iPhone, use manual grams or the Android scale station.</div>
+    </div>
+
     <div class="row">
       <label>ACTION</label>
       <div class="action-row">
@@ -3220,7 +3239,7 @@ function _bleDecodeFrame(bytes) {
   r.confidence = 'high'; r.reason = 'ok'; return r;
 }
 function _bleHex(bytes) { var s = ''; for (var i = 0; i < bytes.length; i++) { var h = bytes[i].toString(16); s += (h.length < 2 ? '0' : '') + h; } return s; }
-var _BLE_SURFACES = ['qm-ble', 'rf-ble'];   // scan-sheet (TAKEN/Partial) + main RETURN form; one shared connection drives both
+var _BLE_SURFACES = ['main-ble', 'qm-ble', 'rf-ble'];   // visible main panel + scan-sheet (TAKEN/Partial) + RETURN form; one shared connection drives all three
 function _bleStatus(msg) {
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
     var el = $(_BLE_SURFACES[i] + '-status');
@@ -3237,7 +3256,7 @@ function _bleClearDbg() {
 // Reset both connect buttons to "Connect scale" and re-show the all-devices fallback.
 function _bleResetButtons() {
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
-    var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = '📶 Connect scale';
+    var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = (_BLE_SURFACES[i] === 'main-ble' ? '📶 Connect Scale' : '📶 Connect scale');
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = '';
   }
 }
@@ -3253,7 +3272,11 @@ function _bleSetDisconnected() {
   bleScale.connected = false; bleScale.latest = null; bleScale.name = ''; bleScale.gotFrame = false;
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
     var p = _BLE_SURFACES[i];
-    var live = $(p + '-live'); if (live) { live.style.display = 'none'; live.textContent = '—'; }
+    var live = $(p + '-live');
+    if (live) {
+      if (p === 'main-ble') { live.textContent = 'Live weight: —'; live.style.display = ''; }   // main panel line is always visible
+      else { live.style.display = 'none'; live.textContent = '—'; }
+    }
     var use = $(p + '-use'); if (use) use.style.display = 'none';
     // debug intentionally left as-is so connect errors stay visible.
   }
@@ -3354,19 +3377,37 @@ function _bleUseLatestReturn() {
   q.value = String(bleScale.latest.grams);
   try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
 }
+// Main panel — direction-neutral. RETURN → fill QTY grams; otherwise (TAKEN,
+// incl. used/partial bottles sent TO a bar) → fill the main Weight (g) field and
+// recalc remaining % from the DB/local profile. Operator still sets bottle state
+// and taps ADD TO REVIEW. Never submits, never writes DB.
+function _bleUseLatestMain() {
+  if (!bleScale.latest) return;
+  var g = String(bleScale.latest.grams);
+  if (state.selectedAction === 'RETURNED') {
+    var q = $('qty-input'); if (q) q.value = g;
+    try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  } else {
+    var w = $('weight-g-input'); if (w) w.value = g;
+    try { updateRemainingDisplay(); } catch (_) {}
+    try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  }
+}
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
 // so supported stays false and the UI never shows (and never errors).
 (function _bleInitSupport() {
   try {
-    if (typeof navigator === 'undefined' || !navigator.bluetooth) { bleScale.supported = false; return; }
-    bleScale.supported = true;   // bluetooth object present → treat as supported
-    if (navigator.bluetooth.getAvailability) {
+    // Gate on EXISTENCE of navigator.bluetooth only — NEVER on getAvailability(),
+    // which can return false on devices we still need to test and would wrongly
+    // hide the UI. If Bluetooth is off, Connect simply fails with a clear message.
+    bleScale.supported = !!(typeof navigator !== 'undefined' && navigator.bluetooth);
+    var mp = $('main-ble'); if (mp) mp.style.display = bleScale.supported ? '' : 'none';
+    var mh = $('main-ble-hint'); if (mh) mh.style.display = bleScale.supported ? 'none' : '';
+    try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
+    // Soft, NON-hiding availability hint surfaced in the main debug line only.
+    if (bleScale.supported && navigator.bluetooth.getAvailability) {
       navigator.bluetooth.getAvailability().then(function (a) {
-        bleScale.supported = !!a;
-        var _p = (state.qmBottleState === 'PARTIAL');
-        var qel = $('qm-ble'); if (qel) qel.style.display = (_p && bleScale.supported) ? '' : 'none';
-        var qh = $('qm-ble-hint'); if (qh) qh.style.display = (_p && !bleScale.supported) ? '' : 'none';
-        try { applyActionTint(); } catch (_) {}   // re-evaluate the RETURN-form scale row + hint
+        if (!a) { var d = $('main-ble-debug'); if (d) { d.textContent = 'note: Bluetooth may be off — tap Connect Scale and enable it if prompted'; d.style.display = ''; } }
       }).catch(function () {});
     }
   } catch (_) { bleScale.supported = false; }
@@ -3388,6 +3429,9 @@ if ($('rf-ble-connect')) $('rf-ble-connect').addEventListener('click', () => { t
 if ($('rf-ble-use')) $('rf-ble-use').addEventListener('click', () => { try { _bleUseLatestReturn(); } catch (_) {} });
 if ($('qm-ble-all')) $('qm-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
 if ($('rf-ble-all')) $('rf-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
+if ($('main-ble-connect')) $('main-ble-connect').addEventListener('click', () => { try { if (bleScale.connected) _bleDisconnect(); else _bleConnect(false); } catch (_) {} });
+if ($('main-ble-all')) $('main-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
+if ($('main-ble-use')) $('main-ble-use').addEventListener('click', () => { try { _bleUseLatestMain(); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
