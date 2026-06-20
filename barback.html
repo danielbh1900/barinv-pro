@@ -491,6 +491,7 @@
       </div>
       <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
         <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale connection</div>
+        <div id="main-ble-desktop-cta" style="display:none;margin-top:6px;font-weight:700;color:#f59e0b;font-size:13px;line-height:1.4;">💻 Use Google Chrome or Microsoft Edge to run the Scale Station — this browser has no Web Bluetooth. (Receiver mode below still works in any browser.)</div>
         <div style="margin-top:3px;">This browser does not expose Web Bluetooth.</div>
         <ul style="margin:6px 0 0;padding-left:16px;">
           <li>Direct scale connection works in <b>Android Chrome / Desktop Chrome</b>.</li>
@@ -3504,6 +3505,11 @@ function _bleUseLatestMain() {
     var mp = $('main-ble'); if (mp) mp.style.display = bleScale.supported ? '' : 'none';
     var mh = $('main-ble-hint'); if (mh) mh.style.display = bleScale.supported ? 'none' : '';
     var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = bleScale.supported ? '' : 'none';   // station = a device with local BLE
+    // Desktop with no Web Bluetooth (Safari/Firefox/Arc/Atlas, or Chrome with BLE
+    // disabled) → a station CANNOT run here. Show a clear "use Chrome/Edge" CTA.
+    // Receiver mode (Listen to Scale Station) is unaffected and stays available.
+    var cta = $('main-ble-desktop-cta');
+    if (cta) cta.style.display = (!bleScale.supported && _bleDeviceType() === 'Desktop') ? '' : 'none';
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
