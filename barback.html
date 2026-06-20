@@ -3497,7 +3497,7 @@ function _bleUseLatestMain() {
 // ════════════════════════════════════════════════════════════════════
 var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0,
   subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '',
-  httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', pollTimer: null };
+  httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', lastPollStatus: '', lastPollErr: null, pollTimer: null };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
@@ -3524,7 +3524,7 @@ function _bridgeRenderDiag() {
   lines.push(sl);
   if (bridge.pubError) lines.push('⚠ Publish: ' + bridge.pubError);
   if (bridge.lastHttpTs) lines.push('HTTP pub: ' + (bridge.httpOk ? 'ok' : ('err' + (bridge.httpErr ? ' (' + bridge.httpErr + ')' : ''))) + ' · last ' + bridge.lastHttpTs);
-  if (bridge.lastPollTs) lines.push('Poll: Rx ' + (bridge.pollRx || 0) + ' · last ' + bridge.lastPollTs);
+  if (bridge.lastPollTs) lines.push('Poll: Rx ' + (bridge.pollRx || 0) + ' · ' + (bridge.lastPollStatus || '—') + (bridge.lastPollErr ? ' (' + bridge.lastPollErr + ')' : '') + ' · last ' + bridge.lastPollTs);
   el.textContent = lines.join('\n');
   el.style.display = '';
 }
@@ -3627,10 +3627,13 @@ async function _bridgePollLatest() {
   if (!bridge.listening) return;
   var r = await _bridgeHttp('latest', {});
   bridge.lastPollTs = _bridgeNow();
-  if (r && r.ok && r.weight && typeof r.weight.grams === 'number') {
+  if (!r) { bridge.lastPollStatus = 'error'; bridge.lastPollErr = 'no response'; }
+  else if (r.error) { bridge.lastPollStatus = 'error'; bridge.lastPollErr = String(r.error).slice(0, 60); }
+  else if (r.ok && r.weight && typeof r.weight.grams === 'number') {
+    bridge.lastPollStatus = 'ok'; bridge.lastPollErr = null;
     bridge.pollRx = (bridge.pollRx || 0) + 1;
     _bridgeApplyWeight(r.weight, 'poll');
-  }
+  } else { bridge.lastPollStatus = 'no_weight'; bridge.lastPollErr = null; }
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeListen() {
@@ -3658,9 +3661,12 @@ function _bridgeStopListen() {
 async function _bridgeStartStation() {
   if (bridge.publishing) { _bridgeStopStation(); return; }
   if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then Start Scale Station'); return; }
+  if (!state.jwt) { _bridgeStatus('Log in first — station needs a session to publish'); return; }
   _bridgeStatus('Scale station: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
-  var ch = await _bridgeEnsureChannel();
-  if (!ch) return;
+  // Realtime channel is best-effort (extra path for laptop receivers). HTTP publish
+  // to the Edge endpoint does NOT depend on it, so start publishing even if the
+  // channel never subscribes — otherwise iPhone/iPad (HTTP-only) get nothing.
+  try { await _bridgeEnsureChannel(); } catch (_) {}
   bridge.publishing = true;
   _bridgeStatus('Scale station: publishing · ' + _bridgeStationId()); try { _bridgeRenderDiag(); } catch (_) {}
   var b = $('bridge-start-station'); if (b) b.textContent = 'Stop Scale Station';
@@ -3681,22 +3687,26 @@ function _bridgeMaybeClose() {
 }
 // Station — publish a high-confidence frame (rate-limited). Called from _bleOnFrame.
 function _bridgeMaybePublish(r, hex) {
-  if (!bridge.publishing || !bridge.channel) return;
+  if (!bridge.publishing) return;
   if (!r || r.confidence !== 'high') return;
   var now = Date.now();
   if (now - bridge.lastSent < 250) return;
   bridge.lastSent = now;
   bridge.pubCount = (bridge.pubCount || 0) + 1; bridge.lastPubTs = _bridgeNow(); bridge.lastPubGrams = r.grams; bridge.lastPubStable = !!r.stable;
-  try {
-    var sp = bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
-      type: 'scale_weight', source: 'scale_station', station_id: _bridgeStationId(),
-      item_context: null, grams: r.grams, stable: !!r.stable, raw_hex: hex,
-      decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString()
-    } });
-    // channel.send resolves 'ok' | 'error' | 'timed out' — surface non-ok as the publish error.
-    if (sp && sp.then) { sp.then(function (st2) { bridge.pubError = (st2 === 'ok') ? null : ('send → ' + st2); try { _bridgeRenderDiag(); } catch (_) {} }).catch(function (e) { bridge.pubError = 'send err: ' + (e && e.name || 'unknown'); try { _bridgeRenderDiag(); } catch (_) {} }); }
-  } catch (e) { bridge.pubError = 'send threw: ' + (e && e.name || 'err'); /* never break weighing */ }
-  // ALSO publish over HTTPS to the Edge endpoint — the reliable path for iPhone/iPad.
+  // Realtime broadcast — best-effort, only when a channel is live (laptop receivers).
+  if (bridge.channel) {
+    try {
+      var sp = bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
+        type: 'scale_weight', source: 'scale_station', station_id: _bridgeStationId(),
+        item_context: null, grams: r.grams, stable: !!r.stable, raw_hex: hex,
+        decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString()
+      } });
+      // channel.send resolves 'ok' | 'error' | 'timed out' — surface non-ok as the publish error.
+      if (sp && sp.then) { sp.then(function (st2) { bridge.pubError = (st2 === 'ok') ? null : ('send → ' + st2); try { _bridgeRenderDiag(); } catch (_) {} }).catch(function (e) { bridge.pubError = 'send err: ' + (e && e.name || 'unknown'); try { _bridgeRenderDiag(); } catch (_) {} }); }
+    } catch (e) { bridge.pubError = 'send threw: ' + (e && e.name || 'err'); /* never break weighing */ }
+  }
+  // PRIMARY path — publish over HTTPS to the Edge endpoint, independent of Realtime.
+  // This is what reaches iPhone/iPad (which poll over HTTPS and cannot do Realtime/BLE).
   try { _bridgeHttpPublish({ station_id: _bridgeStationId(), grams: r.grams, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() }); } catch (_) {}
   try { _bridgeRenderDiag(); } catch (_) {}
 }
