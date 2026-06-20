@@ -501,6 +501,25 @@
           navigator.bluetooth: <span id="diag-ble2">missing</span> · secure context: <span id="diag-secure2">—</span> · device: <span id="diag-device2">—</span>
         </div>
       </div>
+      <!-- SCALE_BRIDGE — Realtime relay so iPhone/Safari (no Web Bluetooth) can use a Scale Station's weight. Frontend-only public broadcast; no DB write, no auto-submit; never broadcasts PIN/token/secrets. -->
+      <div id="main-bridge" style="margin-top:8px;padding:10px;border:1px solid #374151;border-radius:8px;background:#0d1411;">
+        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale Bridge <span style="font-weight:400;color:#6b7280;font-size:11px;">— use a scale station without Bluetooth</span></div>
+        <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <button type="button" id="bridge-listen" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Listen to Scale Station</button>
+          <span id="bridge-status" style="font-size:12px;color:#9ca3af;">Bridge: not listening</span>
+        </div>
+        <div id="bridge-recv" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">
+          <div id="bridge-weight">Latest station weight: —</div>
+          <div id="bridge-update" style="font-size:11px;color:#9ca3af;">Last update: —</div>
+          <div id="bridge-station" style="font-size:11px;color:#9ca3af;">Station: —</div>
+          <button type="button" id="bridge-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
+        </div>
+        <div id="bridge-station-row" style="display:none;margin-top:8px;border-top:1px solid #374151;padding-top:8px;">
+          <button type="button" id="bridge-start-station" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Start Scale Station</button>
+          <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;">Station: publishing…</div>
+          <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Connect the scale above first, then start the station to share its weight with iPhone barbacks on this event.</div>
+        </div>
+      </div>
     </div>
 
     <div class="row">
@@ -3330,6 +3349,7 @@ function _bleOnFrame(ev) {
     var devPfx = bleScale.name ? bleScale.name + ' · ' : '';
     if (isHigh) {
       bleScale.latest = { grams: r.grams, stable: r.stable };
+      try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — relay to listeners (station mode only)
       liveTxt = 'Live weight: ' + r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
       dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '');
     } else {
@@ -3452,6 +3472,7 @@ function _bleUseLatestMain() {
     bleScale.supported = !!(typeof navigator !== 'undefined' && navigator.bluetooth);
     var mp = $('main-ble'); if (mp) mp.style.display = bleScale.supported ? '' : 'none';
     var mh = $('main-ble-hint'); if (mh) mh.style.display = bleScale.supported ? 'none' : '';
+    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = bleScale.supported ? '' : 'none';   // station = a device with local BLE
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
@@ -3462,6 +3483,146 @@ function _bleUseLatestMain() {
     }
   } catch (_) { bleScale.supported = false; }
 })();
+// ════════════════════════════════════════════════════════════════════
+//  SCALE_BRIDGE — Realtime relay so iPhone/Safari barbacks (no Web Bluetooth)
+//  can use scale weight. One laptop/Android "Scale Station" connects to the BLE
+//  scale and BROADCASTS the latest high-confidence weight on a venue/night-scoped
+//  Supabase Realtime channel; other clients LISTEN and set bleScale.latest so the
+//  existing field-fill works. Frontend-only: public broadcast channel + anon key.
+//  No table, RLS, Edge, or DB write. Never broadcasts PIN/token/access_code.
+//  supabase-js is loaded lazily, captured, then its window.supabase global is
+//  removed (only if WE loaded it) so the page's event-insert path (SB =
+//  buildSupabaseClient → needs window.supabase) is provably unaffected.
+// ════════════════════════════════════════════════════════════════════
+var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0 };
+var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
+function _bridgeScope() {
+  var tp = state.tokenPayload || {}, ss = state.serverSession || {};
+  var venue = tp.venue_id || ss.venue_id || '';
+  var night = tp.night_id || ss.night_id || '';
+  return (venue && night) ? { venue: venue, night: night, topic: 'scale:' + venue + ':' + night } : null;
+}
+function _bridgeStatus(msg) { var el = $('bridge-status'); if (el) el.textContent = msg; }
+function _bridgeStationId() {
+  if (bridge.stationId) return bridge.stationId;
+  var tp = state.tokenPayload || {};
+  var label = String(tp.nickname || 'station').replace(/[^\w-]/g, '').slice(0, 16) || 'station';
+  bridge.stationId = label + '-' + Math.random().toString(36).slice(2, 7);
+  return bridge.stationId;
+}
+async function _bridgeLoadLib() {
+  if (bridge.sb) return true;
+  var preExisting = !!(window.supabase && window.supabase.createClient);
+  if (!preExisting) { try { await loadScript(SCALE_BRIDGE_CDN); } catch (_) { return false; } }
+  if (!(window.supabase && window.supabase.createClient)) return false;
+  bridge.sb = window.supabase;
+  if (!preExisting) { try { delete window.supabase; } catch (_) { try { window.supabase = undefined; } catch (_) {} } }
+  return true;
+}
+function _bridgeMakeClient() {
+  if (bridge.client) return bridge.client;
+  if (!bridge.sb || !supabaseCfg || !supabaseCfg.url || !supabaseCfg.key) return null;
+  try {
+    bridge.client = bridge.sb.createClient(supabaseCfg.url, supabaseCfg.key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+  } catch (_) { bridge.client = null; }
+  return bridge.client;
+}
+async function _bridgeEnsureChannel() {
+  if (bridge.channel) return bridge.channel;
+  var scope = _bridgeScope();
+  if (!scope) { _bridgeStatus('Bridge: no event scope — log in first'); return null; }
+  if (!(await _bridgeLoadLib())) { _bridgeStatus('Bridge: could not load realtime — manual entry still works'); return null; }
+  var c = _bridgeMakeClient();
+  if (!c) { _bridgeStatus('Bridge: realtime unavailable — manual entry still works'); return null; }
+  return await new Promise(function (resolve) {
+    var settled = false;
+    try {
+      var ch = c.channel(scope.topic, { config: { broadcast: { self: false } } });
+      ch.on('broadcast', { event: 'scale_weight' }, function (m) { try { _bridgeOnMessage(m && m.payload); } catch (_) {} });
+      ch.subscribe(function (st) {
+        if (st === 'SUBSCRIBED' && !settled) { settled = true; bridge.channel = ch; resolve(ch); }
+        else if ((st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') && !settled) { settled = true; resolve(null); }
+      });
+      setTimeout(function () { if (!settled) { settled = true; resolve(bridge.channel || null); } }, 9000);
+    } catch (_) { if (!settled) { settled = true; resolve(null); } }
+  });
+}
+// Receiver — feed bleScale.latest from station broadcasts; existing Use buttons work.
+function _bridgeOnMessage(p) {
+  if (!p || typeof p.grams !== 'number') return;
+  if (bridge.publishing && !bridge.listening) return;   // a pure station ignores remote weights
+  bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '' };
+  bleScale.latest = { grams: p.grams, stable: !!p.stable };
+  var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable');
+  var u = $('bridge-update'); if (u) u.textContent = 'Last update: just now' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
+  var s = $('bridge-station'); if (s) s.textContent = 'Station: ' + (p.station_id || '?');
+  var use = $('bridge-use');
+  if (use) {
+    use.style.display = '';
+    if (p.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
+    else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
+  }
+}
+async function _bridgeListen() {
+  if (bridge.listening) { _bridgeStopListen(); return; }
+  _bridgeStatus('Bridge: connecting…');
+  var ch = await _bridgeEnsureChannel();
+  if (!ch) return;   // status already set
+  bridge.listening = true;
+  _bridgeStatus('Bridge: listening for station weight…');
+  var r = $('bridge-recv'); if (r) r.style.display = '';
+  var b = $('bridge-listen'); if (b) b.textContent = 'Stop listening';
+}
+function _bridgeStopListen() {
+  bridge.listening = false;
+  var r = $('bridge-recv'); if (r) r.style.display = 'none';
+  var b = $('bridge-listen'); if (b) b.textContent = 'Listen to Scale Station';
+  _bridgeStatus(bridge.publishing ? ('Scale station: publishing · ' + (bridge.stationId || '')) : 'Bridge: not listening');
+  _bridgeMaybeClose();
+}
+async function _bridgeStartStation() {
+  if (bridge.publishing) { _bridgeStopStation(); return; }
+  if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then Start Scale Station'); return; }
+  _bridgeStatus('Scale station: connecting…');
+  var ch = await _bridgeEnsureChannel();
+  if (!ch) return;
+  bridge.publishing = true;
+  _bridgeStatus('Scale station: publishing · ' + _bridgeStationId());
+  var b = $('bridge-start-station'); if (b) b.textContent = 'Stop Scale Station';
+  var ss = $('bridge-station-status'); if (ss) ss.style.display = '';
+}
+function _bridgeStopStation() {
+  bridge.publishing = false;
+  var b = $('bridge-start-station'); if (b) b.textContent = 'Start Scale Station';
+  var ss = $('bridge-station-status'); if (ss) ss.style.display = 'none';
+  _bridgeStatus(bridge.listening ? 'Bridge: listening for station weight…' : 'Scale station: stopped');
+  _bridgeMaybeClose();
+}
+function _bridgeMaybeClose() {
+  if (!bridge.listening && !bridge.publishing && bridge.channel) {
+    try { if (bridge.client) bridge.client.removeChannel(bridge.channel); } catch (_) {}
+    bridge.channel = null;
+  }
+}
+// Station — publish a high-confidence frame (rate-limited). Called from _bleOnFrame.
+function _bridgeMaybePublish(r, hex) {
+  if (!bridge.publishing || !bridge.channel) return;
+  if (!r || r.confidence !== 'high') return;
+  var now = Date.now();
+  if (now - bridge.lastSent < 250) return;
+  bridge.lastSent = now;
+  try {
+    bridge.channel.send({ type: 'broadcast', event: 'scale_weight', payload: {
+      type: 'scale_weight', source: 'scale_station', station_id: _bridgeStationId(),
+      item_context: null, grams: r.grams, stable: !!r.stable, raw_hex: hex,
+      decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString()
+    } });
+  } catch (_) { /* never break weighing */ }
+}
+function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
 if ($('qm-minus')) $('qm-minus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) - 1));
 if ($('qm-plus'))  $('qm-plus').addEventListener('click', () => _qmSetQty(parseInt(($('qm-input') && $('qm-input').value) || '1', 10) + 1));
 $$('#qm-quick button').forEach(b => b.addEventListener('click', () => _qmSetQty(b.getAttribute('data-q'))));
@@ -3480,6 +3641,9 @@ if ($('rf-ble-use')) $('rf-ble-use').addEventListener('click', () => { try { _bl
 if ($('qm-ble-all')) $('qm-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
 if ($('rf-ble-all')) $('rf-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
 if ($('main-ble-connect')) $('main-ble-connect').addEventListener('click', () => { try { if (bleScale.connected) _bleDisconnect(); else _bleConnect(false); } catch (_) {} });
+if ($('bridge-listen')) $('bridge-listen').addEventListener('click', () => { try { _bridgeListen(); } catch (_) {} });
+if ($('bridge-start-station')) $('bridge-start-station').addEventListener('click', () => { try { _bridgeStartStation(); } catch (_) {} });
+if ($('bridge-use')) $('bridge-use').addEventListener('click', () => { try { _bridgeUse(); } catch (_) {} });
 if ($('main-ble-all')) $('main-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
 if ($('main-ble-use')) $('main-ble-use').addEventListener('click', () => { try { _bleUseLatestMain(); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
