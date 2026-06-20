@@ -3635,19 +3635,32 @@ function _bridgeApplyWeight(p, source) {
 // the next poll re-enables everything via _bridgeApplyWeight.
 //   expired → a station published but stopped >TTL ago (laptop closed / scale dropped);
 //             `stale` carries the last reading + age, shown greyed-out, NOT usable.
-//   no_row  → no station has published for THIS venue+night — almost always the two
-//             devices are logged into different nights, or the station never started.
-function _bridgeShowNoWeight(reason, stale) {
+//   no_row  → no station has published for THIS venue+night — the station never
+//             started for this event.
+//   scope_mismatch → a station IS publishing fresh for this venue but a DIFFERENT
+//             night (the two devices are logged into different nights).
+//   query_error → the Edge DB read failed this poll.
+// `info` is the full Edge latest response (carries .stale and .publishing_night_tail).
+function _bridgeShowNoWeight(reason, info) {
+  info = info || {};
+  var stale = info.stale || {};
   bridge.latest = null; bleScale.latest = null;
   var w = $('bridge-weight'), u = $('bridge-update'), s = $('bridge-station'), use = $('bridge-use');
-  if (reason === 'expired' && stale && typeof stale.grams === 'number') {
+  if (reason === 'expired' && typeof stale.grams === 'number') {
     if (w) w.textContent = 'Latest station weight: ' + stale.grams + ' g · STALE (' + stale.age_sec + 's old) — station stopped publishing';
     if (u) u.textContent = 'Restart the laptop Scale Station and reconnect the scale';
     if (s) s.textContent = 'Station: ' + (stale.station_id || '?') + ' (stale)';
+  } else if (reason === 'scope_mismatch') {
+    if (w) w.textContent = 'Latest station weight: — · a station IS publishing, but for a DIFFERENT night' + (info.publishing_night_tail ? (' (…' + info.publishing_night_tail + ')') : '');
+    if (u) u.textContent = 'This device and the laptop Scale Station are on different nights — log both into the SAME night';
+    if (s) s.textContent = 'Station: wrong night';
   } else if (reason === 'no_row') {
     if (w) w.textContent = 'Latest station weight: — · no station publishing for this event';
     if (u) u.textContent = 'Check the laptop Scale Station is running AND on the SAME night as this device';
     if (s) s.textContent = 'Station: —';
+  } else if (reason === 'query_error') {
+    if (w) w.textContent = 'Latest station weight: — · bridge query error';
+    if (u) u.textContent = 'Temporary server read error — keep listening, it should recover';
   } else {
     if (w) w.textContent = 'Latest station weight: — (' + (reason || 'no weight') + ')';
   }
@@ -3693,11 +3706,15 @@ async function _bridgePollLatest() {
     bridge.pollRx = (bridge.pollRx || 0) + 1;
     _bridgeApplyWeight(r.weight, 'poll');
   } else {
-    // No fresh weight. r.reason ('no_row' | 'expired') tells the operator WHY.
+    // No fresh weight. r.reason (no_row | expired | scope_mismatch | query_error)
+    // tells the operator WHY instead of a generic dash.
     var reason = (r && r.reason) ? String(r.reason) : 'no_weight';
     bridge.lastPollStatus = reason;
-    bridge.lastPollErr = (reason === 'expired' && r.stale) ? ('stale ' + r.stale.age_sec + 's') : null;
-    try { _bridgeShowNoWeight(reason, r && r.stale); } catch (_) {}
+    bridge.lastPollErr =
+      (reason === 'expired' && r.stale) ? ('stale ' + r.stale.age_sec + 's') :
+      (reason === 'scope_mismatch' && r.publishing_night_tail) ? ('pub night …' + r.publishing_night_tail) :
+      (reason === 'query_error' && r.detail) ? String(r.detail).slice(0, 40) : null;
+    try { _bridgeShowNoWeight(reason, r); } catch (_) {}
   }
   try { _bridgeRenderDiag(); } catch (_) {}
 }
