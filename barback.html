@@ -524,6 +524,7 @@
           <span id="rf-ble-status" style="font-size:12px;color:#9ca3af;">Scale return weight: not connected</span>
           <button type="button" id="rf-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
         </div>
+        <button type="button" id="rf-ble-all" style="margin-top:4px;background:none;border:none;color:#6ea8fe;font-size:11px;text-decoration:underline;cursor:pointer;padding:2px 0;">Can't find scale? Try all BLE devices</button>
         <div id="rf-ble-live" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">—</div>
         <button type="button" id="rf-ble-use" style="display:none;margin-top:6px;width:100%;padding:8px;font-size:13px;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
         <div id="rf-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
@@ -822,6 +823,7 @@
             <span id="qm-ble-status" style="font-size:12px;color:#9ca3af;">Scale: Not connected</span>
             <button type="button" id="qm-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
           </div>
+          <button type="button" id="qm-ble-all" style="margin-top:4px;background:none;border:none;color:#6ea8fe;font-size:11px;text-decoration:underline;cursor:pointer;padding:2px 0;">Can't find scale? Try all BLE devices</button>
           <div id="qm-ble-live" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">—</div>
           <button type="button" id="qm-ble-use" style="display:none;margin-top:6px;width:100%;padding:8px;font-size:13px;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
           <div id="qm-ble-debug" style="display:none;margin-top:4px;font-size:10px;font-family:'Fira Mono',monospace;color:#6b7280;word-break:break-all;"></div>
@@ -3197,7 +3199,7 @@ function qtyModalAdd() {
 // ════════════════════════════════════════════════════════════════════
 var SCALE_BLE_SVC = '0000fff0-0000-1000-8000-00805f9b34fb';
 var SCALE_BLE_CHR = '0000fff1-0000-1000-8000-00805f9b34fb';
-var bleScale = { supported: false, device: null, server: null, char: null, connected: false, latest: null };
+var bleScale = { supported: false, device: null, server: null, char: null, connected: false, latest: null, name: '', gotFrame: false };
 
 // Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
 // Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
@@ -3225,20 +3227,37 @@ function _bleStatus(msg) {
     if (el) el.textContent = (_BLE_SURFACES[i] === 'rf-ble' ? 'Scale return weight: ' : 'Scale: ') + msg;
   }
 }
+// Compact debug line on BOTH surfaces — connection stage / device / hex / decode status.
+function _bleDbg(msg) {
+  for (var i = 0; i < _BLE_SURFACES.length; i++) { var d = $(_BLE_SURFACES[i] + '-debug'); if (d) { d.textContent = msg; d.style.display = ''; } }
+}
+function _bleClearDbg() {
+  for (var i = 0; i < _BLE_SURFACES.length; i++) { var d = $(_BLE_SURFACES[i] + '-debug'); if (d) { d.textContent = ''; d.style.display = 'none'; } }
+}
+// Reset both connect buttons to "Connect scale" and re-show the all-devices fallback.
+function _bleResetButtons() {
+  for (var i = 0; i < _BLE_SURFACES.length; i++) {
+    var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = '📶 Connect scale';
+    var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = '';
+  }
+}
 function _bleSetConnected(name) {
-  bleScale.connected = true;
-  _bleStatus('connected' + (name ? ' · ' + name : ''));
-  for (var i = 0; i < _BLE_SURFACES.length; i++) { var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = 'Disconnect'; }
+  bleScale.connected = true; bleScale.name = name || '';
+  _bleStatus('connected' + (name ? ' · ' + name : '') + ' · waiting for scale data…');
+  for (var i = 0; i < _BLE_SURFACES.length; i++) {
+    var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = 'Disconnect';
+    var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = 'none';   // hide fallback once connected
+  }
 }
 function _bleSetDisconnected() {
-  bleScale.connected = false; bleScale.latest = null;
+  bleScale.connected = false; bleScale.latest = null; bleScale.name = ''; bleScale.gotFrame = false;
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
     var p = _BLE_SURFACES[i];
-    var b = $(p + '-connect'); if (b) b.textContent = '📶 Connect scale';
     var live = $(p + '-live'); if (live) { live.style.display = 'none'; live.textContent = '—'; }
     var use = $(p + '-use'); if (use) use.style.display = 'none';
-    var dbg = $(p + '-debug'); if (dbg) dbg.style.display = 'none';
+    // debug intentionally left as-is so connect errors stay visible.
   }
+  _bleResetButtons();
 }
 function _bleOnFrame(ev) {
   try {
@@ -3246,13 +3265,15 @@ function _bleOnFrame(ev) {
     var n = dv.byteLength, bytes = new Uint8Array(n);
     for (var i = 0; i < n; i++) bytes[i] = dv.getUint8(i);
     var r = _bleDecodeFrame(bytes);
+    if (!bleScale.gotFrame) { bleScale.gotFrame = true; _bleStatus('connected' + (bleScale.name ? ' · ' + bleScale.name : '')); }   // clear "waiting…"
     var isHigh = (r.confidence === 'high'), liveTxt = '', dbgTxt = '';
+    var devPfx = bleScale.name ? bleScale.name + ' · ' : '';
     if (isHigh) {
       bleScale.latest = { grams: r.grams, stable: r.stable };
       liveTxt = 'Live weight: ' + r.grams + ' g · ' + (r.stable ? 'stable' : 'unstable') + (r.rangeMode === 'high-range' ? ' · hi-range' : '');
-      dbgTxt = _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '');
+      dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '');
     } else {
-      dbgTxt = 'frame ignored (' + (r.reason || 'low-confidence') + ')';
+      dbgTxt = devPfx + 'frame ignored: ' + (r.reason || 'low-confidence') + ' [' + r.confidence + ']';
     }
     // Mirror onto BOTH surfaces; only the visible one is on screen.
     for (var j = 0; j < _BLE_SURFACES.length; j++) {
@@ -3266,25 +3287,51 @@ function _bleOnFrame(ev) {
     }
   } catch (_) { /* never break manual entry */ }
 }
-function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _bleSetDisconnected(); _bleStatus('Not connected'); }
-async function _bleConnect() {
+function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _bleSetDisconnected(); _bleStatus('Not connected'); _bleClearDbg(); }
+// allDevices=false → filter by FFF0 (only scales advertising it appear).
+// allDevices=true  → acceptAllDevices fallback for scales that don't advertise FFF0.
+async function _bleConnect(allDevices) {
   if (!navigator.bluetooth) return;
   try {
-    _bleStatus('requesting…');
-    var device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SCALE_BLE_SVC] }], optionalServices: [SCALE_BLE_SVC] });
+    _bleStatus('opening device chooser…');
+    _bleDbg('stage: chooser' + (allDevices ? ' (all BLE devices)' : ' (FFF0 scales)'));
+    var opts = allDevices
+      ? { acceptAllDevices: true, optionalServices: [SCALE_BLE_SVC] }
+      : { filters: [{ services: [SCALE_BLE_SVC] }], optionalServices: [SCALE_BLE_SVC] };
+    var device = await navigator.bluetooth.requestDevice(opts);
     bleScale.device = device;
     device.addEventListener('gattserverdisconnected', _bleOnDisconnect);
     _bleStatus('connecting…');
+    _bleDbg('stage: connecting · ' + (device.name || 'device'));
     var server = await device.gatt.connect(); bleScale.server = server;
-    var service = await server.getPrimaryService(SCALE_BLE_SVC);
-    var ch = await service.getCharacteristic(SCALE_BLE_CHR);
+    var service;
+    try { service = await server.getPrimaryService(SCALE_BLE_SVC); }
+    catch (svcErr) {
+      _bleStatus('Selected device does not expose scale service FFF0');
+      _bleDbg('FFF0 not found on "' + (device.name || 'device') + '" — pick the scale, or use “all BLE devices” (' + (svcErr && svcErr.name || 'error') + ')');
+      try { if (device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
+      bleScale.connected = false; _bleResetButtons();
+      return;
+    }
+    _bleDbg('stage: service FFF0 found · ' + (device.name || 'device'));
+    var ch;
+    try { ch = await service.getCharacteristic(SCALE_BLE_CHR); }
+    catch (chErr) {
+      _bleStatus('Scale service found but notify characteristic FFF1 is missing');
+      _bleDbg('FFF1 not found (' + (chErr && chErr.name || 'error') + ')');
+      try { if (device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (_) {}
+      bleScale.connected = false; _bleResetButtons();
+      return;
+    }
+    _bleDbg('stage: characteristic FFF1 found');
     await ch.startNotifications();
     ch.addEventListener('characteristicvaluechanged', _bleOnFrame);
-    bleScale.char = ch;
+    bleScale.char = ch; bleScale.gotFrame = false;
     _bleSetConnected(device.name || '');
+    _bleDbg('stage: notifications started — waiting for frames · ' + (device.name || 'device'));
   } catch (e) {
-    if (e && e.name === 'NotFoundError') { _bleStatus('Not connected'); }   // user cancelled the chooser
-    else { _bleStatus('connect failed — manual entry still works'); }
+    if (e && e.name === 'NotFoundError') { _bleStatus('Not connected'); _bleDbg('no device selected (cancelled or none found)'); }
+    else { _bleStatus('connect failed — manual entry still works'); _bleDbg('connect error: ' + (e && e.name || 'unknown')); }
     _bleSetDisconnected();
   }
 }
@@ -3339,6 +3386,8 @@ if ($('qm-ble-connect')) $('qm-ble-connect').addEventListener('click', () => { t
 if ($('qm-ble-use')) $('qm-ble-use').addEventListener('click', () => { try { _bleUseLatest(); } catch (_) {} });
 if ($('rf-ble-connect')) $('rf-ble-connect').addEventListener('click', () => { try { if (bleScale.connected) _bleDisconnect(); else _bleConnect(); } catch (_) {} });
 if ($('rf-ble-use')) $('rf-ble-use').addEventListener('click', () => { try { _bleUseLatestReturn(); } catch (_) {} });
+if ($('qm-ble-all')) $('qm-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
+if ($('rf-ble-all')) $('rf-ble-all').addEventListener('click', () => { try { _bleConnect(true); } catch (_) {} });
 if ($('qm-add'))   $('qm-add').addEventListener('click', qtyModalAdd);
 if ($('qm-cancel')) $('qm-cancel').addEventListener('click', () => { closeQtyModal(); try { statusOn('save-status', 'Cancelled — nothing added', 'info'); } catch (_) {} });
 
