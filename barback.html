@@ -3341,7 +3341,12 @@ function _bleOnFrame(ev) {
       var live = $(p + '-live'), use = $(p + '-use'), dbg = $(p + '-debug');
       if (isHigh) {
         if (live) { live.textContent = liveTxt; live.style.display = ''; }
-        if (use) use.style.display = '';
+        // STABLE_GUARD — only allow "Use latest stable weight" on a stable frame.
+        if (use) {
+          use.style.display = '';
+          if (r.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
+          else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
+        }
       }
       if (dbg) { dbg.textContent = dbgTxt; dbg.style.display = ''; }
     }
@@ -4071,7 +4076,10 @@ function updateRemainingDisplay() {
   const el = $('remaining-display'); if (!el) return;
   if (!state.selectedItemId) { el.textContent = ''; return; }
   const w = normalizeWeightG(($('weight-g-input') && $('weight-g-input').value) || '');
-  const prof = WeightProfiles.getForItem(profileKeyForSelectedItem());
+  // PARTIAL_CALC — resolve DB bottle profile first, then local override (was
+  // local-only via WeightProfiles.getForItem, so DB profiles never showed on the
+  // main form). Matches the scan sheet (_qmUpdateRemaining) and the Add path.
+  const prof = resolveBottleProfile(_selectedItemObj()).profile;
   if (!prof) {
     // Scale V3 — weight captured but no profile → REVIEW REQUIRED (matches the
     // [WEIGHT_PROFILE_NEEDED=true] note tag emitted at submit).
