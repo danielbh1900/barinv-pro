@@ -3496,7 +3496,8 @@ function _bleUseLatestMain() {
 //  buildSupabaseClient → needs window.supabase) is provably unaffected.
 // ════════════════════════════════════════════════════════════════════
 var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0,
-  subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '' };
+  subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '',
+  httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', pollTimer: null };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
@@ -3522,6 +3523,8 @@ function _bridgeRenderDiag() {
   if (bridge.lastPubTs) sl += ' · last ' + bridge.lastPubTs + ' · ' + bridge.lastPubGrams + 'g ' + (bridge.lastPubStable ? 'stable' : 'unstable');
   lines.push(sl);
   if (bridge.pubError) lines.push('⚠ Publish: ' + bridge.pubError);
+  if (bridge.lastHttpTs) lines.push('HTTP pub: ' + (bridge.httpOk ? 'ok' : ('err' + (bridge.httpErr ? ' (' + bridge.httpErr + ')' : ''))) + ' · last ' + bridge.lastHttpTs);
+  if (bridge.lastPollTs) lines.push('Poll: Rx ' + (bridge.pollRx || 0) + ' · last ' + bridge.lastPollTs);
   el.textContent = lines.join('\n');
   el.style.display = '';
 }
@@ -3578,9 +3581,15 @@ function _bridgeOnMessage(p) {
   if (!p || typeof p.grams !== 'number') return;
   if (bridge.publishing && !bridge.listening) return;   // a pure station ignores remote weights
   bridge.rxCount = (bridge.rxCount || 0) + 1; bridge.lastRxTs = _bridgeNow(); try { _bridgeRenderDiag(); } catch (_) {}
+  _bridgeApplyWeight(p, 'realtime');
+}
+// Shared receiver update — used by both Realtime broadcast and HTTP polling.
+// Sets bleScale.latest so the existing context-aware Use button fills the field.
+function _bridgeApplyWeight(p, source) {
+  if (!p || typeof p.grams !== 'number') return;
   bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '' };
   bleScale.latest = { grams: p.grams, stable: !!p.stable };
-  var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable');
+  var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable') + (source ? (' · via ' + source) : '');
   var u = $('bridge-update'); if (u) u.textContent = 'Last update: just now' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
   var s = $('bridge-station'); if (s) s.textContent = 'Station: ' + (p.station_id || '?');
   var use = $('bridge-use');
@@ -3589,6 +3598,40 @@ function _bridgeOnMessage(p) {
     if (p.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
     else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
   }
+}
+// HTTP bridge (polling fallback) — authenticated POST to the barback-scale-bridge
+// Edge function with the barback JWT. Edge derives venue/night from the JWT claims.
+async function _bridgeHttp(action, extra) {
+  if (!state.jwt || !supabaseCfg || !supabaseCfg.key) return null;
+  var base; try { base = functionsBase(); } catch (_) { base = null; }
+  if (!base) return null;
+  try {
+    var res = await fetch(base + '/barback-scale-bridge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': supabaseCfg.key, 'Authorization': 'Bearer ' + state.jwt },
+      body: JSON.stringify(Object.assign({ action: action }, extra || {})),
+    });
+    return await res.json().catch(function () { return null; });
+  } catch (_) { return null; }
+}
+async function _bridgeHttpPublish(payload) {
+  var r = await _bridgeHttp('publish', payload);
+  bridge.httpOk = !!(r && r.ok);
+  bridge.httpErr = (r && r.ok) ? null : ((r && r.error) ? String(r.error).slice(0, 40) : 'no response');
+  bridge.lastHttpTs = _bridgeNow();
+  try { _bridgeRenderDiag(); } catch (_) {}
+}
+// Receiver poll — runs every ~1s while listening; delivers weight over HTTPS even
+// when Realtime broadcast Rx stays 0 (iPhone/iPad).
+async function _bridgePollLatest() {
+  if (!bridge.listening) return;
+  var r = await _bridgeHttp('latest', {});
+  bridge.lastPollTs = _bridgeNow();
+  if (r && r.ok && r.weight && typeof r.weight.grams === 'number') {
+    bridge.pollRx = (bridge.pollRx || 0) + 1;
+    _bridgeApplyWeight(r.weight, 'poll');
+  }
+  try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeListen() {
   if (bridge.listening) { _bridgeStopListen(); return; }
@@ -3599,9 +3642,14 @@ async function _bridgeListen() {
   _bridgeStatus('Bridge: listening for station weight…');
   var r = $('bridge-recv'); if (r) r.style.display = '';
   var b = $('bridge-listen'); if (b) b.textContent = 'Stop listening';
+  // HTTPS polling fallback — reliable on iPhone/iPad even when Realtime Rx is 0.
+  if (bridge.pollTimer) { try { clearInterval(bridge.pollTimer); } catch (_) {} }
+  bridge.pollTimer = setInterval(function () { try { _bridgePollLatest(); } catch (_) {} }, 1000);
+  try { _bridgePollLatest(); } catch (_) {}   // fire once immediately
 }
 function _bridgeStopListen() {
   bridge.listening = false;
+  if (bridge.pollTimer) { try { clearInterval(bridge.pollTimer); } catch (_) {} bridge.pollTimer = null; }
   var r = $('bridge-recv'); if (r) r.style.display = 'none';
   var b = $('bridge-listen'); if (b) b.textContent = 'Listen to Scale Station';
   _bridgeStatus(bridge.publishing ? ('Scale station: publishing · ' + (bridge.stationId || '')) : 'Bridge: not listening');
@@ -3648,6 +3696,8 @@ function _bridgeMaybePublish(r, hex) {
     // channel.send resolves 'ok' | 'error' | 'timed out' — surface non-ok as the publish error.
     if (sp && sp.then) { sp.then(function (st2) { bridge.pubError = (st2 === 'ok') ? null : ('send → ' + st2); try { _bridgeRenderDiag(); } catch (_) {} }).catch(function (e) { bridge.pubError = 'send err: ' + (e && e.name || 'unknown'); try { _bridgeRenderDiag(); } catch (_) {} }); }
   } catch (e) { bridge.pubError = 'send threw: ' + (e && e.name || 'err'); /* never break weighing */ }
+  // ALSO publish over HTTPS to the Edge endpoint — the reliable path for iPhone/iPad.
+  try { _bridgeHttpPublish({ station_id: _bridgeStationId(), grams: r.grams, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() }); } catch (_) {}
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
