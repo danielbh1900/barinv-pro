@@ -218,7 +218,7 @@
                           border:1px solid #374151; border-radius:10px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
     .qty-sheet .qm-input { flex:1; height:58px; font-size:30px; font-weight:800; text-align:center; background:#1f2937;
                            color:#fff; border:1px solid #374151; border-radius:10px; }
-    .qty-sheet .qm-quick { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin-bottom:14px; }
+    .qty-sheet .qm-quick { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-bottom:14px; }
     .qty-sheet .qm-quick button { padding:12px 0; font-size:16px; font-weight:700; background:#1f2937; color:#cbd5e1;
                                   border:1px solid #374151; border-radius:8px; cursor:pointer; }
     .qty-sheet .qm-quick button:active { background:#064e3b; color:#6ee7b7; }
@@ -573,7 +573,7 @@
       <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
       <div class="checkbox-row">
         <input type="checkbox" id="rapid-mode">
-        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, auto-save qty=1</label>
+        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, ask quantity after each scan</label>
       </div>
       <input id="search-input" type="text" placeholder="or type barcode / name (or use HID scanner)..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
@@ -848,9 +848,8 @@
       <button type="button" data-q="1">1</button>
       <button type="button" data-q="2">2</button>
       <button type="button" data-q="3">3</button>
-      <button type="button" data-q="4">4</button>
-      <button type="button" data-q="6">6</button>
-      <button type="button" data-q="12">12</button>
+      <button type="button" data-q="5">5</button>
+      <button type="button" data-q="10">10</button>
     </div>
     <div class="qm-state-section" id="qm-state-section" style="margin:8px 0 2px;">
       <div style="font-size:11px;color:var(--muted);letter-spacing:0.04em;margin-bottom:4px;">BOTTLE STATE</div>
@@ -2598,6 +2597,11 @@ async function ensureZXing() {
 // by either route within DUPE_SCAN_WINDOW_MS is never double-added.
 function acceptDecodedCode(code, controls) {
   if (!code) return;
+  // SCAN_QTY (PLAN-2026-06-21) — while the quantity sheet is open for a scanned
+  // item (continuous mode), PAUSE the decode loop so the live camera can stay on
+  // without stacking scans behind the sheet. closeQtyModal() nulls qtyModalItem,
+  // which clears this gate → scanning resumes automatically (Add or Cancel).
+  if (state.qtyModalItem) return;
   const now = Date.now();
   const last = state.scannerCooldown[code] || 0;
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
@@ -2933,26 +2937,26 @@ async function onBarcodeScanned(code, controls) {
   }
 
   if (state.scannerContinuous) {
-    // RAPID / continuous — ADD TO REVIEW (qty=1) and KEEP the camera open so the
-    // next bottle can be scanned. Every side-effect is wrapped so a render/add
-    // error can NEVER bubble into the decode callback and freeze the loop (that
-    // was the "stuck after first scan" symptom). The per-barcode dupe lock
-    // (DUPE_SCAN_WINDOW_MS) auto-expires, so the SAME bottle can be rescanned
-    // after the window while immediate repeats stay suppressed. We stop NOTHING.
-    // Rapid = qty 1 per scan, via the SHARED core (Multi-Bar fan-out + draft
-    // refresh handled inside). Message states the actual qty, never the count.
-    let addRes;
-    try { addRes = addCurrentSelectionToReview({ item: it, qtyOverride: 1 }); }
-    catch (e) { addRes = { ok: false, error: (e && e.message) || 'add failed' }; }
-    let n = 0; try { n = Drafts.count(); } catch (_) {}
-    try {
-      showScannerToast(
-        (addRes && addRes.ok)
-          ? ('✓ Rapid Mode: qty 1 added · ' + it.name + (addRes.multi ? (' × ' + addRes.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''))
-          : '⚠ ' + ((addRes && addRes.error) || 'add failed') + ': ' + it.name,
-        (addRes && addRes.ok) ? 'ok' : 'warn'
-      );
-    } catch (_) {}
+    // SCAN_QTY (PLAN-2026-06-21) — continuous scanning now ASKS QUANTITY per scan
+    // (default 1) instead of auto-adding qty=1, then resumes. The camera stays
+    // live; the decode loop is paused via the state.qtyModalItem gate in
+    // acceptDecodedCode, and closing the sheet (Add or Cancel) clears that gate so
+    // the next bottle can be scanned immediately. Nothing is submitted here — the
+    // sheet's Add routes through the SHARED Review core (Multi-Bar fan-out + draft
+    // refresh handled inside). Pre-checks below must block BEFORE the sheet opens,
+    // mirroring the one-shot path; the per-barcode dupe lock (DUPE_SCAN_WINDOW_MS)
+    // still prevents an immediate re-scan of the same bottle. We stop NOTHING.
+    let blockMsg = null;
+    if (!state.selectedAction) blockMsg = 'Pick TAKEN or RETURN first';
+    else if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length === 0)
+      blockMsg = 'Select at least one bar first';
+    if (blockMsg) {
+      try { showScannerToast('⚠ ' + blockMsg, 'warn'); } catch (_) {}
+      return;   // stay open; nothing added, sheet not opened
+    }
+    try { showScannerToast('✓ ' + it.name + ' · set quantity…', 'ok'); } catch (_) {}
+    try { openQtyModal(it); } catch (_) {}   // gate pauses decodes; closeQtyModal resumes
+    return;
   } else {
     // SINGLE-SCAN — guard against a second decode firing during the close window.
     if (state.scannerClosing) return;
