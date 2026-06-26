@@ -3609,7 +3609,8 @@ function _weightUseScaleFill() {
 var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0,
   subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '',
   httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', lastPollStatus: '', lastPollErr: null, pollTimer: null,
-  wakeLock: null, lastPubMs: 0, startedMs: 0, watchTimer: null };
+  wakeLock: null, lastPubMs: 0, startedMs: 0, watchTimer: null,
+  heartbeatTimer: null, lastHeartbeatTs: '', lastHeartbeatErr: null, lastPubHex: '', lastPubConf: 'high', lastPubRange: '' };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
@@ -3871,7 +3872,8 @@ function _bridgeStationHealth() {
   el.style.display = '';
   var ageMs = bridge.lastPubMs ? (Date.now() - bridge.lastPubMs) : null;
   var idTxt = 'Station ' + (bridge.stationId || '') + ' · Pub ' + bridge.pubCount +
-    (bridge.lastPubTs ? (' · last ' + bridge.lastPubTs) : '');
+    (bridge.lastPubTs ? (' · last ' + bridge.lastPubTs) : '') +
+    (bridge.lastHeartbeatTs ? (' · hb ' + bridge.lastHeartbeatTs) : '');
   if (bridge.httpErr) {
     el.style.color = '#ff6b6b';
     el.textContent = '🔴 Publish error: ' + bridge.httpErr + ' — check connection / re-login.\n' + idTxt;
@@ -3883,8 +3885,38 @@ function _bridgeStationHealth() {
     el.textContent = '🔴 Station not publishing — keep screen awake or reconnect scale.\n' + idTxt;
   } else {
     el.style.color = '#34d399';
-    el.textContent = '🟢 Scale Station LIVE — publishing to iPhones.\nKeep this Android phone unlocked and Chrome open.\n' + idTxt;
+    el.textContent = '🟢 Scale Station LIVE — publishing to iPhones.\nHeartbeat keeping iPhone weight fresh. Keep this Android phone unlocked and Chrome open.\n' + idTxt;
   }
+}
+// SCALE_STATION_HEARTBEAT_V1 — the QN-KS scale stops emitting BLE frames once the
+// weight is stable/idle (or it sleeps), so the frame-driven _bridgeMaybePublish goes
+// silent and the bridge row hits its TTL → iPhone shows STALE. While the station is ON
+// and the scale is still connected, re-publish the LAST known weight every ~4s so the
+// bridge row stays fresh. Reuses _bridgeHttpPublish and the EXACT same payload shape —
+// no endpoint / payload / TTL / receiver change. Receiver stale rules stay strict.
+function _bridgeHeartbeatPublish() {
+  if (!bridge.publishing) return;        // station off → no heartbeat
+  if (!bleScale.connected) return;       // scale dropped → do NOT publish a fake-fresh value
+  var L = bleScale.latest;
+  if (!L || typeof L.grams !== 'number' || !isFinite(L.grams)) return;  // need a real last weight
+  try {
+    _bridgeHttpPublish({
+      station_id: _bridgeStationId(),
+      grams: L.grams,                    // already offset-corrected in _bleOnFrame
+      stable: !!L.stable,
+      raw_hex: bridge.lastPubHex || '',
+      decoder_confidence: bridge.lastPubConf || 'high',
+      range_mode: bridge.lastPubRange || '',
+      ts: new Date().toISOString()
+    });
+    bridge.pubCount = (bridge.pubCount || 0) + 1;
+    bridge.lastPubTs = _bridgeNow(); bridge.lastPubMs = Date.now();
+    bridge.lastPubGrams = L.grams; bridge.lastPubStable = !!L.stable;
+    bridge.lastHeartbeatTs = _bridgeNow(); bridge.lastHeartbeatErr = null;
+  } catch (e) {
+    bridge.lastHeartbeatErr = (e && e.message) ? String(e.message).slice(0, 40) : 'heartbeat error';
+  }
+  try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeStartStation() {
   if (bridge.publishing) { _bridgeStopStation(); return; }
@@ -3905,10 +3937,15 @@ async function _bridgeStartStation() {
   try { _bridgeStationHealth(); } catch (_) {}
   if (bridge.watchTimer) { try { clearInterval(bridge.watchTimer); } catch (_) {} }
   bridge.watchTimer = setInterval(function () { try { _bridgeStationHealth(); } catch (_) {} }, 1000);
+  // SCALE_STATION_HEARTBEAT_V1 — keep the bridge row fresh between BLE frames.
+  if (bridge.heartbeatTimer) { try { clearInterval(bridge.heartbeatTimer); } catch (_) {} }
+  bridge.heartbeatTimer = setInterval(function () { try { _bridgeHeartbeatPublish(); } catch (_) {} }, 4000);
+  try { _bridgeHeartbeatPublish(); } catch (_) {}   // fire once now if a weight already exists
 }
 function _bridgeStopStation() {
   bridge.publishing = false;
   if (bridge.watchTimer) { try { clearInterval(bridge.watchTimer); } catch (_) {} bridge.watchTimer = null; }
+  if (bridge.heartbeatTimer) { try { clearInterval(bridge.heartbeatTimer); } catch (_) {} bridge.heartbeatTimer = null; }
   _bridgeReleaseWakeLock(); try { _bridgeSetWakeHint(true); } catch (_) {}
   var b = $('bridge-start-station'); if (b) b.textContent = '📡 Publish to iPhones';
   var ss = $('bridge-station-status'); if (ss) ss.style.display = 'none';
@@ -3932,6 +3969,8 @@ function _bridgeMaybePublish(r, hex) {
   // raw_hex + decoder_confidence stay raw for diagnostics.
   var pubG = _scaleCorrect(r.grams);
   bridge.pubCount = (bridge.pubCount || 0) + 1; bridge.lastPubTs = _bridgeNow(); bridge.lastPubGrams = pubG; bridge.lastPubStable = !!r.stable;
+  // SCALE_STATION_HEARTBEAT_V1 — stash last frame's meta so the heartbeat can re-publish it.
+  bridge.lastPubHex = hex; bridge.lastPubConf = r.confidence; bridge.lastPubRange = r.rangeMode;
   // Realtime broadcast — best-effort, only when a channel is live (laptop receivers).
   if (bridge.channel) {
     try {
