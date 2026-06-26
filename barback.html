@@ -527,9 +527,10 @@
           <button type="button" id="bridge-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
         </div>
         <div id="bridge-station-row" style="display:none;margin-top:8px;border-top:1px solid #374151;padding-top:8px;">
-          <button type="button" id="bridge-start-station" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Start Scale Station</button>
-          <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;">Station: publishing…</div>
-          <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Connect the scale above first, then start the station to share its weight with iPhone barbacks on this event.</div>
+          <button type="button" id="bridge-start-station" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📡 Publish to iPhones</button>
+          <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;white-space:pre-line;">Station: publishing…</div>
+          <div id="bridge-wake-hint" style="display:none;margin-top:4px;font-size:11px;color:#f6c200;font-weight:600;">Keep this Android phone awake. Do not lock the screen.</div>
+          <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Scale connected? Tap “📡 Publish to iPhones” to share its weight with iPhone barbacks. Keep this Android phone unlocked and Chrome open.</div>
         </div>
         <div id="bridge-diag" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #2a3340;font-family:'Fira Mono',monospace;font-size:10px;color:#6b7280;line-height:1.55;white-space:pre-wrap;word-break:break-all;"></div>
       </div>
@@ -3607,7 +3608,8 @@ function _weightUseScaleFill() {
 // ════════════════════════════════════════════════════════════════════
 var bridge = { sb: null, client: null, channel: null, listening: false, publishing: false, latest: null, stationId: null, lastSent: 0,
   subStatus: '', pubCount: 0, lastPubTs: '', lastPubGrams: null, lastPubStable: null, pubError: null, rxCount: 0, lastRxTs: '',
-  httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', lastPollStatus: '', lastPollErr: null, pollTimer: null };
+  httpOk: null, httpErr: null, lastHttpTs: '', pollRx: 0, lastPollTs: '', lastPollStatus: '', lastPollErr: null, pollTimer: null,
+  wakeLock: null, lastPubMs: 0, startedMs: 0, watchTimer: null };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
@@ -3629,7 +3631,19 @@ function _bridgeRenderDiag() {
     'Channel: ' + _bridgeChanShort(),
     'Sub: ' + (bridge.subStatus || '—') + ' · Rx: ' + bridge.rxCount + (bridge.lastRxTs ? (' · last ' + bridge.lastRxTs) : ''),
   ];
-  var sl = 'Station: ' + (bridge.publishing ? ('ON · ' + (bridge.stationId || '')) : 'off') + ' · Pub: ' + bridge.pubCount;
+  var sl;
+  if (bridge.publishing) {
+    sl = 'Station: ON · ' + (bridge.stationId || '') + ' · Pub: ' + bridge.pubCount;
+  } else if (bridge.listening) {
+    var _rs = bridge.lastPollStatus || '—';
+    sl = (_rs === 'fresh') ? 'Remote Scale Station LIVE'
+      : (_rs === 'expired') ? 'Remote Scale Station STOPPED'
+      : (_rs === 'no_row') ? 'No Scale Station running for this night'
+      : (_rs === 'scope_mismatch') ? 'Scale Station on a DIFFERENT night'
+      : ('Remote station: ' + _rs);
+  } else {
+    sl = 'Station: off';
+  }
   if (bridge.lastPubTs) sl += ' · last ' + bridge.lastPubTs + ' · ' + bridge.lastPubGrams + 'g ' + (bridge.lastPubStable ? 'stable' : 'unstable');
   lines.push(sl);
   if (bridge.pubError) lines.push('⚠ Publish: ' + bridge.pubError);
@@ -3727,16 +3741,18 @@ function _bridgeShowNoWeight(reason, info) {
   bridge.latest = null; bleScale.latest = null;
   var w = $('bridge-weight'), u = $('bridge-update'), s = $('bridge-station'), use = $('bridge-use');
   if (reason === 'expired' && typeof stale.grams === 'number') {
-    if (w) w.textContent = 'Latest station weight: ' + stale.grams + ' g · STALE (' + stale.age_sec + 's old) — station stopped publishing';
-    if (u) u.textContent = 'Restart the laptop Scale Station and reconnect the scale';
-    if (s) s.textContent = 'Station: ' + (stale.station_id || '?') + ' (stale)';
+    var _ageS = Number(stale.age_sec) || 0;
+    var _ageTxt = _ageS >= 60 ? (Math.round(_ageS / 60) + ' min') : (_ageS + ' seconds');
+    if (w) w.textContent = 'Remote Scale Station stopped ' + _ageTxt + ' ago — last weight ' + stale.grams + ' g (stale, not usable)';
+    if (u) u.textContent = 'Restart the Android Scale Station phone (keep its screen awake) and reconnect the scale';
+    if (s) s.textContent = 'Station: ' + (stale.station_id || '?') + ' (stopped)';
   } else if (reason === 'scope_mismatch') {
-    if (w) w.textContent = 'Latest station weight: — · a station IS publishing, but for a DIFFERENT night' + (info.publishing_night_tail ? (' (…' + info.publishing_night_tail + ')') : '');
-    if (u) u.textContent = 'This device and the laptop Scale Station are on different nights — log both into the SAME night';
+    if (w) w.textContent = 'A Scale Station is running, but on a DIFFERENT night' + (info.publishing_night_tail ? (' (…' + info.publishing_night_tail + ')') : '');
+    if (u) u.textContent = 'Scale Station is running on another night — use the same night/login on both phones';
     if (s) s.textContent = 'Station: wrong night';
   } else if (reason === 'no_row') {
-    if (w) w.textContent = 'Latest station weight: — · no station publishing for this event';
-    if (u) u.textContent = 'Check the laptop Scale Station is running AND on the SAME night as this device';
+    if (w) w.textContent = 'No Scale Station is running for this night';
+    if (u) u.textContent = 'Start the Android Scale Station phone on the SAME night as this device';
     if (s) s.textContent = 'Station: —';
   } else if (reason === 'query_error') {
     if (w) w.textContent = 'Latest station weight: — · bridge query error';
@@ -3820,9 +3836,59 @@ function _bridgeStopListen() {
   _bridgeStatus(bridge.publishing ? ('Scale station: publishing · ' + (bridge.stationId || '')) : 'Bridge: not listening');
   _bridgeMaybeClose();
 }
+// SCALE_STATION_RELIABILITY_V1 — keep the Android phone awake while publishing and
+// surface station-publish health. UI/reliability only; no API / payload / TTL change.
+async function _bridgeAcquireWakeLock() {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.wakeLock && navigator.wakeLock.request) {
+      bridge.wakeLock = await navigator.wakeLock.request('screen');
+      try { bridge.wakeLock.addEventListener('release', function () { bridge.wakeLock = null; }); } catch (_) {}
+      return true;
+    }
+  } catch (_) { bridge.wakeLock = null; }
+  return false;
+}
+function _bridgeReleaseWakeLock() {
+  try { if (bridge.wakeLock) bridge.wakeLock.release(); } catch (_) {}
+  bridge.wakeLock = null;
+}
+function _bridgeSetWakeHint(ok) {
+  var h = $('bridge-wake-hint'); if (!h) return;
+  if (ok) { h.style.display = 'none'; }
+  else { h.style.display = ''; h.textContent = 'Keep this Android phone awake. Do not lock the screen.'; }
+}
+// The OS drops a screen wake lock whenever the page is hidden; re-acquire it when
+// the operator returns to the tab while the station is still publishing.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && bridge.publishing && !bridge.wakeLock) {
+    _bridgeAcquireWakeLock().then(function (ok) { try { _bridgeSetWakeHint(ok); } catch (_) {} });
+  }
+});
+// Station health badge — runs every 1s while publishing. Pure UI; reads existing counters.
+function _bridgeStationHealth() {
+  var el = $('bridge-station-status'); if (!el) return;
+  if (!bridge.publishing) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  var ageMs = bridge.lastPubMs ? (Date.now() - bridge.lastPubMs) : null;
+  var idTxt = 'Station ' + (bridge.stationId || '') + ' · Pub ' + bridge.pubCount +
+    (bridge.lastPubTs ? (' · last ' + bridge.lastPubTs) : '');
+  if (bridge.httpErr) {
+    el.style.color = '#ff6b6b';
+    el.textContent = '🔴 Publish error: ' + bridge.httpErr + ' — check connection / re-login.\n' + idTxt;
+  } else if (bridge.pubCount === 0) {
+    el.style.color = '#f6c200';
+    el.textContent = '🟡 Station is ON but not publishing yet — keep weight stable / check connection.\n' + idTxt;
+  } else if (ageMs !== null && ageMs > 5000) {
+    el.style.color = '#ff6b6b';
+    el.textContent = '🔴 Station not publishing — keep screen awake or reconnect scale.\n' + idTxt;
+  } else {
+    el.style.color = '#34d399';
+    el.textContent = '🟢 Scale Station LIVE — publishing to iPhones.\nKeep this Android phone unlocked and Chrome open.\n' + idTxt;
+  }
+}
 async function _bridgeStartStation() {
   if (bridge.publishing) { _bridgeStopStation(); return; }
-  if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then Start Scale Station'); return; }
+  if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then tap Publish to iPhones'); return; }
   if (!state.jwt) { _bridgeStatus('Log in first — station needs a session to publish'); return; }
   _bridgeStatus('Scale station: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
   // Realtime channel is best-effort (extra path for laptop receivers). HTTP publish
@@ -3830,13 +3896,21 @@ async function _bridgeStartStation() {
   // channel never subscribes — otherwise iPhone/iPad (HTTP-only) get nothing.
   try { await _bridgeEnsureChannel(); } catch (_) {}
   bridge.publishing = true;
-  _bridgeStatus('Scale station: publishing · ' + _bridgeStationId()); try { _bridgeRenderDiag(); } catch (_) {}
-  var b = $('bridge-start-station'); if (b) b.textContent = 'Stop Scale Station';
+  bridge.startedMs = Date.now(); bridge.pubCount = 0; bridge.lastPubMs = 0; bridge.httpErr = null;
+  var _wlOk = await _bridgeAcquireWakeLock(); try { _bridgeSetWakeHint(_wlOk); } catch (_) {}
+  _bridgeStationId();
+  _bridgeStatus('📡 Scale Station LIVE — publishing to iPhones'); try { _bridgeRenderDiag(); } catch (_) {}
+  var b = $('bridge-start-station'); if (b) b.textContent = '⏹ Stop Publishing';
   var ss = $('bridge-station-status'); if (ss) ss.style.display = '';
+  try { _bridgeStationHealth(); } catch (_) {}
+  if (bridge.watchTimer) { try { clearInterval(bridge.watchTimer); } catch (_) {} }
+  bridge.watchTimer = setInterval(function () { try { _bridgeStationHealth(); } catch (_) {} }, 1000);
 }
 function _bridgeStopStation() {
   bridge.publishing = false;
-  var b = $('bridge-start-station'); if (b) b.textContent = 'Start Scale Station';
+  if (bridge.watchTimer) { try { clearInterval(bridge.watchTimer); } catch (_) {} bridge.watchTimer = null; }
+  _bridgeReleaseWakeLock(); try { _bridgeSetWakeHint(true); } catch (_) {}
+  var b = $('bridge-start-station'); if (b) b.textContent = '📡 Publish to iPhones';
   var ss = $('bridge-station-status'); if (ss) ss.style.display = 'none';
   _bridgeStatus(bridge.listening ? 'Bridge: listening for station weight…' : 'Scale station: stopped');
   _bridgeMaybeClose();
@@ -3853,7 +3927,7 @@ function _bridgeMaybePublish(r, hex) {
   if (!r || r.confidence !== 'high') return;
   var now = Date.now();
   if (now - bridge.lastSent < 250) return;
-  bridge.lastSent = now;
+  bridge.lastSent = now; bridge.lastPubMs = now;
   // SCALE_OFFSET — publish CORRECTED grams (what iPhone/iPad receivers consume);
   // raw_hex + decoder_confidence stay raw for diagnostics.
   var pubG = _scaleCorrect(r.grams);
