@@ -5486,6 +5486,13 @@ function bleAvailable() {
 function refreshBleCard() {
   state.ble.available = bleAvailable();
   const card = $('ble-card');
+  // SCALE_NATIVE_BLE_ROUTE_FIX — when the QN-KS/Arboleaf iOS native adapter is
+  // active (nativeMode), the new main-ble panel ("Connect Scale (iOS Native)")
+  // owns scale weighing. Hide this legacy ESP32 "SCALE" card (namePrefix:'BARINV'
+  // / ba51e001) so the barback can never trigger the old "No BARINV scale found"
+  // scanner. Web Bluetooth (_bleConnect supported path) and plain-Safari are
+  // unaffected — they never reach nativeMode.
+  if (typeof bleScale !== 'undefined' && bleScale && bleScale.nativeMode) { card.style.display = 'none'; return; }
   if (!state.ble.available) { card.style.display = 'none'; return; }
   card.style.display = '';
   card.classList.toggle('connected', state.ble.connected);
@@ -5494,6 +5501,15 @@ function refreshBleCard() {
   $('ble-weight').style.display = state.ble.connected ? '' : 'none';
 }
 $('ble-toggle').addEventListener('click', async () => {
+  // SCALE_NATIVE_BLE_ROUTE_FIX — inside the BARINV app the QN-KS/Arboleaf native
+  // adapter owns scale weighing. If this legacy card is ever shown in nativeMode,
+  // route to _bleConnect(false) → _nativeScaleConnect (FFF0) and NEVER the legacy
+  // BARINV/ESP32 scanner. Mirrors the main-ble-connect handler.
+  if (typeof bleScale !== 'undefined' && bleScale && bleScale.nativeMode) {
+    try { if (bleScale.connected) { _bleDisconnect(); } else { await _bleConnect(false); } }
+    catch (e) { statusOn('save-status', 'Scale error: ' + (e && e.message || e), 'err'); }
+    return;
+  }
   if (!state.ble.available) return;
   if (state.ble.connected) { await bleDisconnect(); return; }
   try { await bleConnect(); }
