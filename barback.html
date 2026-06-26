@@ -3610,7 +3610,106 @@ function _nativeValueToDataView(v) {
   } catch (_) {}
   return null;
 }
-var _nativeScale = { deviceId: null, listener: null, connecting: false };
+var _nativeScale = { deviceId: null, listener: null, connecting: false, subs: [], watchdog: null };
+// SCALE_NATIVE_NOTIFY_FIX_START — QN-KS/Arboleaf scales stream weight on a vendor
+// characteristic that is not always FFF1 (commonly AE02 on service AE00). The
+// previous adapter subscribed to FFF1 only, so a scale that notifies elsewhere
+// connected + "subscribed" but delivered ZERO frames to JS. We now discover
+// services and subscribe to EVERY notify/indicate-capable characteristic (plus the
+// known FFF1 / AE02 candidates), funnel them through one central handler, expose
+// debug counters, and run a watchdog. Mirrors Admin index.html's bleDbSubscribeAll.
+// Decoder (_bleDecodeFrame) and Web Bluetooth / Safari / bridge paths are untouched.
+var SCALE_BLE_SVC2 = '0000ae00-0000-1000-8000-00805f9b34fb';   // Arboleaf/QN vendor service
+var SCALE_BLE_CHR2 = '0000ae02-0000-1000-8000-00805f9b34fb';   // vendor notify characteristic
+var _nativeScaleNotify = { count: 0, lastAt: 0, lastShape: '', mode: '' };
+
+// Central notification handler. Counts every event, records the value shape,
+// converts to a DataView, and forwards to the EXISTING _bleOnFrame (decoder
+// unchanged). All native characteristics route through here.
+function _nativeScaleHandleNotification(input, sourceLabel) {
+  try {
+    _nativeScaleNotify.count++;
+    _nativeScaleNotify.lastAt = Date.now();
+    var raw = (input && input.value != null) ? input.value : input;
+    var shape = (raw == null) ? 'null'
+      : (typeof raw === 'string') ? ('hexstr(' + raw.length + ')')
+      : (raw && raw.byteLength != null && typeof raw.getUint8 === 'function') ? ('DataView(' + raw.byteLength + ')')
+      : (raw instanceof ArrayBuffer) ? ('ArrayBuffer(' + raw.byteLength + ')')
+      : (raw && Array.isArray(raw.numbers)) ? ('numbers(' + raw.numbers.length + ')')
+      : (Array.isArray(raw)) ? ('array(' + raw.length + ')')
+      : (typeof raw);
+    _nativeScaleNotify.lastShape = (sourceLabel ? (sourceLabel + ':') : '') + shape;
+    var dv = _nativeValueToDataView(raw);
+    if (dv) { bleScale.gotFrame = true; _bleOnFrame({ target: { value: dv } }); }
+    _nativeScaleRenderDebug();
+  } catch (_) {}
+}
+
+// Visible debug: notifyCount, lastNotifyAt (relative), value shape, subscription mode.
+function _nativeScaleRenderDebug() {
+  try {
+    var n = _nativeScaleNotify;
+    var ago = n.lastAt ? ((Math.round((Date.now() - n.lastAt) / 100) / 10) + 's ago') : '—';
+    try { window.__nativeScaleNotify = n; } catch (_) {}
+    _bleDbg('iOS native BLE · ' + (n.mode || 'subscribed') +
+      ' · notifyCount=' + n.count + ' · last=' + ago + ' · shape=' + (n.lastShape || '—'));
+  } catch (_) {}
+}
+
+// Discover services and subscribe to all notify/indicate characteristics, plus the
+// known FFF1 / AE02 scale candidates. addListener(key) FIRST, then startNotifications
+// — the installed @capacitor-community/bluetooth-le pattern (v8). Returns active subs.
+async function _nativeScaleSubscribe(Ble, devId) {
+  var subs = [];
+  var raw = [];
+  try { raw = await Ble.getServices({ deviceId: devId }); } catch (_) {}
+  var services = Array.isArray(raw) ? raw : ((raw && raw.services) || []);
+  var wanted = [];
+  function pushWanted(svc, chr) {
+    if (!svc || !chr) return;
+    svc = String(svc).toLowerCase(); chr = String(chr).toLowerCase();
+    if (!wanted.some(function (w) { return w.svc === svc && w.chr === chr; })) wanted.push({ svc: svc, chr: chr });
+  }
+  services.forEach(function (s) {
+    var su = (s && (s.uuid || s.service)) || '';
+    ((s && s.characteristics) || []).forEach(function (c) {
+      var p = (c && c.properties) || {};
+      if (p.notify || p.indicate) pushWanted(su, (c && (c.uuid || c.characteristic)));
+    });
+  });
+  // Always try the known scale candidates even if discovery missed/empty.
+  pushWanted(SCALE_BLE_SVC, SCALE_BLE_CHR);
+  pushWanted(SCALE_BLE_SVC2, SCALE_BLE_CHR2);
+
+  for (var i = 0; i < wanted.length; i++) {
+    var w = wanted[i];
+    var label = (w.chr.length >= 8) ? w.chr.slice(4, 8).toUpperCase() : w.chr;
+    try {
+      var key = 'notification|' + devId + '|' + w.svc + '|' + w.chr;
+      var listener = await Ble.addListener(key, (function (lbl) {
+        return function (ev) { _nativeScaleHandleNotification(ev, lbl); };
+      })(label));
+      await Ble.startNotifications({ deviceId: devId, service: w.svc, characteristic: w.chr });
+      subs.push({ svc: w.svc, chr: w.chr, listener: listener });
+    } catch (_) { /* characteristic not subscribable on this device — skip */ }
+  }
+  return subs;
+}
+
+// Watchdog — if subscribed but no frames arrive within the window, say so plainly.
+function _nativeScaleStartWatchdog() {
+  try { if (_nativeScale.watchdog) clearTimeout(_nativeScale.watchdog); } catch (_) {}
+  var startCount = _nativeScaleNotify.count;
+  _nativeScale.watchdog = setTimeout(function () {
+    if (bleScale.connected && _nativeScaleNotify.count === startCount) {
+      _bleSetMode('subscribed · no frames');
+      _bleStatus('Subscribed, but no scale frames received.');
+      _bleDbg('Subscribed, but no scale frames received. ' + (_nativeScaleNotify.mode || '') +
+        ' — place weight on the scale or reconnect.');
+    }
+  }, 8000);
+}
+// SCALE_NATIVE_NOTIFY_FIX_END
 async function _nativeScaleConnect(allDevices) {
   var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
   if (!Ble) { _bleStatus('native BLE unavailable'); return; }
@@ -3628,15 +3727,17 @@ async function _nativeScaleConnect(allDevices) {
     if (!devId) { _bleStatus('no scale selected'); _bleSetMode('native: not connected'); return; }
     _nativeScale.deviceId = devId;
     await Ble.connect({ deviceId: devId, timeout: 12000 });
-    var key = 'notification|' + devId + '|' + SCALE_BLE_SVC + '|' + SCALE_BLE_CHR;
-    _nativeScale.listener = await Ble.addListener(key, function (ev) {
-      try { var dv = _nativeValueToDataView(ev && ev.value); if (dv) _bleOnFrame({ target: { value: dv } }); } catch (_) {}
-    });
-    await Ble.startNotifications({ deviceId: devId, service: SCALE_BLE_SVC, characteristic: SCALE_BLE_CHR });
+    // SCALE_NATIVE_NOTIFY_FIX — discover + subscribe to ALL notify-capable chars
+    // (not just FFF1) so QN-KS/Arboleaf weight frames are actually delivered.
+    _nativeScaleNotify.count = 0; _nativeScaleNotify.lastAt = 0; _nativeScaleNotify.lastShape = '';
+    _nativeScale.subs = await _nativeScaleSubscribe(Ble, devId);
+    _nativeScaleNotify.mode = 'subs=' + _nativeScale.subs.length +
+      ' [' + _nativeScale.subs.map(function (s) { return (s.chr.length >= 8) ? s.chr.slice(4, 8).toUpperCase() : s.chr; }).join(',') + ']';
     bleScale.nativeSource = 'ios_native_ble'; bleScale.gotFrame = false;
     _bleSetConnected((device && device.name) || 'QN-KS');
-    _bleSetMode('iOS native BLE · notifications started — waiting for frames');
-    _bleDbg('Source: iOS native BLE · connected · waiting for frames · ' + ((device && device.name) || 'scale'));
+    _bleSetMode('iOS native BLE · ' + _nativeScaleNotify.mode + ' — waiting for frames');
+    _bleDbg('Source: iOS native BLE · connected · ' + _nativeScaleNotify.mode + ' · waiting for frames · ' + ((device && device.name) || 'scale'));
+    _nativeScaleStartWatchdog();
   } catch (e) {
     _bleStatus('native connect failed — manual entry still works');
     _bleSetMode('native: not connected');
@@ -3646,6 +3747,15 @@ async function _nativeScaleConnect(allDevices) {
 }
 async function _nativeScaleDisconnect() {
   var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
+  try { if (_nativeScale.watchdog) clearTimeout(_nativeScale.watchdog); } catch (_) {}
+  _nativeScale.watchdog = null;
+  // SCALE_NATIVE_NOTIFY_FIX — tear down every subscription opened by _nativeScaleSubscribe.
+  var subs = _nativeScale.subs || [];
+  for (var i = 0; i < subs.length; i++) {
+    try { if (subs[i].listener && typeof subs[i].listener.remove === 'function') await subs[i].listener.remove(); } catch (_) {}
+    try { if (Ble && _nativeScale.deviceId) await Ble.stopNotifications({ deviceId: _nativeScale.deviceId, service: subs[i].svc, characteristic: subs[i].chr }); } catch (_) {}
+  }
+  _nativeScale.subs = [];
   try { if (_nativeScale.listener && typeof _nativeScale.listener.remove === 'function') await _nativeScale.listener.remove(); } catch (_) {}
   _nativeScale.listener = null;
   try { if (Ble && _nativeScale.deviceId) await Ble.disconnect({ deviceId: _nativeScale.deviceId }); } catch (_) {}
