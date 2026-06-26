@@ -2089,7 +2089,7 @@ function applyActionTint() {
   // iPhone (no Web Bluetooth) and for TAKEN. typeof guard: bleScale may not be
   // assigned yet on the very first init call (var-hoisted as undefined).
   var _rfRet = (state.selectedAction === 'RETURNED');
-  var _rfSup = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported);
+  var _rfSup = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode));
   var _rfBle = $('rf-ble'); if (_rfBle) _rfBle.style.display = (_rfRet && _rfSup) ? '' : 'none';                // connect widget (Android/desktop Chrome)
   var _rfHint = $('rf-ble-hint'); if (_rfHint) _rfHint.style.display = (_rfRet && !_rfSup) ? '' : 'none';       // manual hint (iPhone)
 }
@@ -3033,7 +3033,7 @@ function _qmSetState(stateVal) {
   const wrap = $('qm-weight-wrap'); if (wrap) wrap.style.display = (stateVal === 'PARTIAL') ? '' : 'none';
   // SCALE_BLE — capability-gated. Android/desktop Chrome → connect widget; iPhone (unsupported) → manual hint.
   const _blePartial = (stateVal === 'PARTIAL');
-  const _bleSup = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported);
+  const _bleSup = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode));
   const _bleEl = $('qm-ble'); if (_bleEl) _bleEl.style.display = (_blePartial && _bleSup) ? '' : 'none';
   const _bleHintEl = $('qm-ble-hint'); if (_bleHintEl) _bleHintEl.style.display = (_blePartial && !_bleSup) ? '' : 'none';
   if (stateVal !== 'PARTIAL') { const w = $('qm-weight'); if (w) w.value = ''; }
@@ -3461,6 +3461,7 @@ function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _ble
 // allDevices=false → filter by FFF0 (only scales advertising it appear).
 // allDevices=true  → acceptAllDevices fallback for scales that don't advertise FFF0.
 async function _bleConnect(allDevices) {
+  if (bleScale.nativeMode) { return _nativeScaleConnect(allDevices); }   // SCALE_NATIVE_BLE — iOS in-app
   if (!navigator.bluetooth) return;
   try {
     _bleStatus('opening device chooser…');
@@ -3513,6 +3514,7 @@ async function _bleConnect(allDevices) {
   }
 }
 function _bleDisconnect() {
+  if (bleScale.nativeMode) { _nativeScaleDisconnect(); return; }   // SCALE_NATIVE_BLE — iOS in-app
   try { if (bleScale.device && bleScale.device.gatt && bleScale.device.gatt.connected) bleScale.device.gatt.disconnect(); } catch (_) {}
   _bleOnDisconnect();
 }
@@ -3552,7 +3554,7 @@ function _bleUseLatestMain() {
 // only on a stable reading. Called from _bleOnFrame and connect/disconnect.
 function _weightUseScaleSync() {
   var btn = $('weight-use-scale'); if (!btn) return;
-  var connected = !!(typeof bleScale !== 'undefined' && bleScale && bleScale.supported && bleScale.connected);
+  var connected = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode) && bleScale.connected);
   var hasStable = connected && !!(bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number');
   btn.style.display = connected ? '' : 'none';
   btn.disabled = !hasStable;
@@ -3571,20 +3573,108 @@ function _weightUseScaleFill() {
 }
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
 // so supported stays false and the UI never shows (and never errors).
+// ════════════════════════════════════════════════════════════════════
+// SCALE_NATIVE_BLE (Option B) — direct iPhone scale INSIDE the BARINV iOS app.
+// Plain Safari has no navigator.bluetooth; the Capacitor app exposes
+// window.Capacitor.Plugins.BluetoothLe. Connect the QN-KS/Arboleaf scale over
+// FFF0/FFF1 natively and funnel raw frames into the EXISTING _bleOnFrame —
+// reusing _bleDecodeFrame, software stability, offset, Use-latest-stable,
+// tare/full, remaining %, Add to Review, Submit All. UUIDs unchanged.
+// Plain Safari (no Capacitor) is unaffected: stays manual/bridge fallback.
+// ════════════════════════════════════════════════════════════════════
+function _nativeScaleAvailable() {
+  return !(typeof navigator !== 'undefined' && navigator.bluetooth)
+    && !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe);
+}
+// Normalize a Capacitor BluetoothLe notification value to a DataView of raw bytes.
+function _nativeValueToDataView(v) {
+  try {
+    if (v == null) return null;
+    if (v.byteLength != null && typeof v.getUint8 === 'function') return v;                 // DataView
+    if (v instanceof ArrayBuffer) return new DataView(v);                                   // ArrayBuffer
+    if (v && Array.isArray(v.numbers)) return new DataView(Uint8Array.from(v.numbers).buffer);
+    if (Array.isArray(v)) return new DataView(Uint8Array.from(v).buffer);                   // number[]
+    if (typeof v !== 'string' && typeof v.length === 'number') return new DataView(Uint8Array.from(v).buffer); // Uint8Array-like
+    if (typeof v === 'string') {
+      var s = v.trim(), b, i;
+      if (/^[0-9a-fA-F]+$/.test(s) && s.length % 2 === 0) {                                 // hex
+        b = new Uint8Array(s.length / 2);
+        for (i = 0; i < b.length; i++) b[i] = parseInt(s.substr(i * 2, 2), 16);
+        return new DataView(b.buffer);
+      }
+      var bin = atob(s.replace(/\s+/g, ''));                                                // base64
+      b = new Uint8Array(bin.length);
+      for (i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+      return new DataView(b.buffer);
+    }
+  } catch (_) {}
+  return null;
+}
+var _nativeScale = { deviceId: null, listener: null, connecting: false };
+async function _nativeScaleConnect(allDevices) {
+  var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
+  if (!Ble) { _bleStatus('native BLE unavailable'); return; }
+  if (_nativeScale.connecting) return;
+  if (bleScale.connected) { try { await _nativeScaleDisconnect(); } catch (_) {} return; }
+  _nativeScale.connecting = true;
+  try {
+    _bleStatus('connecting (iOS native)…'); _bleSetMode(allDevices ? 'native: all BLE devices' : 'native: scanning FFF0');
+    _bleDbg('Source: iOS native BLE · opening device picker' + (allDevices ? ' (all devices)' : ' (FFF0 scales)'));
+    try { await Ble.initialize({ androidNeverForLocation: true }); } catch (_) {}
+    var opts = allDevices ? { optionalServices: [SCALE_BLE_SVC] }
+                          : { services: [SCALE_BLE_SVC], optionalServices: [SCALE_BLE_SVC] };
+    var device = await Ble.requestDevice(opts);                 // native picker → { deviceId, name }
+    var devId = device && (device.deviceId || device.id);
+    if (!devId) { _bleStatus('no scale selected'); _bleSetMode('native: not connected'); return; }
+    _nativeScale.deviceId = devId;
+    await Ble.connect({ deviceId: devId, timeout: 12000 });
+    var key = 'notification|' + devId + '|' + SCALE_BLE_SVC + '|' + SCALE_BLE_CHR;
+    _nativeScale.listener = await Ble.addListener(key, function (ev) {
+      try { var dv = _nativeValueToDataView(ev && ev.value); if (dv) _bleOnFrame({ target: { value: dv } }); } catch (_) {}
+    });
+    await Ble.startNotifications({ deviceId: devId, service: SCALE_BLE_SVC, characteristic: SCALE_BLE_CHR });
+    bleScale.nativeSource = 'ios_native_ble'; bleScale.gotFrame = false;
+    _bleSetConnected((device && device.name) || 'QN-KS');
+    _bleSetMode('iOS native BLE · notifications started — waiting for frames');
+    _bleDbg('Source: iOS native BLE · connected · waiting for frames · ' + ((device && device.name) || 'scale'));
+  } catch (e) {
+    _bleStatus('native connect failed — manual entry still works');
+    _bleSetMode('native: not connected');
+    _bleDbg('native connect error: ' + ((e && (e.message || e.name)) || 'unknown'));
+    try { await _nativeScaleDisconnect(); } catch (_) {}
+  } finally { _nativeScale.connecting = false; }
+}
+async function _nativeScaleDisconnect() {
+  var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
+  try { if (_nativeScale.listener && typeof _nativeScale.listener.remove === 'function') await _nativeScale.listener.remove(); } catch (_) {}
+  _nativeScale.listener = null;
+  try { if (Ble && _nativeScale.deviceId) await Ble.disconnect({ deviceId: _nativeScale.deviceId }); } catch (_) {}
+  _nativeScale.deviceId = null; bleScale.nativeSource = null;
+  try { _bleSetDisconnected(); } catch (_) {}
+}
 (function _bleInitSupport() {
   try {
     // Gate on EXISTENCE of navigator.bluetooth only — NEVER on getAvailability(),
     // which can return false on devices we still need to test and would wrongly
     // hide the UI. If Bluetooth is off, Connect simply fails with a clear message.
     bleScale.supported = !!(typeof navigator !== 'undefined' && navigator.bluetooth);
-    var mp = $('main-ble'); if (mp) mp.style.display = bleScale.supported ? '' : 'none';
-    var mh = $('main-ble-hint'); if (mh) mh.style.display = bleScale.supported ? 'none' : '';
-    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = bleScale.supported ? '' : 'none';   // station = a device with local BLE
+    // SCALE_NATIVE_BLE — inside the BARINV iOS app, Safari has no navigator.bluetooth
+    // but Capacitor BluetoothLe is present → enable the SAME scale UI, driven natively.
+    bleScale.nativeMode = !bleScale.supported && _nativeScaleAvailable();
+    var _scaleUi = bleScale.supported || bleScale.nativeMode;
+    var mp = $('main-ble'); if (mp) mp.style.display = _scaleUi ? '' : 'none';
+    var mh = $('main-ble-hint'); if (mh) mh.style.display = _scaleUi ? 'none' : '';
+    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = _scaleUi ? '' : 'none';   // station = a device with local BLE (Web BT or iOS native)
     // Desktop with no Web Bluetooth (Safari/Firefox/Arc/Atlas, or Chrome with BLE
     // disabled) → a station CANNOT run here. Show a clear "use Chrome/Edge" CTA.
     // Receiver mode (Listen to Scale Station) is unaffected and stays available.
     var cta = $('main-ble-desktop-cta');
-    if (cta) cta.style.display = (!bleScale.supported && _bleDeviceType() === 'Desktop') ? '' : 'none';
+    if (cta) cta.style.display = (!_scaleUi && _bleDeviceType() === 'Desktop') ? '' : 'none';
+    if (bleScale.nativeMode) {
+      var nst = $('main-ble-status'); if (nst) nst.textContent = 'Scale: Not connected · iOS native BLE available';
+      var ncb = $('main-ble-connect'); if (ncb) ncb.textContent = '📶 Connect Scale (iOS Native)';
+      try { _bleSetMode('iOS native BLE available'); } catch (_) {}
+    }
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
