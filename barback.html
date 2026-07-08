@@ -1081,7 +1081,7 @@ const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
 //                 the token carries session_id; else fall back to Phase 2.
 // 'phase3'      — require Phase 3; refuse Phase 2 test tokens.
 // 'phase2_test' — never call the Edge Function (legacy test-only mode).
-const AUTH_MODE = 'auto';
+const AUTH_MODE = 'phase3';
 const PHASE3_SESSION_KEEPALIVE_MS = 60_000;
 
 // ════════════════════════════════════════════════════════════════════
