@@ -135,6 +135,39 @@
     /* Two-column bars|staff layout on wide screens; stacked on mobile. */
     .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
     @media (max-width:700px) { .cols-2 { grid-template-columns:1fr; gap:0; } }
+    .opening-par-card {
+      margin:16px 0 12px; padding:14px; background:#11100a;
+      border:1px solid #713f12; border-radius:9px;
+    }
+    .opening-par-card h3 { margin:0 0 10px; color:#fbbf24; }
+    .opening-par-actions { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+    .opening-par-actions .btn { width:auto; flex:1; min-width:150px; margin:0; padding:11px; }
+    .opening-par-list {
+      max-height:420px; overflow-y:auto; margin:10px 0;
+      border:1px solid #292315; border-radius:7px; background:#090909;
+    }
+    .opening-par-item {
+      display:grid; grid-template-columns:minmax(0,1fr) 42px 72px 42px;
+      gap:7px; align-items:center; padding:9px;
+      border-bottom:1px solid #201c13;
+    }
+    .opening-par-item:last-child { border-bottom:none; }
+    .opening-par-item-name { min-width:0; font-size:13px; color:#f5f5f5; }
+    .opening-par-item-meta { display:block; margin-top:2px; color:#777; font-size:10px; }
+    .opening-par-step {
+      width:42px; height:42px; padding:0; border:1px solid #4b3a17;
+      border-radius:7px; background:#211a0d; color:#fbbf24;
+      font-size:22px; font-weight:800; cursor:pointer;
+    }
+    input.opening-par-qty { padding:9px 5px; text-align:center; font-size:16px; }
+    .opening-par-summary {
+      margin:8px 0; padding:10px; background:#15130d; border:1px solid #4b3a17;
+      border-radius:6px; color:#fde68a; font-size:12px; line-height:1.5;
+    }
+    @media (max-width:420px) {
+      .opening-par-item { grid-template-columns:minmax(0,1fr) 38px 64px 38px; gap:5px; }
+      .opening-par-step { width:38px; height:40px; }
+    }
     .small { font-size:11px; color:#888; line-height:1.5; }
     .muted { color:#666; }
     code { background:#000; padding:1px 6px; border-radius:3px; color:#fbbf24; font-size:11px; }
@@ -329,6 +362,31 @@
             </div>
           </div>
         </div>
+        <section class="opening-par-card" id="c-opening-par-card">
+          <h3>OPENING STOCK / PAR</h3>
+          <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#ddd;">
+            <input type="checkbox" id="c-opening-par-enabled" style="width:auto;">
+            <span>Enable Opening PAR for this link</span>
+          </label>
+          <div class="small muted" style="margin-top:6px;">
+            For this link/session only — BARINV Master PAR is unchanged.
+          </div>
+          <div id="c-opening-par-controls" style="display:none;">
+            <div class="opening-par-actions">
+              <button type="button" class="btn btn-secondary" id="c-opening-par-load">LOAD BARINV DEFAULT PAR</button>
+            </div>
+            <div id="c-opening-par-status"></div>
+            <div id="c-opening-par-workspace" style="display:none;">
+              <label style="margin-top:12px;">REVIEW / EDIT OPENING PAR</label>
+              <div class="opening-par-summary" id="c-opening-par-summary">—</div>
+              <div class="opening-par-list" id="c-opening-par-list"></div>
+              <div class="opening-par-actions">
+                <button type="button" class="btn btn-secondary" id="c-opening-par-reset">RESET TO BARINV DEFAULTS</button>
+                <button type="button" class="btn btn-secondary" id="c-opening-par-close">CLOSE</button>
+              </div>
+            </div>
+          </div>
+        </section>
         <div class="row">
           <label>EXPIRES AT</label>
           <input id="c-expires" type="datetime-local">
@@ -774,6 +832,16 @@ const state = {
   bars: [],
   staffList: [],
   lastCreate: null,
+  openingPar: {
+    enabled: false,
+    loaded: false,
+    workspaceOpen: false,
+    nightId: null,
+    items: [],
+    defaults: {},
+    quantities: {},
+    warning: '',
+  },
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -1007,6 +1075,217 @@ function canUseTableLink(staff, assignment) {
   return TABLE_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
 }
 
+// MANAGER_OPENING_PAR_V1_CORE_START
+// Pure helpers shared by the Manager UI and focused local fixtures.
+const ManagerOpeningParV1 = Object.freeze({
+  isRegularItem(item) {
+    if (!item || !item.id || item.active === false) return false;
+    const mode = String(item.service_mode || '').toLowerCase().trim();
+    return mode === 'regular_bar' || mode === 'bar' || mode === 'bar_only' ||
+      mode === 'all_bars' || mode === 'both';
+  },
+
+  positiveMasterItems(items) {
+    return (items || []).filter(item => {
+      const qty = Number(item && item.par_level);
+      return this.isRegularItem(item) && Number.isFinite(qty) &&
+        Number.isInteger(qty) && qty > 0;
+    });
+  },
+
+  summary(quantities, barCount) {
+    const invalid = [];
+    const positive = [];
+    Object.keys(quantities || {}).forEach(itemId => {
+      const qty = Number(quantities[itemId]);
+      if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 0) {
+        invalid.push(itemId);
+      } else if (qty > 0) {
+        positive.push({ item_id: itemId, qty: qty });
+      }
+    });
+    return {
+      invalid: invalid,
+      items: positive,
+      barCount: Math.max(0, Number(barCount) || 0),
+      itemCount: positive.length,
+      rowCount: positive.length * Math.max(0, Number(barCount) || 0),
+    };
+  },
+
+  buildEnabledIntent(quantities, barCount) {
+    const result = this.summary(quantities, barCount);
+    if (result.invalid.length) throw new Error('Opening PAR quantities must be non-negative whole bottles.');
+    if (!result.barCount) throw new Error('Opening PAR requires at least one selected regular bar.');
+    if (!result.items.length) throw new Error('Opening PAR requires at least one positive item quantity.');
+    return {
+      opening_par_enabled: true,
+      opening_par_items: result.items,
+    };
+  },
+});
+// MANAGER_OPENING_PAR_V1_CORE_END
+
+function managerOpeningParEffectiveBarIds() {
+  if (!$('c-linktype') || $('c-linktype').value !== 'bar') return [];
+  const available = new Set(
+    Array.from(($('c-bar') && $('c-bar').options) || [])
+      .map(option => option.value).filter(Boolean)
+  );
+  const ids = [];
+  const seen = new Set();
+  const add = id => {
+    if (id && available.has(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
+  };
+  add(($('c-bar') && $('c-bar').value) || '');
+  $$('#c-allowed-bars input:checked').forEach(input => add(input.value));
+  return ids;
+}
+
+function managerOpeningParClear(message) {
+  const op = state.openingPar;
+  op.loaded = false;
+  op.workspaceOpen = false;
+  op.nightId = null;
+  op.items = [];
+  op.defaults = {};
+  op.quantities = {};
+  op.warning = message || '';
+  renderManagerOpeningPar();
+}
+
+function managerOpeningParMeta(item) {
+  return [item && item.unit_size, item && item.bottle_size_ml ? item.bottle_size_ml + 'ml' : '', item && item.unit]
+    .filter(Boolean).filter((value, index, arr) => arr.indexOf(value) === index).join(' · ');
+}
+
+function renderManagerOpeningParRows() {
+  const list = $('c-opening-par-list');
+  if (!list) return;
+  const op = state.openingPar;
+  list.innerHTML = (op.items || []).map(item => {
+    const meta = managerOpeningParMeta(item);
+    const qty = Object.prototype.hasOwnProperty.call(op.quantities, item.id)
+      ? op.quantities[item.id] : 0;
+    return '<div class="opening-par-item" data-item="' + esc(item.id) + '">' +
+      '<div class="opening-par-item-name">' + esc(item.name || '?') +
+        (meta ? '<span class="opening-par-item-meta">' + esc(meta) + '</span>' : '') + '</div>' +
+      '<button type="button" class="opening-par-step op-minus" aria-label="Decrease ' + esc(item.name || 'item') + '">−</button>' +
+      '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" value="' +
+        esc(String(qty)) + '" aria-label="Opening quantity for ' + esc(item.name || 'item') + '">' +
+      '<button type="button" class="opening-par-step op-plus" aria-label="Increase ' + esc(item.name || 'item') + '">+</button>' +
+    '</div>';
+  }).join('');
+
+  Array.from(list.querySelectorAll('.opening-par-item')).forEach(row => {
+    const itemId = row.getAttribute('data-item');
+    const input = row.querySelector('.opening-par-qty');
+    const setStep = delta => {
+      const current = Number(input.value);
+      const base = Number.isFinite(current) && Number.isInteger(current) && current >= 0 ? current : 0;
+      op.quantities[itemId] = Math.max(0, base + delta);
+      input.value = String(op.quantities[itemId]);
+      renderManagerOpeningPar();
+    };
+    input.addEventListener('input', () => {
+      op.quantities[itemId] = input.value === '' ? NaN : Number(input.value);
+      renderManagerOpeningPar();
+    });
+    row.querySelector('.op-minus').addEventListener('click', () => setStep(-1));
+    row.querySelector('.op-plus').addEventListener('click', () => setStep(1));
+  });
+}
+
+function renderManagerOpeningPar() {
+  const op = state.openingPar;
+  const enabled = !!($('c-opening-par-enabled') && $('c-opening-par-enabled').checked);
+  op.enabled = enabled;
+  if ($('c-opening-par-controls')) $('c-opening-par-controls').style.display = enabled ? '' : 'none';
+  if (!enabled) return;
+
+  const isRegularLink = $('c-linktype') && $('c-linktype').value === 'bar';
+  const currentNight = ($('c-night') && $('c-night').value) || null;
+  const currentSnapshot = op.loaded && op.nightId === currentNight;
+  const workspace = $('c-opening-par-workspace');
+  if (workspace) workspace.style.display = currentSnapshot && op.workspaceOpen ? '' : 'none';
+  if ($('c-opening-par-load')) {
+    $('c-opening-par-load').textContent = currentSnapshot ? 'REOPEN REVIEW / EDIT PAR' : 'LOAD BARINV DEFAULT PAR';
+    $('c-opening-par-load').disabled = !isRegularLink || !currentNight;
+  }
+
+  const bars = managerOpeningParEffectiveBarIds();
+  const result = ManagerOpeningParV1.summary(op.quantities, bars.length);
+  if ($('c-opening-par-summary')) {
+    $('c-opening-par-summary').textContent = result.itemCount + ' item' + (result.itemCount === 1 ? '' : 's') +
+      ' × ' + result.barCount + ' bar' + (result.barCount === 1 ? '' : 's') +
+      ' = ' + result.rowCount + ' opening row' + (result.rowCount === 1 ? '' : 's') +
+      (result.invalid.length ? ' · ' + result.invalid.length + ' invalid quantity' + (result.invalid.length === 1 ? '' : ' values') : '');
+  }
+
+  let message = op.warning || '';
+  let level = 'warn';
+  if (!isRegularLink) message = 'Opening PAR is unavailable for VIP / Table links. Disable it or switch back to Barback / Bars.';
+  else if (!bars.length) message = 'Select at least one active regular-bar destination. Opening PAR fails closed with no destinations.';
+  else if (currentSnapshot && result.invalid.length) message = 'Correct all quantities to non-negative whole bottle counts before generating the link.';
+  else if (!message && currentSnapshot) { message = 'Snapshot reviewed for this night. BARINV Master PAR remains unchanged.'; level = 'ok'; }
+  if (message) statusOn('c-opening-par-status', message, level);
+  else if ($('c-opening-par-status')) $('c-opening-par-status').innerHTML = '';
+}
+
+async function loadManagerOpeningParDefaults() {
+  const op = state.openingPar;
+  const nightId = ($('c-night') && $('c-night').value) || null;
+  if (!nightId || $('c-linktype').value !== 'bar') {
+    statusOn('c-opening-par-status', 'Choose a Barback / Bars link and a night first.', 'err');
+    return;
+  }
+  if (!managerOpeningParEffectiveBarIds().length) {
+    statusOn('c-opening-par-status', 'Select at least one active regular-bar destination before loading PAR.', 'err');
+    return;
+  }
+  $('c-opening-par-load').disabled = true;
+  $('c-opening-par-load').textContent = '… LOADING DEFAULT PAR';
+  try {
+    const { data, error } = await SB.from('items')
+      .select('id, name, unit, unit_size, bottle_size_ml, active, service_mode, par_level')
+      .eq('venue_id', state.venueId)
+      .or('active.is.true,active.is.null')
+      .order('name');
+    if (error) throw error;
+    const items = ManagerOpeningParV1.positiveMasterItems(data || []);
+    if (!items.length) throw new Error('No active regular-bar item has a positive BARINV Master PAR.');
+    op.items = items;
+    op.defaults = {};
+    op.quantities = {};
+    items.forEach(item => {
+      op.defaults[item.id] = Number(item.par_level);
+      op.quantities[item.id] = Number(item.par_level);
+    });
+    op.loaded = true;
+    op.workspaceOpen = true;
+    op.nightId = nightId;
+    op.warning = '';
+    renderManagerOpeningParRows();
+    renderManagerOpeningPar();
+  } catch (e) {
+    op.warning = 'Opening PAR defaults unavailable: ' + (e.message || e);
+    statusOn('c-opening-par-status', op.warning, 'err');
+  } finally {
+    renderManagerOpeningPar();
+  }
+}
+
+function managerOpeningParIntentOrThrow() {
+  const op = state.openingPar;
+  if (!op.enabled) return null;
+  const nightId = ($('c-night') && $('c-night').value) || null;
+  if (!op.loaded || !op.nightId || op.nightId !== nightId) {
+    throw new Error('Opening PAR must be loaded and reviewed for the selected night.');
+  }
+  if ($('c-linktype').value !== 'bar') throw new Error('Opening PAR is only available for Barback / Bars links.');
+  return ManagerOpeningParV1.buildEnabledIntent(op.quantities, managerOpeningParEffectiveBarIds().length);
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  Load venue context (nights, bars, staff) from DB
 // ════════════════════════════════════════════════════════════════════
@@ -1069,13 +1348,34 @@ async function loadVenueContext() {
   // Scope bars + staff to the selected night, and re-scope when it changes.
   if ($('c-night') && !$('c-night')._wired) {
     $('c-night')._wired = true;
-    $('c-night').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+    $('c-night').addEventListener('change', async () => {
+      if (state.openingPar.loaded && state.openingPar.nightId !== $('c-night').value) {
+        managerOpeningParClear('Night changed. The previous Opening PAR snapshot was cleared; load and review this night’s defaults.');
+      }
+      await renderNightScoped($('c-night').value);
+      renderManagerOpeningPar();
+    });
   }
   if ($('c-linktype') && !$('c-linktype')._wired) {
     $('c-linktype')._wired = true;
-    $('c-linktype').addEventListener('change', () => { renderNightScoped($('c-night').value); });
+    $('c-linktype').addEventListener('change', async () => {
+      if (state.openingPar.loaded) {
+        managerOpeningParClear('Link Type changed. The previous regular-bar Opening PAR snapshot was cleared; reload it if Opening PAR still applies.');
+      }
+      await renderNightScoped($('c-night').value);
+      renderManagerOpeningPar();
+    });
+  }
+  if ($('c-bar') && !$('c-bar')._openingParWired) {
+    $('c-bar')._openingParWired = true;
+    $('c-bar').addEventListener('change', renderManagerOpeningPar);
+  }
+  if ($('c-allowed-bars') && !$('c-allowed-bars')._openingParWired) {
+    $('c-allowed-bars')._openingParWired = true;
+    $('c-allowed-bars').addEventListener('change', renderManagerOpeningPar);
   }
   if (state.nights[0]) { try { await renderNightScoped(state.nights[0].id); } catch (_) {} }
+  renderManagerOpeningPar();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1215,6 +1515,7 @@ async function renderNightScoped(nightId) {
         rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
     });
   }
+  renderManagerOpeningPar();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1280,6 +1581,33 @@ function getBarinvPublicBaseUrl() {
 // ════════════════════════════════════════════════════════════════════
 //  Create session
 // ════════════════════════════════════════════════════════════════════
+if ($('c-opening-par-enabled')) $('c-opening-par-enabled').addEventListener('change', () => {
+  state.openingPar.enabled = $('c-opening-par-enabled').checked;
+  state.openingPar.warning = '';
+  renderManagerOpeningPar();
+});
+if ($('c-opening-par-load')) $('c-opening-par-load').addEventListener('click', () => {
+  if (state.openingPar.loaded && state.openingPar.nightId === $('c-night').value) {
+    state.openingPar.workspaceOpen = true;
+    renderManagerOpeningParRows();
+    renderManagerOpeningPar();
+    return;
+  }
+  loadManagerOpeningParDefaults();
+});
+if ($('c-opening-par-reset')) $('c-opening-par-reset').addEventListener('click', () => {
+  if (!state.openingPar.loaded) return;
+  state.openingPar.quantities = Object.assign({}, state.openingPar.defaults);
+  state.openingPar.warning = '';
+  renderManagerOpeningParRows();
+  renderManagerOpeningPar();
+});
+if ($('c-opening-par-close')) $('c-opening-par-close').addEventListener('click', () => {
+  state.openingPar.workspaceOpen = false;
+  state.openingPar.warning = 'Opening PAR review closed; your session-only edits are retained. Reopen before generating if you want to review them again.';
+  renderManagerOpeningPar();
+});
+
 $('c-create').addEventListener('click', async () => {
   const nightId = $('c-night').value;
   if (!nightId) { statusOn('c-status', 'Pick a night', 'err'); return; }
@@ -1290,18 +1618,22 @@ $('c-create').addEventListener('click', async () => {
   if (!expRaw) { statusOn('c-status', 'Pick an expiration', 'err'); return; }
   const nickname = $('c-nickname').value.trim() || null;
   const rotatePins = $('c-rotate-pins').checked;
+  let openingParIntent = null;
+  try { openingParIntent = managerOpeningParIntentOrThrow(); }
+  catch (e) { statusOn('c-status', e.message || String(e), 'err'); return; }
 
   $('c-create').disabled = true;
   $('c-create').textContent = '… GENERATING';
   statusOn('c-status', 'Calling barback-create-session…', 'info');
 
   try {
-    const res = await fnInvoke('barback-create-session', {
+    const createRequest = {
       venue_id:       state.venueId,
       night_id:       nightId,
       bar_id:         barId,
       allowed_bars:   allowedBars,
       allowed_staff:  allowedStaff,
+      link_type:      $('c-linktype').value,
       nickname:       nickname,
       expires_at:     new Date(expRaw).toISOString(),
       pin_rotate_for: rotatePins ? allowedStaff : [],
@@ -1310,7 +1642,17 @@ $('c-create').addEventListener('click', async () => {
       // by the barback's personal phone regardless of where the
       // manager UI is running.
       public_url_base: getBarinvPublicBaseUrl(),
-    });
+    };
+    // Disabled mode sends no Opening PAR fields. link_type is sent for the
+    // backend's existing destination/staff validation; legacy callers that
+    // omit it remain supported by server-side type derivation.
+    // Enabled mode sends user intent only; version/timestamp/scope authority
+    // are constructed and validated by barback-create-session.
+    if (openingParIntent) {
+      createRequest.opening_par_enabled = true;
+      createRequest.opening_par_items = openingParIntent.opening_par_items;
+    }
+    const res = await fnInvoke('barback-create-session', createRequest);
     state.lastCreate = res;
     res._selectedStaff = allowedStaff;   // PLAN-2026-06-17 — selected staff for the PIN panel
     renderCreateResult(res);
