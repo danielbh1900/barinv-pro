@@ -131,8 +131,14 @@ test('2. legacy session with NULL config normalizes to disabled', () => {
 
 test('3. Manager disabled mode preserves the legacy request path', () => {
   assert.match(managerHtml, /Disabled mode sends no Opening PAR fields/);
-  assert.match(managerHtml, /if \(openingParIntent\) \{[\s\S]*createRequest\.opening_par_enabled = true/);
-  assert.doesNotMatch(managerHtml.slice(managerHtml.indexOf('const createRequest = {'), managerHtml.indexOf('if (openingParIntent)')), /opening_par_/);
+  assert.match(managerHtml, /ManagerOpeningParV1\.buildCreateRequest\([\s\S]*OPENING_PAR_MANAGER_V1_ENABLED/);
+  assert.doesNotMatch(
+    managerHtml.slice(
+      managerHtml.indexOf('const baseCreateRequest = {'),
+      managerHtml.indexOf('const createRequest = ManagerOpeningParV1.buildCreateRequest'),
+    ),
+    /opening_par_/,
+  );
 });
 
 test('4. enabled Manager intent contains item IDs and quantities only', () => {
@@ -358,4 +364,88 @@ test('36. Master PAR changes after link creation do not change the stored sessio
   );
   assert.equal(model.items[0].opening_par_qty, 2);
   assert.equal(visible[0].par_level, 12);
+});
+
+test('37. Manager Opening PAR rollout gate defaults OFF', () => {
+  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = false;/);
+});
+
+test('38. disabled Manager gate keeps the Opening PAR card hidden and controls disabled', () => {
+  assert.match(managerHtml, /id="c-opening-par-card" style="display:none;" aria-hidden="true"/);
+  assert.match(managerHtml, /card\.querySelectorAll\('button,input,select,textarea'\)[\s\S]*control\.disabled = true/);
+  assert.match(managerHtml, /if \(!enforceManagerOpeningParRolloutGate\(\)\) return;/);
+});
+
+test('39. disabled Manager gate strips all Opening PAR request fields', () => {
+  const classic = { venue_id: 'venue-1', night_id: 'night-1', allowed_bars: ['bar-1'] };
+  const forgedIntent = {
+    opening_par_enabled: true,
+    opening_par_items: [{ item_id: 'heineken', qty: 2 }],
+  };
+  const request = managerCore.buildCreateRequest(classic, false, forgedIntent);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), classic);
+  assert.equal(Object.hasOwn(request, 'opening_par_enabled'), false);
+  assert.equal(Object.hasOwn(request, 'opening_par_items'), false);
+});
+
+test('40. disabled Manager gate ignores stale Opening PAR state', () => {
+  const staleIntent = managerCore.buildEnabledIntent({ heineken: 2 }, 1);
+  const request = managerCore.buildCreateRequest({ nickname: 'Classic' }, false, staleIntent);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { nickname: 'Classic' });
+  assert.match(managerHtml, /op\.loaded = false;[\s\S]*op\.items = \[\];[\s\S]*op\.quantities = \{\};/);
+});
+
+test('41. disabled Manager gate preserves the complete Classic request object', () => {
+  const classic = {
+    venue_id: 'venue-1', night_id: 'night-1', bar_id: 'bar-1',
+    allowed_bars: ['bar-2'], allowed_staff: ['staff-1'], link_type: 'bar',
+    nickname: 'Classic', expires_at: '2026-07-21T00:00:00.000Z',
+    pin_rotate_for: ['staff-1'], public_url_base: 'https://example.test',
+  };
+  const request = managerCore.buildCreateRequest(classic, false, {
+    opening_par_enabled: true,
+    opening_par_items: [{ item_id: 'heineken', qty: 2 }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), classic);
+});
+
+test('42. DOM or console-state manipulation cannot bypass request-time gating', () => {
+  assert.match(
+    managerHtml,
+    /buildCreateRequest\(\s*baseCreateRequest,\s*OPENING_PAR_MANAGER_V1_ENABLED,\s*openingParIntent/,
+  );
+  assert.match(managerHtml, /if \(!enforceManagerOpeningParRolloutGate\(\)\) return null;/);
+  const tampered = managerCore.buildCreateRequest({}, false, {
+    opening_par_enabled: true,
+    opening_par_items: [{ item_id: 'tampered', qty: 999 }],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(tampered)), {});
+});
+
+test('43. enabled Manager gate with checkbox/config disabled sends no Opening PAR fields', () => {
+  const request = managerCore.buildCreateRequest({ venue_id: 'venue-1' }, true, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(request)), { venue_id: 'venue-1' });
+  assert.match(managerHtml, /const checkboxEnabled = !!\(\$\('c-opening-par-enabled'\)[\s\S]*\.checked\)/);
+});
+
+test('44. enabled Manager gate preserves the compact validated Opening PAR contract', () => {
+  const intent = managerCore.buildEnabledIntent({ heineken: 2, corona: 0 }, 3);
+  const request = managerCore.buildCreateRequest({ venue_id: 'venue-1' }, true, intent);
+  assert.equal(request.opening_par_enabled, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(request.opening_par_items)), [
+    { item_id: 'heineken', qty: 2 },
+  ]);
+  assert.equal(Object.hasOwn(request, 'version'), false);
+  assert.equal(Object.hasOwn(request, 'configured_at'), false);
+});
+
+test('45. enabled Manager gate retains Night and Link Type stale-snapshot clearing', () => {
+  assert.match(managerHtml, /Night changed\. The previous Opening PAR snapshot was cleared/);
+  assert.match(managerHtml, /Link Type changed\. The previous regular-bar Opening PAR snapshot was cleared/);
+  assert.match(managerHtml, /if \(OPENING_PAR_MANAGER_V1_ENABLED && \$\('c-opening-par-enabled'\)\)/);
+});
+
+test('46. Manager and Barback production rollout gates both remain OFF', () => {
+  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = false;/);
+  assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
 });

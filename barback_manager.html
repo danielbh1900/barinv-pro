@@ -362,7 +362,7 @@
             </div>
           </div>
         </div>
-        <section class="opening-par-card" id="c-opening-par-card">
+        <section class="opening-par-card" id="c-opening-par-card" style="display:none;" aria-hidden="true">
           <h3>OPENING STOCK / PAR</h3>
           <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#ddd;">
             <input type="checkbox" id="c-opening-par-enabled" style="width:auto;">
@@ -781,6 +781,10 @@ window.__BB_VENDOR_READY.then(() => {
 // ════════════════════════════════════════════════════════════════════
 //  Config — reused from production app's stored Supabase config
 // ════════════════════════════════════════════════════════════════════
+// Independent Manager rollout kill switch. This gates both visibility and
+// request construction; keep OFF until a separately authorised rollout.
+const OPENING_PAR_MANAGER_V1_ENABLED = false;
+
 const CFG_KEYS = ['barinv_supabase_config', 'barinv_cfg', 'cfg', 'supabase_config'];
 function loadCfg() {
   for (const k of CFG_KEYS) {
@@ -849,6 +853,38 @@ const state = {
 // ════════════════════════════════════════════════════════════════════
 const $ = (id) => document.getElementById(id);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+function enforceManagerOpeningParRolloutGate() {
+  const card = $('c-opening-par-card');
+  if (OPENING_PAR_MANAGER_V1_ENABLED) {
+    if (card) {
+      card.style.display = '';
+      card.setAttribute('aria-hidden', 'false');
+    }
+    return true;
+  }
+
+  const op = state.openingPar;
+  op.enabled = false;
+  op.loaded = false;
+  op.workspaceOpen = false;
+  op.nightId = null;
+  op.items = [];
+  op.defaults = {};
+  op.quantities = {};
+  op.warning = '';
+  const checkbox = $('c-opening-par-enabled');
+  if (checkbox) checkbox.checked = false;
+  if (card) {
+    card.style.display = 'none';
+    card.setAttribute('aria-hidden', 'true');
+    card.querySelectorAll('button,input,select,textarea').forEach(control => {
+      control.disabled = true;
+    });
+  }
+  return false;
+}
+enforceManagerOpeningParRolloutGate();
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -1123,6 +1159,15 @@ const ManagerOpeningParV1 = Object.freeze({
       opening_par_items: result.items,
     };
   },
+
+  buildCreateRequest(baseRequest, managerGateEnabled, openingParIntent) {
+    const request = Object.assign({}, baseRequest);
+    if (managerGateEnabled === true && openingParIntent) {
+      request.opening_par_enabled = true;
+      request.opening_par_items = openingParIntent.opening_par_items;
+    }
+    return request;
+  },
 });
 // MANAGER_OPENING_PAR_V1_CORE_END
 
@@ -1197,6 +1242,7 @@ function renderManagerOpeningParRows() {
 }
 
 function renderManagerOpeningPar() {
+  if (!enforceManagerOpeningParRolloutGate()) return;
   const op = state.openingPar;
   const enabled = !!($('c-opening-par-enabled') && $('c-opening-par-enabled').checked);
   op.enabled = enabled;
@@ -1233,6 +1279,7 @@ function renderManagerOpeningPar() {
 }
 
 async function loadManagerOpeningParDefaults() {
+  if (!enforceManagerOpeningParRolloutGate()) return;
   const op = state.openingPar;
   const nightId = ($('c-night') && $('c-night').value) || null;
   if (!nightId || $('c-linktype').value !== 'bar') {
@@ -1276,8 +1323,11 @@ async function loadManagerOpeningParDefaults() {
 }
 
 function managerOpeningParIntentOrThrow() {
+  if (!enforceManagerOpeningParRolloutGate()) return null;
   const op = state.openingPar;
-  if (!op.enabled) return null;
+  const checkboxEnabled = !!($('c-opening-par-enabled') && $('c-opening-par-enabled').checked);
+  op.enabled = checkboxEnabled;
+  if (!checkboxEnabled) return null;
   const nightId = ($('c-night') && $('c-night').value) || null;
   if (!op.loaded || !op.nightId || op.nightId !== nightId) {
     throw new Error('Opening PAR must be loaded and reviewed for the selected night.');
@@ -1581,12 +1631,12 @@ function getBarinvPublicBaseUrl() {
 // ════════════════════════════════════════════════════════════════════
 //  Create session
 // ════════════════════════════════════════════════════════════════════
-if ($('c-opening-par-enabled')) $('c-opening-par-enabled').addEventListener('change', () => {
+if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-enabled')) $('c-opening-par-enabled').addEventListener('change', () => {
   state.openingPar.enabled = $('c-opening-par-enabled').checked;
   state.openingPar.warning = '';
   renderManagerOpeningPar();
 });
-if ($('c-opening-par-load')) $('c-opening-par-load').addEventListener('click', () => {
+if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-load')) $('c-opening-par-load').addEventListener('click', () => {
   if (state.openingPar.loaded && state.openingPar.nightId === $('c-night').value) {
     state.openingPar.workspaceOpen = true;
     renderManagerOpeningParRows();
@@ -1595,14 +1645,14 @@ if ($('c-opening-par-load')) $('c-opening-par-load').addEventListener('click', (
   }
   loadManagerOpeningParDefaults();
 });
-if ($('c-opening-par-reset')) $('c-opening-par-reset').addEventListener('click', () => {
+if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-reset')) $('c-opening-par-reset').addEventListener('click', () => {
   if (!state.openingPar.loaded) return;
   state.openingPar.quantities = Object.assign({}, state.openingPar.defaults);
   state.openingPar.warning = '';
   renderManagerOpeningParRows();
   renderManagerOpeningPar();
 });
-if ($('c-opening-par-close')) $('c-opening-par-close').addEventListener('click', () => {
+if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-close')) $('c-opening-par-close').addEventListener('click', () => {
   state.openingPar.workspaceOpen = false;
   state.openingPar.warning = 'Opening PAR review closed; your session-only edits are retained. Reopen before generating if you want to review them again.';
   renderManagerOpeningPar();
@@ -1627,7 +1677,7 @@ $('c-create').addEventListener('click', async () => {
   statusOn('c-status', 'Calling barback-create-session…', 'info');
 
   try {
-    const createRequest = {
+    const baseCreateRequest = {
       venue_id:       state.venueId,
       night_id:       nightId,
       bar_id:         barId,
@@ -1648,10 +1698,11 @@ $('c-create').addEventListener('click', async () => {
     // omit it remain supported by server-side type derivation.
     // Enabled mode sends user intent only; version/timestamp/scope authority
     // are constructed and validated by barback-create-session.
-    if (openingParIntent) {
-      createRequest.opening_par_enabled = true;
-      createRequest.opening_par_items = openingParIntent.opening_par_items;
-    }
+    const createRequest = ManagerOpeningParV1.buildCreateRequest(
+      baseCreateRequest,
+      OPENING_PAR_MANAGER_V1_ENABLED,
+      openingParIntent,
+    );
     const res = await fnInvoke('barback-create-session', createRequest);
     state.lastCreate = res;
     res._selectedStaff = allowedStaff;   // PLAN-2026-06-17 — selected staff for the PIN panel
