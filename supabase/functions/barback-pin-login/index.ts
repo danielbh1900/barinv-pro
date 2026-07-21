@@ -327,7 +327,7 @@ Deno.serve(async (req: Request) => {
     bar_id:       session.bar_id ?? "",
     allowed_bars: (Array.isArray(session.allowed_bars) ? session.allowed_bars : []).join(","),
     staff_id:     body.staff_id,
-    staff_name:   staffRow?.name ?? null ?? undefined,
+    staff_name:   staffRow?.name ?? undefined,
     nickname:     session.nickname ?? undefined,
   };
   const jwt = await signBarbackJwt(claims, JWT_SECRET);

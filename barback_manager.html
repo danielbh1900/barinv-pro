@@ -10,14 +10,11 @@
     ────────────────────────────────────────────────────────────────
     Standalone admin page. Does NOT modify www/index.html.
 
-    Calls three Edge Functions:
+    Calls authenticated Edge Functions:
       • barback-create-session  ← creates a session + assigns PINs
-      • barback-revoke-session  ← kills a session
-      • (PIN rotation reuses barback-create-session with pin_rotate_for)
-
-    Reads `barback_sessions` and `barback_audit_log` directly via the
-    authenticated manager's JWT — the existing RLS policy allows
-    authenticated reads.
+      • barback-manager-sessions ← returns a secret-free venue summary
+      • barback-revoke-session  ← revokes one exact session
+      • barback-rotate-pin      ← rotates one exact staff PIN
 
     Auth: standard Supabase email/password sign-in (the manager has a
     real auth.users row). The manager must be linked to a staff record
@@ -336,31 +333,47 @@
             <option value="bar" selected>Barback / Bars</option>
             <option value="table">VIP / Tables</option>
           </select>
-          <div class="small muted" id="c-linktype-help">Barbacks/managers operating bars + opening stock.</div>
+          <div class="small muted" id="c-linktype-help">Barbacks and Bartenders operating assigned destinations.</div>
         </div>
         <div class="row">
           <label>NIGHT</label>
           <select id="c-night"></select>
+          <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#9ca3af;margin-top:7px;">
+            <input type="checkbox" id="c-show-closed-nights" style="width:auto;">
+            <span>Show Closed Nights <b>(read-only)</b></span>
+          </label>
+          <div class="small muted" id="c-night-help">Only active nights can be used to create sessions.</div>
         </div>
         <div class="cols-2">
           <div>
             <div class="row">
               <label id="c-primary-label">PRIMARY BAR (optional — leave blank for multi-bar)</label>
-              <select id="c-bar"><option value="">(any bar)</option></select>
+              <select id="c-bar"><option value="">(any destination)</option></select>
             </div>
             <div class="row">
               <label id="c-additional-label">ADDITIONAL BARS THE BARBACK CAN POST TO</label>
               <div class="multi-select" id="c-allowed-bars"></div>
-              <div class="small muted" id="c-additional-help">Active bars for the selected night only. Leave all unchecked to lock to the primary bar.</div>
+              <div class="small muted" id="c-additional-help">Assigned destinations are selected automatically from the chosen staff.</div>
+              <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#bbb;margin-top:8px;">
+                <input type="checkbox" id="c-customize-destinations" style="width:auto;">
+                <span>Customize Assigned Destinations</span>
+              </label>
+              <div id="c-destination-exception" class="small" style="display:none;color:#fbbf24;margin-top:6px;">
+                This creates a session-specific exception to the BARINV PRO night assignment.
+              </div>
             </div>
           </div>
           <div>
             <div class="row">
               <label>WHO CAN USE THIS LINK</label>
               <div class="multi-select" id="c-staff"></div>
-              <div class="small muted" id="c-staff-helper">Only selected-night barbacks/managers can log in with this link.</div>
+              <div class="small muted" id="c-staff-helper">Selected-night Barbacks and Bartenders; assigned destinations are shown per person.</div>
             </div>
           </div>
+        </div>
+        <div class="row" id="c-scope-review" style="padding:10px;background:#111827;border:1px solid #374151;border-radius:6px;">
+          <label>FINAL SESSION SCOPE</label>
+          <div class="small" id="c-scope-review-body">Select staff to derive assigned destinations.</div>
         </div>
         <section class="opening-par-card" id="c-opening-par-card" style="display:none;" aria-hidden="true">
           <h3>OPENING STOCK / PAR</h3>
@@ -416,20 +429,23 @@
 
       <div class="card" id="c-result-card" style="display:none;">
         <h3>Generated link</h3>
+        <div class="status warn">Credentials are hidden by default. Reveal only when the intended recipient is ready.</div>
         <div class="row">
           <label>URL</label>
-          <pre class="token-out" id="c-url"></pre>
+          <pre class="token-out" id="c-url">••••••••••••••••••••••••</pre>
           <div style="display:flex;gap:6px;">
+            <button class="btn btn-secondary" id="c-reveal-link">REVEAL LINK</button>
             <button class="btn btn-secondary" id="c-copy">📋 COPY LINK</button>
             <button class="btn btn-secondary" id="c-share">↗ SHARE</button>
           </div>
         </div>
         <div class="row" style="text-align:center;">
           <label>QR CODE</label>
-          <div id="qr-out" style="min-height:80px;"></div>
+          <button class="btn btn-secondary" id="c-reveal-qr">REVEAL QR</button>
+          <div id="qr-out" style="display:none;min-height:80px;"></div>
         </div>
         <div class="row">
-          <label>PIN ASSIGNMENTS (visible ONCE — copy now)</label>
+          <label>PIN ASSIGNMENTS (one-time values, masked by default)</label>
           <div class="pin-list" id="c-pins">—</div>
           <div class="small muted" style="margin-top:6px;">
             Already-assigned staff show no PIN here unless "Rotate PINs" was checked. Use the ROTATE button in the Active tab to issue a new PIN for a single staff member.
@@ -441,7 +457,7 @@
     <!-- ─── SESSIONS TAB ─── -->
     <div class="tab" data-tab="sessions" style="display:none;">
       <div class="card">
-        <h3>Active barback sessions</h3>
+        <h3>Manager-authorized Barback sessions</h3>
         <div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap;">
           <input id="sessions-search" type="search" placeholder="filter by nickname..."
                  style="flex:1;min-width:140px;padding:8px;font-size:13px;">
@@ -452,31 +468,23 @@
             <input type="checkbox" id="sessions-auto" checked style="width:auto;">auto-refresh 30s
           </label>
         </div>
-        <div id="sessions-bulk-bar" style="display:none;padding:8px 10px;background:#3f2c0a;border:1px solid #f59e0b;border-radius:6px;margin:6px 0;font-size:12px;color:#fbbf24;">
-          <span id="sessions-selected-count">0 selected</span>
-          <button class="btn btn-danger" id="sessions-bulk-revoke" style="float:right;padding:6px 12px;margin:0;font-size:11px;">⚠ BULK REVOKE</button>
-        </div>
         <div id="sessions-list">loading…</div>
         <button class="btn btn-secondary" id="sessions-refresh">↺ REFRESH</button>
       </div>
 
-      <!-- Phase 5: night-level danger zone -->
-      <div class="card" style="border:1px solid #7c2d12;background:#1a0a0a;">
-        <h3 style="color:#fca5a5;">⚠ Night-level controls</h3>
+      <div class="card">
+        <h3>Night event export</h3>
         <div class="row">
-          <label>SELECT NIGHT FOR BULK / CLOSE / EXPORT</label>
+          <label>SELECT NIGHT FOR EXPORT</label>
           <select id="dz-night"></select>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="btn btn-danger"    id="dz-revoke-all">⚠ REVOKE ALL ACTIVE</button>
-          <button class="btn btn-danger"    id="dz-close-night">🔒 CLOSE NIGHT (revoke + audit)</button>
           <button class="btn btn-secondary" id="dz-export-csv">⬇ EXPORT EVENTS CSV</button>
         </div>
         <div id="dz-status"></div>
         <div class="small muted" style="margin-top:6px;">
-          REVOKE ALL = revokes every active session for the selected night.<br>
-          CLOSE NIGHT = REVOKE ALL + writes a <code>night_closed</code> audit summary, marking end-of-shift.<br>
-          EXPORT EVENTS CSV = downloads all <code>events</code> rows tagged <code>source=barback_web_link</code> for this night.
+          Session revocation is exact-session only. Export downloads <code>events</code> rows tagged
+          <code>source=barback_web_link</code> for the selected night.
         </div>
       </div>
     </div>
@@ -833,9 +841,14 @@ const state = {
   venueId: null,
   venueName: null,
   nights: [],
+  allNights: [],
   bars: [],
   staffList: [],
+  nightAssignments: [],
+  nightDestinationIds: [],
+  destinationCustomization: false,
   lastCreate: null,
+  credentialReveal: { link: false, qr: false, pins: new Set() },
   openingPar: {
     enabled: false,
     loaded: false,
@@ -894,6 +907,7 @@ function showScreen(id) {
   $(id).classList.add('active');
 }
 function showTab(name) {
+  if (name !== 'create') hideGeneratedCredentials(true);
   $$('.tab').forEach(t => t.style.display = t.dataset.tab === name ? '' : 'none');
   // Auto-refresh runs only while the sessions tab is active
   if (name === 'sessions') { renderSessions(); startSessionsAutoRefresh(); populateDangerZoneNights(); }
@@ -1052,8 +1066,9 @@ async function afterSignedIn() {
 //  Capability filter — who can receive a barback link?
 // ════════════════════════════════════════════════════════════════════
 // Business rule (PLAN-2026-06-04):
-//   • A staff member is eligible to be checked under STAFF ASSIGNED
-//     iff their `staff.role` text mentions BARBACK or MANAGER.
+//   • A staff member is eligible to be checked under STAFF ASSIGNED when the
+//     staff or selected-night assignment role is valid for the link mode.
+//     Barback/Bars includes both Barbacks and Bartenders.
 //   • `staff.role` is a single TEXT column that holds comma-separated
 //     labels in this venue's data — e.g. "bartender, server, manager",
 //     "bartender, barback, other", "manager, liquor room".
@@ -1068,15 +1083,15 @@ async function afterSignedIn() {
 //   "bartender, server, manager"    → eligible (manager) — Irish
 //   "manager, liquor room"          → eligible (manager)
 //   "tables manager"                → eligible (manager substring)
-//   "bartender"                     → NOT eligible
-//   "bartender, server"             → NOT eligible
+//   "bartender"                     → eligible for Barback/Bars
+//   "bartender, server"             → eligible for Barback/Bars or Tables
 //   "coat check" / "security"       → NOT eligible
 // "Who can use this Barback Link" = login-eligible operational staff.
-// Matches barback + manager-level roles: manager / admin / server manager /
+// Matches Barback, Bartender, and manager-level roles: manager / admin /
 // table manager / floor manager / lead / supervisor (all contain one of the
 // keywords below after stripping non-letters, e.g. "server manager" →
-// "servermanager" → has "manager"). Plain bartender / server are excluded
-// unless their role string ALSO carries one of these keywords.
+// "servermanager" → has "manager"). Plain servers remain excluded from
+// Barback/Bars.
 // Combined, normalized role string from BOTH the staff record's role AND the
 // night assignment's role (lowercase, punctuation/spaces stripped). Either
 // source can carry the operational designation, e.g. a person whose
@@ -1085,7 +1100,7 @@ async function afterSignedIn() {
 // the role-keyword lists and area-type lists are defined ONCE. No behavior
 // change: values are byte-identical to the previous inline literals.
 // Removal: grep WEBLINK_HELPERS.
-const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'manager', 'admin', 'lead', 'supervisor'];
+const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'bartender', 'manager', 'admin', 'lead', 'supervisor'];
 const TABLE_LINK_ROLE_KEYWORDS = ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'];
 const AREA_TABLE_TYPES         = ['table', 'vip', 'booth'];
 function isBarArea(bt)      { return String(bt || '').toLowerCase() === 'bar'; }
@@ -1095,8 +1110,8 @@ function _roleBlob(staff, assignment) {
   return [staff && staff.role, assignment && assignment.role]
     .map(r => String(r || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
 }
-// Barback / Bars login-eligible: barback + manager-level (manager/admin/lead/
-// supervisor). Excludes plain bartender/server unless also one of these.
+// Barback / Bars login-eligible: Barback, Bartender, and manager-level
+// (manager/admin/lead/supervisor). Excludes a plain server.
 function canUseBarLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
   const b = _roleBlob(staff, assignment);
@@ -1110,6 +1125,60 @@ function canUseTableLink(staff, assignment) {
   const b = _roleBlob(staff, assignment);
   return TABLE_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
 }
+
+// MANAGER_DESTINATION_SCOPE_V1_CORE_START
+// Pure staff-to-destination helpers. Night assignments are authoritative;
+// every activated non-table operational area is supported by Barback/Bars.
+const ManagerDestinationScopeV1 = Object.freeze({
+  tableTypes: ['table', 'vip', 'booth'],
+  barRoles: ['barback', 'bartender', 'manager', 'admin', 'lead', 'supervisor'],
+  tableRoles: ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'],
+
+  destinationMode(destination) {
+    const type = String(destination && destination.bar_type || '').toLowerCase().trim();
+    if (!type) return null;
+    return this.tableTypes.includes(type) ? 'table' : 'bar';
+  },
+
+  roleEligible(staff, assignment, mode) {
+    if (!staff || staff.active === false) return false;
+    const blob = [staff.role, assignment && assignment.role]
+      .map(value => String(value || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
+    const roles = mode === 'table' ? this.tableRoles : this.barRoles;
+    return roles.some(role => blob.includes(role));
+  },
+
+  derive(selectedStaffIds, assignments, activeDestinations, mode) {
+    const selected = new Set(selectedStaffIds || []);
+    const activeById = new Map((activeDestinations || [])
+      .filter(destination => destination && destination.id && this.destinationMode(destination) === mode)
+      .map(destination => [destination.id, destination]));
+    const ids = [];
+    const seen = new Set();
+    (assignments || []).forEach(assignment => {
+      if (!assignment || assignment.revoked || !selected.has(assignment.staff_id)) return;
+      (assignment.allowed_bar_ids || []).forEach(id => {
+        if (activeById.has(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
+      });
+    });
+    return {
+      destinationIds: ids,
+      primaryId: ids.length === 1 ? ids[0] : null,
+      additionalIds: ids.length === 1 ? [] : ids.slice(),
+    };
+  },
+
+  submittedScope(primaryId, additionalIds) {
+    const primary = primaryId || null;
+    const seen = new Set(primary ? [primary] : []);
+    const additional = [];
+    (additionalIds || []).forEach(id => {
+      if (id && !seen.has(id)) { seen.add(id); additional.push(id); }
+    });
+    return { primaryId: primary, additionalIds: additional };
+  },
+});
+// MANAGER_DESTINATION_SCOPE_V1_CORE_END
 
 // MANAGER_OPENING_PAR_V1_CORE_START
 // Pure helpers shared by the Manager UI and focused local fixtures.
@@ -1152,7 +1221,7 @@ const ManagerOpeningParV1 = Object.freeze({
   buildEnabledIntent(quantities, barCount) {
     const result = this.summary(quantities, barCount);
     if (result.invalid.length) throw new Error('Opening PAR quantities must be non-negative whole bottles.');
-    if (!result.barCount) throw new Error('Opening PAR requires at least one selected regular bar.');
+    if (!result.barCount) throw new Error('Opening PAR requires at least one selected operational destination.');
     if (!result.items.length) throw new Error('Opening PAR requires at least one positive item quantity.');
     return {
       opening_par_enabled: true,
@@ -1263,7 +1332,7 @@ function renderManagerOpeningPar() {
   const result = ManagerOpeningParV1.summary(op.quantities, bars.length);
   if ($('c-opening-par-summary')) {
     $('c-opening-par-summary').textContent = result.itemCount + ' item' + (result.itemCount === 1 ? '' : 's') +
-      ' × ' + result.barCount + ' bar' + (result.barCount === 1 ? '' : 's') +
+      ' × ' + result.barCount + ' destination' + (result.barCount === 1 ? '' : 's') +
       ' = ' + result.rowCount + ' opening row' + (result.rowCount === 1 ? '' : 's') +
       (result.invalid.length ? ' · ' + result.invalid.length + ' invalid quantity' + (result.invalid.length === 1 ? '' : ' values') : '');
   }
@@ -1271,7 +1340,7 @@ function renderManagerOpeningPar() {
   let message = op.warning || '';
   let level = 'warn';
   if (!isRegularLink) message = 'Opening PAR is unavailable for VIP / Table links. Disable it or switch back to Barback / Bars.';
-  else if (!bars.length) message = 'Select at least one active regular-bar destination. Opening PAR fails closed with no destinations.';
+  else if (!bars.length) message = 'Select staff with at least one active operational destination. Opening PAR fails closed with no destinations.';
   else if (currentSnapshot && result.invalid.length) message = 'Correct all quantities to non-negative whole bottle counts before generating the link.';
   else if (!message && currentSnapshot) { message = 'Snapshot reviewed for this night. BARINV Master PAR remains unchanged.'; level = 'ok'; }
   if (message) statusOn('c-opening-par-status', message, level);
@@ -1287,7 +1356,7 @@ async function loadManagerOpeningParDefaults() {
     return;
   }
   if (!managerOpeningParEffectiveBarIds().length) {
-    statusOn('c-opening-par-status', 'Select at least one active regular-bar destination before loading PAR.', 'err');
+    statusOn('c-opening-par-status', 'Select staff with at least one active operational destination before loading PAR.', 'err');
     return;
   }
   $('c-opening-par-load').disabled = true;
@@ -1339,6 +1408,39 @@ function managerOpeningParIntentOrThrow() {
 // ════════════════════════════════════════════════════════════════════
 //  Load venue context (nights, bars, staff) from DB
 // ════════════════════════════════════════════════════════════════════
+function selectedNightRow() {
+  const id = ($('c-night') && $('c-night').value) || '';
+  return (state.allNights || []).find(night => night.id === id) || null;
+}
+
+function updateNightCreationState() {
+  const night = selectedNightRow();
+  const closed = !!night && night.active === false;
+  if ($('c-night-help')) {
+    $('c-night-help').textContent = closed
+      ? 'CLOSED — reopen this night in BARINV PRO before creating a Barback session.'
+      : 'Only active nights can be used to create sessions.';
+    $('c-night-help').style.color = closed ? '#fbbf24' : '';
+  }
+  if ($('c-create')) $('c-create').disabled = !night || closed;
+  return !!night && !closed;
+}
+
+function renderNewNightOptions() {
+  const select = $('c-night');
+  if (!select) return;
+  const previous = select.value;
+  const showClosed = !!($('c-show-closed-nights') && $('c-show-closed-nights').checked);
+  const rows = (state.allNights || []).filter(night => showClosed || night.active !== false);
+  select.innerHTML = rows.map(night =>
+    '<option value="' + esc(night.id) + '">' +
+      esc((night.date || '') + (night.name ? ' · ' + night.name : '') + (night.active === false ? ' · CLOSED' : '')) +
+    '</option>'
+  ).join('');
+  if (previous && rows.some(night => night.id === previous)) select.value = previous;
+  updateNightCreationState();
+}
+
 async function loadVenueContext() {
   // Venue name
   const { data: vrow } = await SB.from('venues').select('id, name').eq('id', state.venueId).maybeSingle();
@@ -1347,14 +1449,13 @@ async function loadVenueContext() {
 
   // Nights (most recent first)
   const { data: nights } = await SB.from('nights')
-    .select('id, date, name')
+    .select('id, date, name, active')
     .eq('venue_id', state.venueId)
     .order('date', { ascending: false })
     .limit(60);
-  state.nights = nights || [];
-  $('c-night').innerHTML = state.nights.map(n =>
-    '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>'
-  ).join('');
+  state.allNights = nights || [];
+  state.nights = state.allNights; // history/session labels include closed nights
+  renderNewNightOptions();
 
   // Bars
   const { data: bars } = await SB.from('bars')
@@ -1370,11 +1471,9 @@ async function loadVenueContext() {
   // PLAN-2026-06-04 — barback-link recipients are capability-filtered.
   // `staff.role` is a single TEXT column that already holds comma-separated
   // labels (e.g. "bartender, server, manager", "bartender, barback").
-  // Include a staff member in the STAFF ASSIGNED list iff their role
-  // string mentions BARBACK or MANAGER (covers "manager", "tables
-  // manager", "table_manager", "floor manager", "bar manager", etc.).
-  // Pure bartender / server / coat check / security / etc. are excluded
-  // unless they also carry one of the included capabilities.
+  // Include selected-night Barbacks and Bartenders in Barback/Bars; retain
+  // manager-level roles and the established server/table roles for Tables.
+  // Coat check, security, and unrelated roles remain excluded.
   // state.staffList stays as the FULL list — telemetry tables and the
   // audit-filter dropdown still need every staff name for name lookups
   // on historical events.
@@ -1385,7 +1484,7 @@ async function loadVenueContext() {
   state.staffList = staffRows || [];
   // RIGHT SIDE ("WHO CAN USE THIS LINK") is populated PER SELECTED NIGHT by
   // renderNightScoped() = this night's non-revoked assignees ∩ login-eligible
-  // roles (barback/manager-level). Not a venue-wide list.
+  // roles (Barback/Bartender/manager-level). Not a venue-wide list.
   // Populate audit staff filter
   const sel = $('audit-filter-staff');
   if (sel) {
@@ -1403,7 +1502,16 @@ async function loadVenueContext() {
         managerOpeningParClear('Night changed. The previous Opening PAR snapshot was cleared; load and review this night’s defaults.');
       }
       await renderNightScoped($('c-night').value);
+      updateNightCreationState();
       renderManagerOpeningPar();
+    });
+  }
+  if ($('c-show-closed-nights') && !$('c-show-closed-nights')._wired) {
+    $('c-show-closed-nights')._wired = true;
+    $('c-show-closed-nights').addEventListener('change', async () => {
+      renderNewNightOptions();
+      await renderNightScoped($('c-night').value);
+      updateNightCreationState();
     });
   }
   if ($('c-linktype') && !$('c-linktype')._wired) {
@@ -1418,21 +1526,41 @@ async function loadVenueContext() {
   }
   if ($('c-bar') && !$('c-bar')._openingParWired) {
     $('c-bar')._openingParWired = true;
-    $('c-bar').addEventListener('change', renderManagerOpeningPar);
+    $('c-bar').addEventListener('change', () => {
+      const primary = $('c-bar').value;
+      $$('#c-allowed-bars input[type="checkbox"]').forEach(input => {
+        if (primary && input.value === primary) input.checked = false;
+      });
+      renderManagerScopeReview();
+    });
   }
   if ($('c-allowed-bars') && !$('c-allowed-bars')._openingParWired) {
     $('c-allowed-bars')._openingParWired = true;
-    $('c-allowed-bars').addEventListener('change', renderManagerOpeningPar);
+    $('c-allowed-bars').addEventListener('change', event => {
+      const input = event.target;
+      if (input && input.matches && input.matches('input[type="checkbox"]') && input.checked && $('c-bar').value === input.value) {
+        input.checked = false;
+      }
+      renderManagerScopeReview();
+    });
   }
-  if (state.nights[0]) { try { await renderNightScoped(state.nights[0].id); } catch (_) {} }
+  if ($('c-customize-destinations') && !$('c-customize-destinations')._wired) {
+    $('c-customize-destinations')._wired = true;
+    $('c-customize-destinations').addEventListener('change', () => {
+      renderDestinationCustomizationState();
+      if (!$('c-customize-destinations').checked) syncAssignedDestinationsFromStaff();
+    });
+  }
+  if ($('c-night').value) { try { await renderNightScoped($('c-night').value); } catch (_) {} }
+  updateNightCreationState();
   renderManagerOpeningPar();
 }
 
 // ════════════════════════════════════════════════════════════════════
 //  Night-scoped selectors (PLAN-2026-06-13) — frontend-only.
 // ════════════════════════════════════════════════════════════════════
-// LEFT: bars active for the selected night (night_bars), bar_type 'bar' (VIP
-// tables + internal areas excluded), labelled with assigned staff names
+// LEFT: active destinations for the selected night (night_bars), split by
+// operational-vs-table link mode and labelled with assigned staff names
 // (night_staff_assignments.allowed_bar_ids). RIGHT ("WHO CAN USE THIS LINK"):
 // this night's NON-REVOKED assignees ∩ login-eligible roles (canUseBarbackLink
 // on the staff record). NOT venue-wide — a manager/barback not assigned to
@@ -1461,12 +1589,17 @@ async function renderNightScoped(nightId) {
       .eq('night_id', nightId).eq('venue_id', state.venueId);
     assigns = (a || []).filter(x => x && !x.revoked);
   } catch (_) {}
+  state.nightAssignments = assigns;
+  state.nightDestinationIds = Array.from(activeBarIds);
+  state.destinationCustomization = false;
+  if ($('c-customize-destinations')) $('c-customize-destinations').checked = false;
 
   // 3. Active areas for this night, filtered by the selected LINK TYPE:
-  //    Barback/Bars → bar_type 'bar'; VIP/Tables → 'table'/'vip'/'booth'.
+  //    Barback/Bars → every non-table operational type;
+  //    VIP/Tables → 'table'/'vip'/'booth'.
   const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
   const wantTable = (mode === 'table');
-  const isAreaForMode = (bt) => wantTable ? isTableArea(bt) : isBarArea(bt);
+  const isAreaForMode = (bt) => ManagerDestinationScopeV1.destinationMode({ bar_type: bt }) === mode;
   const activeBars = (state.bars || []).filter(b =>
     activeBarIds.has(b.id) && isAreaForMode(String(b.bar_type || '').toLowerCase()));
 
@@ -1476,12 +1609,13 @@ async function renderNightScoped(nightId) {
   // manager assigned only to VIP tables must NOT appear in the Barback/Bars
   // staff list, and a barback assigned only to bars must NOT appear in VIP.
   const barTypeById = {}; (state.bars || []).forEach(b => { barTypeById[b.id] = String(b.bar_type || '').toLowerCase(); });
-  const activeBarTypeIds = new Set();    // this night's active 'bar' areas
+  const activeBarTypeIds = new Set();    // this night's active operational areas
   const activeTableTypeIds = new Set();  // this night's active 'table'/'vip'/'booth' areas
   activeBarIds.forEach(id => {
     const bt = barTypeById[id];
-    if (isBarArea(bt)) activeBarTypeIds.add(id);
-    else if (isTableArea(bt)) activeTableTypeIds.add(id);
+    const destinationMode = ManagerDestinationScopeV1.destinationMode({ bar_type: bt });
+    if (destinationMode === 'bar') activeBarTypeIds.add(id);
+    else if (destinationMode === 'table') activeTableTypeIds.add(id);
   });
   const hasBarCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeBarTypeIds.has(id));
   const hasTableCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeTableTypeIds.has(id));
@@ -1489,19 +1623,19 @@ async function renderNightScoped(nightId) {
   try {
     if ($('c-linktype-help')) $('c-linktype-help').textContent = wantTable
       ? 'Servers/table managers operating VIP tables.'
-      : 'Barbacks/managers operating bars + opening stock.';
+      : 'Barbacks and Bartenders operating their assigned active destinations.';
     if ($('c-primary-label')) $('c-primary-label').textContent = wantTable
       ? 'PRIMARY TABLE (optional — leave blank for multi-table)'
-      : 'PRIMARY BAR (optional — leave blank for multi-bar)';
+      : 'PRIMARY DESTINATION (automatic when exactly one is assigned)';
     if ($('c-additional-label')) $('c-additional-label').textContent = wantTable
       ? 'ADDITIONAL TABLES THE SERVER CAN POST TO'
-      : 'ADDITIONAL BARS THE BARBACK CAN POST TO';
+      : 'ASSIGNED DESTINATIONS';
     if ($('c-additional-help')) $('c-additional-help').textContent = wantTable
-      ? 'Active VIP tables for the selected night only. Leave all unchecked to lock to the primary table.'
-      : 'Active bars for the selected night only. Leave all unchecked to lock to the primary bar.';
+      ? 'Selected automatically from the chosen staff assignments for this night.'
+      : 'Bars, stations, dispatch/storage, and other activated operational areas are selected automatically.';
     if ($('c-staff-helper')) $('c-staff-helper').textContent = wantTable
       ? 'Only selected-night servers/table managers can log in with this link.'
-      : 'Only selected-night barbacks/managers can log in with this link.';
+      : 'Selected-night Barbacks and Bartenders; each row shows role and assigned destinations.';
   } catch (_) {}
 
   // 4. bar_id -> assigned staff names (via allowed_bar_ids)
@@ -1535,37 +1669,124 @@ async function renderNightScoped(nightId) {
   }
 
   // RIGHT SIDE — WHO CAN USE THIS LINK = this night's non-revoked assignees
-  // INTERSECT login-eligible roles for the SELECTED LINK TYPE (bars → barback/
-  // manager-level; tables → server/table-manager/manager-level). Not venue-
+  // INTERSECT login-eligible roles for the SELECTED LINK TYPE (bars → Barback/
+  // Bartender/manager-level; tables → server/table-manager). Not venue-
   // wide; never falls back to all staff. PIN is rotate-only (existing PIN is
   // hashed/unreadable; a new PIN is shown once on rotation, never logged).
   if (staffBox) {
     const byId = {}; (state.staffList || []).forEach(s => { byId[s.id] = s; });
-    const seen = new Set(); const eligible = [];
+    const eligibleById = new Map();
     assigns.forEach(a => {
       const s = byId[a.staff_id];
-      const roleOk = (mode === 'table') ? canUseTableLink(s, a) : canUseBarLink(s, a);
+      const roleOk = ManagerDestinationScopeV1.roleEligible(s, a, mode);
       const covOk = (mode === 'table') ? hasTableCoverage(a) : hasBarCoverage(a);
-      if (s && !seen.has(s.id) && roleOk && covOk) { seen.add(s.id); eligible.push(s); }
+      if (!s || !roleOk || !covOk) return;
+      const row = eligibleById.get(s.id) || { staff: s, roles: new Set(), destinationIds: new Set() };
+      if (a.role) row.roles.add(a.role);
+      (a.allowed_bar_ids || []).forEach(id => {
+        if (activeBars.some(destination => destination.id === id)) row.destinationIds.add(id);
+      });
+      eligibleById.set(s.id, row);
     });
-    eligible.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    const eligible = Array.from(eligibleById.values());
+    eligible.sort((x, y) => String(x.staff.name || '').localeCompare(String(y.staff.name || '')));
     const eligCount = eligible.length
       ? '<div class="small muted" style="margin-bottom:6px;">' + eligible.length + ' eligible staff</div>'
       : '';
     staffBox.innerHTML = eligCount + (eligible.length
-      ? eligible.map(s =>
-          '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+      ? eligible.map(entry => {
+          const s = entry.staff;
+          const roleLabel = Array.from(entry.roles).filter(Boolean).join(', ') || s.role || 'assigned';
+          const destinationLabel = Array.from(entry.destinationIds).map(id =>
+            (state.bars.find(destination => destination.id === id) || {}).name || id.slice(0, 8)
+          ).join(', ');
+          return '<label><input type="checkbox" value="' + esc(s.id) + '"> ' + esc(s.name || '?') +
+            ' <span class="muted small">· ' + esc(roleLabel) + ' · ' + esc(destinationLabel || 'no active destinations') + '</span>' +
             ' <span style="color:#666;font-size:11px;margin-left:4px;">· PIN ••••••</span>' +
             ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
-              '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>'
-        ).join('')
-      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'barback / manager-level') + ' staff assigned for this night.</div>'));
+              '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>';
+        }).join('')
+      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'Barback / Bartender') + ' staff assigned for this night.</div>'));
+    Array.from(staffBox.querySelectorAll('input[type="checkbox"]')).forEach(input => {
+      input.addEventListener('change', syncAssignedDestinationsFromStaff);
+    });
     $$('[data-rotate-staff]').forEach(a => {
       a.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation();
         rotatePinForStaff(a.dataset.rotateStaff, a.dataset.staffName); });
     });
   }
+  renderDestinationCustomizationState();
+  syncAssignedDestinationsFromStaff();
   renderManagerOpeningPar();
+}
+
+function selectedManagerStaffIds() {
+  return $$('#c-staff input[type="checkbox"]:checked').map(input => input.value);
+}
+
+function currentModeDestinations() {
+  const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
+  const active = new Set(state.nightDestinationIds || []);
+  return (state.bars || []).filter(destination =>
+    active.has(destination.id) && ManagerDestinationScopeV1.destinationMode(destination) === mode
+  );
+}
+
+function automaticManagerDestinationScope() {
+  return ManagerDestinationScopeV1.derive(
+    selectedManagerStaffIds(), state.nightAssignments || [], currentModeDestinations(),
+    ($('c-linktype') && $('c-linktype').value) || 'bar',
+  );
+}
+
+function currentManagerDestinationScope() {
+  return ManagerDestinationScopeV1.submittedScope(
+    ($('c-bar') && $('c-bar').value) || null,
+    $$('#c-allowed-bars input[type="checkbox"]:checked').map(input => input.value),
+  );
+}
+
+function applyManagerDestinationScope(scope) {
+  if ($('c-bar')) $('c-bar').value = scope.primaryId || '';
+  const wanted = new Set(scope.additionalIds || []);
+  $$('#c-allowed-bars input[type="checkbox"]').forEach(input => {
+    input.checked = wanted.has(input.value) && input.value !== scope.primaryId;
+  });
+}
+
+function renderManagerScopeReview() {
+  const auto = automaticManagerDestinationScope();
+  const actual = currentManagerDestinationScope();
+  const actualIds = [actual.primaryId].concat(actual.additionalIds || []).filter(Boolean);
+  const staffNames = selectedManagerStaffIds().map(id =>
+    (state.staffList.find(staff => staff.id === id) || {}).name || id.slice(0, 8)
+  );
+  const destinationNames = actualIds.map(id =>
+    (state.bars.find(destination => destination.id === id) || {}).name || id.slice(0, 8)
+  );
+  const autoSet = new Set(auto.destinationIds || []);
+  const actualSet = new Set(actualIds);
+  const exception = autoSet.size !== actualSet.size || Array.from(autoSet).some(id => !actualSet.has(id));
+  if ($('c-destination-exception')) $('c-destination-exception').style.display = exception ? '' : 'none';
+  if ($('c-scope-review-body')) {
+    $('c-scope-review-body').innerHTML = '<b>Staff:</b> ' + esc(staffNames.join(', ') || 'none') + '<br>' +
+      '<b>Destinations:</b> ' + esc(destinationNames.join(', ') || 'none') +
+      (exception ? '<br><span style="color:#fbbf24;">Session-specific assignment exception.</span>' : '');
+  }
+  renderManagerOpeningPar();
+}
+
+function syncAssignedDestinationsFromStaff() {
+  applyManagerDestinationScope(automaticManagerDestinationScope());
+  renderManagerScopeReview();
+}
+
+function renderDestinationCustomizationState() {
+  const customize = !!($('c-customize-destinations') && $('c-customize-destinations').checked);
+  state.destinationCustomization = customize;
+  if ($('c-bar')) $('c-bar').disabled = !customize;
+  $$('#c-allowed-bars input[type="checkbox"]').forEach(input => { input.disabled = !customize; });
+  renderManagerScopeReview();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1661,9 +1882,16 @@ if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-close')) $('c-opening-par
 $('c-create').addEventListener('click', async () => {
   const nightId = $('c-night').value;
   if (!nightId) { statusOn('c-status', 'Pick a night', 'err'); return; }
-  const barId = $('c-bar').value || null;
-  const allowedBars = $$('#c-allowed-bars input:checked').map(i => i.value);
-  const allowedStaff = $$('#c-staff input:checked').map(i => i.value);
+  if (!updateNightCreationState()) {
+    statusOn('c-status', 'This night is closed. Reopen it in BARINV PRO before creating a Barback session.', 'err');
+    return;
+  }
+  const scope = currentManagerDestinationScope();
+  const barId = scope.primaryId;
+  const allowedBars = scope.additionalIds;
+  const allowedStaff = selectedManagerStaffIds();
+  if (!allowedStaff.length) { statusOn('c-status', 'Select at least one assigned staff member.', 'err'); return; }
+  if (!barId && !allowedBars.length) { statusOn('c-status', 'Selected staff have no active assigned destinations.', 'err'); return; }
   const expRaw = $('c-expires').value;
   if (!expRaw) { statusOn('c-status', 'Pick an expiration', 'err'); return; }
   const nickname = $('c-nickname').value.trim() || null;
@@ -1672,6 +1900,7 @@ $('c-create').addEventListener('click', async () => {
   try { openingParIntent = managerOpeningParIntentOrThrow(); }
   catch (e) { statusOn('c-status', e.message || String(e), 'err'); return; }
 
+  hideGeneratedCredentials(true);
   $('c-create').disabled = true;
   $('c-create').textContent = '… GENERATING';
   statusOn('c-status', 'Calling barback-create-session…', 'info');
@@ -1727,24 +1956,21 @@ $('c-create').addEventListener('click', async () => {
   } catch (e) {
     statusOn('c-status', '✗ ' + (e.message || e), 'err');
   } finally {
-    $('c-create').disabled = false;
+    updateNightCreationState();
     $('c-create').textContent = 'GENERATE LINK + PINS';
   }
 });
 
 function renderCreateResult(res) {
+  state.credentialReveal = { link: false, qr: false, pins: new Set() };
   $('c-result-card').style.display = '';
-  const url = res.url || res.token;
-  $('c-url').textContent = url;
-  // QR
-  try {
-    const q = qrcode(0, 'M');
-    q.addData(url);
-    q.make();
-    $('qr-out').innerHTML = q.createSvgTag(4, 8);
-  } catch (e) {
-    $('qr-out').innerHTML = '<div style="color:#666;padding:18px;">QR unavailable</div>';
-  }
+  const hasLink = !!generatedSessionUrl();
+  $('c-url').textContent = hasLink ? maskedGeneratedLink() : '(no session link generated)';
+  $('qr-out').innerHTML = '';
+  $('qr-out').style.display = 'none';
+  $('c-reveal-link').textContent = 'REVEAL LINK';
+  $('c-reveal-qr').textContent = 'REVEAL QR';
+  ['c-reveal-link', 'c-copy', 'c-share', 'c-reveal-qr'].forEach(id => { if ($(id)) $(id).disabled = !hasLink; });
   // PIN ASSIGNMENTS — masked-by-default, per-row Reveal/Copy (PLAN-2026-06-17).
   // Plaintext is shown ONLY when this generation/rotation actually returned it
   // (res.pin_assignments[].pin). Existing PINs are hashed server-side and cannot
@@ -1754,6 +1980,23 @@ function renderCreateResult(res) {
 }
 
 function _maskPin() { return '\u2022\u2022\u2022\u2022\u2022\u2022'; }
+function maskedGeneratedLink() { return 'https://••••••••/barback.html?token=••••••••'; }
+function generatedSessionUrl() {
+  return state.lastCreate && (state.lastCreate.url || state.lastCreate.token) || '';
+}
+function hideGeneratedCredentials(clearPanel) {
+  state.credentialReveal = { link: false, qr: false, pins: new Set() };
+  if ($('c-url')) $('c-url').textContent = generatedSessionUrl() ? maskedGeneratedLink() : '';
+  if ($('qr-out')) { $('qr-out').innerHTML = ''; $('qr-out').style.display = 'none'; }
+  if ($('c-reveal-link')) $('c-reveal-link').textContent = 'REVEAL LINK';
+  if ($('c-reveal-qr')) $('c-reveal-qr').textContent = 'REVEAL QR';
+  if (state.lastCreate) renderPinAssignments(state.lastCreate);
+  if (clearPanel) {
+    state.lastCreate = null;
+    if ($('c-result-card')) $('c-result-card').style.display = 'none';
+  }
+}
+
 function renderPinAssignments(res) {
   const box = $('c-pins'); if (!box) return;
   const pinByStaff = {};
@@ -1771,7 +2014,7 @@ function renderPinAssignments(res) {
     if (p && p.pin) {
       return '<div class="pin-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">' +
         '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">' + nm + '</span>' +
-        '<span class="pin" data-pin-val="' + esc(p.pin) + '" data-shown="0">' + _maskPin() + '</span>' +
+        '<span class="pin" data-staff-id="' + esc(sid) + '" data-shown="0">' + _maskPin() + '</span>' +
         '<a href="#" class="pin-reveal" style="color:#fb923c;font-size:12px;text-decoration:underline;">Reveal</a>' +
         '<a href="#" class="pin-copy" style="color:#60a5fa;font-size:12px;text-decoration:underline;">Copy</a>' +
         '</div>';
@@ -1787,24 +2030,70 @@ function renderPinAssignments(res) {
   box.querySelectorAll('.pin-reveal').forEach(a => a.addEventListener('click', (e) => {
     e.preventDefault();
     const row = a.closest('.pin-row'); const span = row && row.querySelector('.pin'); if (!span) return;
-    if (span.getAttribute('data-shown') === '1') { span.textContent = _maskPin(); span.setAttribute('data-shown', '0'); a.textContent = 'Reveal'; }
-    else { span.textContent = span.getAttribute('data-pin-val') || _maskPin(); span.setAttribute('data-shown', '1'); a.textContent = 'Hide'; }
+    const sid = span.getAttribute('data-staff-id');
+    if (span.getAttribute('data-shown') === '1') {
+      span.textContent = _maskPin(); span.setAttribute('data-shown', '0'); a.textContent = 'Reveal';
+      state.credentialReveal.pins.delete(sid);
+    } else {
+      if (!confirm('Reveal this one-time PIN? Make sure only the intended recipient can see the screen.')) return;
+      const rowSecret = ((state.lastCreate && state.lastCreate.pin_assignments) || []).find(pin => pin.staff_id === sid);
+      span.textContent = (rowSecret && rowSecret.pin) || _maskPin();
+      span.setAttribute('data-shown', '1'); a.textContent = 'Hide';
+      state.credentialReveal.pins.add(sid);
+    }
   }));
   box.querySelectorAll('.pin-copy').forEach(a => a.addEventListener('click', async (e) => {
     e.preventDefault();
     const row = a.closest('.pin-row'); const span = row && row.querySelector('.pin');
-    const val = span && span.getAttribute('data-pin-val'); if (!val) return;
+    const sid = span && span.getAttribute('data-staff-id');
+    const rowSecret = ((state.lastCreate && state.lastCreate.pin_assignments) || []).find(pin => pin.staff_id === sid);
+    const val = rowSecret && rowSecret.pin; if (!val) return;
     try { await navigator.clipboard.writeText(val); a.textContent = 'Copied'; } catch (_) { a.textContent = 'Copy failed'; }
     setTimeout(() => { a.textContent = 'Copy'; }, 1200);
   }));
 }
 
+$('c-reveal-link').addEventListener('click', () => {
+  const url = generatedSessionUrl(); if (!url) return;
+  if (state.credentialReveal.link) {
+    state.credentialReveal.link = false;
+    $('c-url').textContent = maskedGeneratedLink();
+    $('c-reveal-link').textContent = 'REVEAL LINK';
+    return;
+  }
+  if (!confirm('Reveal the generated session link? Treat it as a credential and keep it private.')) return;
+  state.credentialReveal.link = true;
+  $('c-url').textContent = url;
+  $('c-reveal-link').textContent = 'HIDE LINK';
+});
+$('c-reveal-qr').addEventListener('click', () => {
+  const url = generatedSessionUrl(); if (!url) return;
+  if (state.credentialReveal.qr) {
+    state.credentialReveal.qr = false;
+    $('qr-out').innerHTML = '';
+    $('qr-out').style.display = 'none';
+    $('c-reveal-qr').textContent = 'REVEAL QR';
+    return;
+  }
+  if (!confirm('Reveal the QR code? It contains the session credential.')) return;
+  try {
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    $('qr-out').innerHTML = q.createSvgTag(4, 8);
+    $('qr-out').style.display = '';
+    state.credentialReveal.qr = true;
+    $('c-reveal-qr').textContent = 'HIDE QR';
+  } catch (_) {
+    $('qr-out').innerHTML = '<div style="color:#666;padding:18px;">QR unavailable</div>';
+    $('qr-out').style.display = '';
+  }
+});
 $('c-copy').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText($('c-url').textContent); statusOn('c-status', '✓ Copied', 'ok'); }
+  const url = generatedSessionUrl(); if (!url) return;
+  try { await navigator.clipboard.writeText(url); statusOn('c-status', '✓ Link copied without revealing it', 'ok'); }
   catch (e) { statusOn('c-status', 'Copy failed: ' + e.message, 'err'); }
 });
 $('c-share').addEventListener('click', async () => {
-  const url = $('c-url').textContent;
+  const url = generatedSessionUrl(); if (!url) return;
   if (navigator.share) {
     try { await navigator.share({ title: 'BARINV barback access', text: 'Open this on your phone', url }); }
     catch (_) {}
@@ -1816,7 +2105,7 @@ $('c-share').addEventListener('click', async () => {
 // ════════════════════════════════════════════════════════════════════
 //  Active sessions tab
 // ════════════════════════════════════════════════════════════════════
-let _sessionsLastData = [];     // cached for copySessionLink etc.
+let _sessionsLastData = [];
 let _sessionsAutoTimer = null;
 function stopSessionsAutoRefresh() {
   if (_sessionsAutoTimer) { clearInterval(_sessionsAutoTimer); _sessionsAutoTimer = null; }
@@ -1835,41 +2124,17 @@ function startSessionsAutoRefresh() {
 
 async function renderSessions(silent) {
   if (!silent) $('sessions-list').innerHTML = '<div class="muted small">loading…</div>';
-  const nightIds = state.nights.map(n => n.id);
-  if (!nightIds.length) {
-    $('sessions-list').innerHTML = '<div class="muted small">No nights loaded for this venue.</div>';
+  let data;
+  try {
+    const result = await fnInvoke('barback-manager-sessions', {
+      venue_id: state.venueId,
+      include_history: true,
+      limit: 200,
+    });
+    data = (result && result.sessions) || [];
+  } catch (e) {
+    $('sessions-list').innerHTML = '<div class="status err">' + esc(e.message || e) + '</div>';
     return;
-  }
-  // Prefer the Phase 4 analytics view (events_written, logins_ok, etc.).
-  // Fall back to base table if the view isn't deployed yet.
-  let data, error;
-  ({ data, error } = await SB.from('v_barback_session_summary')
-    .select('*')
-    .in('night_id', nightIds)
-    .order('issued_at', { ascending: false })
-    .limit(200));
-  if (error) {
-    ({ data, error } = await SB.from('barback_sessions')
-      .select('*')
-      .in('night_id', nightIds)
-      .order('issued_at', { ascending: false })
-      .limit(200));
-    if (error) {
-      $('sessions-list').innerHTML = '<div class="status err">' + esc(error.message) + '</div>';
-      return;
-    }
-    // Adapt base-table rows to the view shape so the render code is uniform.
-    data = (data || []).map(s => ({
-      ...s,
-      session_id: s.id,
-      events_written: null,
-      logins_ok: null,
-      logins_failed: null,
-      last_event_at: null,
-      status: s.revoked_at ? 'revoked' : (new Date(s.expires_at) <= new Date() ? 'expired' : 'active'),
-      allowed_staff_count: (s.allowed_staff || []).length,
-      allowed_bars_count:  (s.allowed_bars  || []).length,
-    }));
   }
 
   // Active-only filter
@@ -1884,7 +2149,6 @@ async function renderSessions(silent) {
 
   if (!data.length) {
     $('sessions-list').innerHTML = '<div class="muted small">No matching sessions.</div>';
-    updateBulkBar();
     return;
   }
 
@@ -1899,48 +2163,31 @@ async function renderSessions(silent) {
                 : expired ? '<span class="pill expired">EXPIRED</span>'
                 : expiringSoon ? '<span class="pill expiring">EXPIRING</span>'
                 : '<span class="pill active">ACTIVE</span>';
-    const barInfo = s.bar_id ? state.bars.find(b => b.id === s.bar_id)?.name || s.bar_id.slice(0,8) : '(any bar)';
+    const barInfo = s.primary_destination_id
+      ? state.bars.find(b => b.id === s.primary_destination_id)?.name || s.primary_destination_id.slice(0,8)
+      : '(any destination)';
     const nightInfo = state.nights.find(n => n.id === s.night_id);
     const nightLabel = nightInfo ? ((nightInfo.date || '') + (nightInfo.name ? ' · ' + nightInfo.name : '')) : s.night_id.slice(0,8);
 
-    const stats = (s.events_written != null)
-      ? '<span class="muted">' +
-          esc(String(s.events_written)) + ' writes · ' +
-          esc(String(s.logins_ok || 0))  + ' logins · ' +
-          esc(String(s.logins_failed || 0)) + ' failed' +
-          (s.last_event_at ? ' · last activity ' + fmtTime(s.last_event_at) : '') +
-        '</span><br>'
-      : '';
-
     const canAct = !revoked && !expired;
     return '<div class="session-row' + (revoked || expired ? ' revoked' : '') + '">' +
-      (canAct
-        ? '<input type="checkbox" class="sess-check" data-sid="' + esc(sid) + '" style="flex:0;width:18px;height:18px;margin:6px 4px 0 0;">'
-        : '') +
       '<div class="meta">' +
         pill + ' <b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
         '<span class="muted">' + esc(nightLabel) + ' · ' + esc(barInfo) + '</span><br>' +
         '<span class="muted">expires ' + fmtTime(s.expires_at) +
         (revoked ? ' · revoked ' + fmtTime(s.revoked_at) : '') + '</span><br>' +
         '<span class="muted">' + (s.allowed_staff_count || 0) + ' staff · ' +
-        (s.allowed_bars_count  || 0) + ' extra bars</span><br>' +
-        stats +
+        (s.destination_count || 0) + ' destinations · ' + (s.opening_par_item_count || 0) + ' Opening PAR items</span><br>' +
       '</div>' +
       '<div class="actions">' +
         (canAct
-          ? '<button class="btn btn-danger"    data-revoke="' + esc(sid) + '">REVOKE</button>' +
-            '<button class="btn btn-secondary" data-extend="' + esc(sid) + '">⏱ EXTEND</button>'
+          ? '<button class="btn btn-danger" data-revoke="' + esc(sid) + '">REVOKE EXACT SESSION</button>'
           : '') +
-        '<button class="btn btn-secondary" data-resend="' + esc(sid) + '">↗ COPY LINK</button>' +
       '</div>' +
     '</div>';
   }).join('');
 
   $$('[data-revoke]').forEach(b => b.addEventListener('click', () => revokeSession(b.dataset.revoke)));
-  $$('[data-extend]').forEach(b => b.addEventListener('click', () => extendSession(b.dataset.extend)));
-  $$('[data-resend]').forEach(b => b.addEventListener('click', () => copySessionLink(b.dataset.resend, _sessionsLastData)));
-  $$('.sess-check').forEach(c => c.addEventListener('change', updateBulkBar));
-  updateBulkBar();
 }
 $('sessions-refresh').addEventListener('click', () => renderSessions(false));
 $('sessions-search')?.addEventListener('input', () => renderSessions(true));
@@ -1950,37 +2197,11 @@ $('sessions-auto')?.addEventListener('change', () => {
   else stopSessionsAutoRefresh();
 });
 
-function updateBulkBar() {
-  const sel = $$('.sess-check:checked');
-  const bar = $('sessions-bulk-bar');
-  if (!bar) return;
-  if (!sel.length) { bar.style.display = 'none'; return; }
-  bar.style.display = '';
-  $('sessions-selected-count').textContent = sel.length + ' selected';
-}
-$('sessions-bulk-revoke')?.addEventListener('click', async () => {
-  const ids = $$('.sess-check:checked').map(c => c.dataset.sid);
-  if (!ids.length) return;
-  const reason = prompt('Reason for bulk revoke (optional)?', '') || '';
-  if (!confirm('Revoke ' + ids.length + ' session(s)? Cannot be undone.')) return;
-  $('sessions-bulk-revoke').disabled = true;
-  $('sessions-bulk-revoke').textContent = '… REVOKING';
-  let okN = 0, failN = 0;
-  for (const sid of ids) {
-    try { await fnInvoke('barback-revoke-session', { session_id: sid, reason: reason }); okN++; }
-    catch (e) { console.warn('revoke failed for', sid, e); failN++; }
-  }
-  $('sessions-bulk-revoke').disabled = false;
-  $('sessions-bulk-revoke').textContent = '⚠ BULK REVOKE';
-  alert('Revoked ' + okN + ' · failed ' + failN);
-  renderSessions(false);
-});
-
 async function revokeSession(sid) {
   const reason = prompt('Reason for revoke (optional)?', '') || '';
   if (!confirm('Revoke session ' + sid.slice(0,8) + '?\n\nThe next save attempt from this session will be denied.')) return;
   try {
-    await fnInvoke('barback-revoke-session', { session_id: sid, reason: reason });
+    await fnInvoke('barback-revoke-session', { session_id: sid, venue_id: state.venueId, reason: reason });
     renderSessions(false);
   } catch (e) {
     alert('Revoke failed: ' + (e.message || e));
@@ -2030,35 +2251,17 @@ async function rotatePinForStaff(staffId, staffName) {
       venue_id: state.venueId,
       length: 4,
     });
-    alert('NEW PIN for ' + (res.staff_name || staffId.slice(0,8)) + ': ' + res.pin + '\n\nWrite it down NOW — it will not be shown again.');
+    hideGeneratedCredentials(true);
+    state.lastCreate = {
+      pin_assignments: [{ staff_id: staffId, staff_name: res.staff_name || staffName || staffId.slice(0, 8), pin: res.pin }],
+      _selectedStaff: [staffId],
+      session: { allowed_staff: [staffId] },
+    };
+    renderCreateResult(state.lastCreate);
+    statusOn('c-status', 'PIN rotated. The one-time value is masked in the credential panel.', 'ok');
   } catch (e) {
     alert('Rotate failed: ' + (e.message || e));
   }
-}
-
-function copySessionLink(sid, sessions) {
-  const s = sessions.find(x => x.id === sid);
-  if (!s) return;
-  const payload = {
-    v: 1,
-    session_id: s.id,
-    venue_id: s.venue_id,
-    night_id: s.night_id,
-    bar_id: s.bar_id ?? null,
-    allowed_bars: s.allowed_bars,
-    allowed_staff: s.allowed_staff,
-    nickname: s.nickname,
-    expires_at: s.expires_at,
-    test_mode: false,
-  };
-  const token = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  // PLAN-QR-2026-06-03 Web-Barback: use canonical public HTTPS base
-  // so the copied URL is openable by the barback's personal phone.
-  const url = getBarinvPublicBaseUrl() + '/barback.html?token=' + encodeURIComponent(token);
-  navigator.clipboard.writeText(url)
-    .then(() => alert('Copied:\n' + url))
-    .catch(() => prompt('Copy this URL:', url));
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2128,48 +2331,6 @@ function populateDangerZoneNights() {
     '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>'
   ).join('');
 }
-
-$('dz-revoke-all')?.addEventListener('click', async () => {
-  const nightId = $('dz-night').value;
-  if (!nightId) { alert('Pick a night'); return; }
-  if (!confirm('REVOKE ALL active sessions for this night?\n\nBarbacks currently signed in will be force-logged-out on their next save.')) return;
-  $('dz-revoke-all').disabled = true;
-  // Find every active session for this night, revoke one by one
-  const { data } = await SB.from('barback_sessions')
-    .select('id')
-    .eq('night_id', nightId)
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString());
-  let okN = 0, failN = 0;
-  for (const r of (data || [])) {
-    try { await fnInvoke('barback-revoke-session', { session_id: r.id, reason: 'revoke_all' }); okN++; }
-    catch (_) { failN++; }
-  }
-  $('dz-revoke-all').disabled = false;
-  statusOn('dz-status', '✓ Revoked ' + okN + ' · failed ' + failN, failN === 0 ? 'ok' : 'warn');
-  renderSessions(false);
-});
-
-$('dz-close-night')?.addEventListener('click', async () => {
-  const nightId = $('dz-night').value;
-  if (!nightId) { alert('Pick a night'); return; }
-  if (!confirm('CLOSE NIGHT — revoke every active session for this night AND write a "night_closed" audit row.\n\nThis is the end-of-shift marker. Proceed?')) return;
-  const reason = prompt('Reason / notes for close (shown in audit log; optional)?', '') || '';
-  $('dz-close-night').disabled = true;
-  try {
-    const res = await fnInvoke('barback-close-night', {
-      venue_id: state.venueId,
-      night_id: nightId,
-      reason: reason,
-    });
-    statusOn('dz-status', '✓ Closed: ' + res.closed_count + ' session(s) revoked, audit recorded', 'ok');
-    renderSessions(false);
-  } catch (e) {
-    statusOn('dz-status', '✗ Close failed: ' + (e.message || e), 'err');
-  } finally {
-    $('dz-close-night').disabled = false;
-  }
-});
 
 $('dz-export-csv')?.addEventListener('click', async () => {
   const nightId = $('dz-night').value;

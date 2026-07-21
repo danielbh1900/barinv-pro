@@ -71,18 +71,20 @@ function uniqueIdArray(value: unknown, field: string): string[] {
 }
 
 // BARBACK_CREATE_SESSION_VALIDATION_START
-const SESSION_BAR_TYPES = ["bar"];
 const SESSION_TABLE_TYPES = ["table", "vip", "booth"];
-const SESSION_BAR_ROLE_KEYWORDS = ["barback", "manager", "admin", "lead", "supervisor"];
+const SESSION_BAR_ROLE_KEYWORDS = ["barback", "bartender", "manager", "admin", "lead", "supervisor"];
 const SESSION_TABLE_ROLE_KEYWORDS = ["server", "table", "vip", "manager", "admin", "lead", "supervisor"];
 const OPENING_PAR_REGULAR_MODES = ["regular_bar", "bar", "bar_only", "all_bars", "both"];
 const OPENING_PAR_MAX_ITEMS = 500;
 
 function sessionModeForBarType(value: unknown): SessionLinkMode | null {
   const type = String(value || "").toLowerCase().trim();
-  if (SESSION_BAR_TYPES.includes(type)) return "bar";
+  if (!type) return null;
   if (SESSION_TABLE_TYPES.includes(type)) return "table";
-  return null;
+  // `bars` is BARINV PRO's generic operational-destination table. Any active,
+  // night-activated non-table type (bar, internal station, dispatch, storage,
+  // liquor room, or a future operational type) belongs to Barback/Bars mode.
+  return "bar";
 }
 
 function resolveSessionDestinations(
@@ -102,7 +104,7 @@ function resolveSessionDestinations(
     const area = byId.get(id);
     if (!area) throw new SessionInputError("selected destination is not active for this venue/night");
     const mode = sessionModeForBarType(area.bar_type);
-    if (!mode) throw new SessionInputError("selected destination is not a supported bar/table area");
+    if (!mode) throw new SessionInputError("selected destination has no supported operational type");
     if (explicitMode && mode !== explicitMode) {
       throw new SessionInputError("selected destination is invalid for the requested link type");
     }
@@ -253,6 +255,9 @@ Deno.serve(async (req: Request) => {
     allowedBars = uniqueIdArray(body.allowed_bars, "allowed_bars");
     allowedStaff = uniqueIdArray(body.allowed_staff, "allowed_staff");
     pinRotateFor = uniqueIdArray(body.pin_rotate_for, "pin_rotate_for");
+    if (!allowedStaff.length) {
+      throw new SessionInputError("at least one allowed_staff member is required");
+    }
     const allowedStaffSet = new Set(allowedStaff);
     if (pinRotateFor.some((id) => !allowedStaffSet.has(id))) {
       throw new SessionInputError("pin_rotate_for must be a subset of allowed_staff");
@@ -268,10 +273,16 @@ Deno.serve(async (req: Request) => {
   if (!venueExistsRow) return errorResponse("venue not found", 400);
 
   const { data: scopedNight, error: nightErr } = await svc
-    .from("nights").select("id, venue_id")
+    .from("nights").select("id, venue_id, active")
     .eq("id", body.night_id).eq("venue_id", body.venue_id).maybeSingle();
   if (nightErr) return errorResponse("night validation failed: " + nightErr.message, 500);
   if (!scopedNight) return errorResponse("night does not belong to the authorised venue", 400);
+  if (scopedNight.active === false) {
+    return errorResponse(
+      "This night is closed. Reopen it in BARINV PRO before creating a Barback session.",
+      409,
+    );
+  }
 
   const [nightBarsRes, venueBarsRes] = await Promise.all([
     svc.from("night_bars").select("bar_id").eq("night_id", body.night_id),
@@ -290,6 +301,9 @@ Deno.serve(async (req: Request) => {
   } catch (e) {
     if (e instanceof SessionInputError) return errorResponse(e.message, 400);
     return errorResponse("invalid destination scope", 400);
+  }
+  if (!resolvedScope.mode || !resolvedScope.effectiveDestinationIds.length) {
+    return errorResponse("at least one validated destination is required", 400);
   }
 
   if (allowedStaff.length) {
@@ -319,6 +333,7 @@ Deno.serve(async (req: Request) => {
       const mode = sessionModeForBarType(area.bar_type);
       if (mode) activeAreaModeById.set(area.id, mode);
     }
+    const assignedDestinationIds = new Set<string>();
     for (const staffId of allowedStaff) {
       const staff = staffById.get(staffId);
       if (!staff || staff.active === false) return errorResponse("allowed_staff contains an inactive or cross-venue staff id", 400);
@@ -329,6 +344,19 @@ Deno.serve(async (req: Request) => {
         staffHasModeCoverage(assignment, mode, activeAreaModeById)
       ));
       if (!eligible) return errorResponse("allowed_staff contains a staff member not eligible for this venue/night/link type", 400);
+      for (const assignment of assignments) {
+        if (!staffRoleEligible(staff, assignment, resolvedScope.mode)) continue;
+        for (const destinationId of assignment.allowed_bar_ids ?? []) {
+          if (activeAreaModeById.get(destinationId) === resolvedScope.mode) {
+            assignedDestinationIds.add(destinationId);
+          }
+        }
+      }
+    }
+    for (const destinationId of resolvedScope.effectiveDestinationIds) {
+      if (!assignedDestinationIds.has(destinationId)) {
+        return errorResponse("selected destination is not assigned to allowed_staff", 400);
+      }
     }
   }
 
@@ -341,7 +369,7 @@ Deno.serve(async (req: Request) => {
   try {
     if (body.opening_par_enabled === true) {
       if (resolvedScope.mode !== "bar" || !resolvedScope.effectiveDestinationIds.length) {
-        throw new SessionInputError("Opening PAR requires at least one validated regular-bar destination");
+        throw new SessionInputError("Opening PAR requires at least one validated operational destination");
       }
       const { data: venueItems, error: itemErr } = await svc
         .from("items").select("id, active, service_mode").eq("venue_id", body.venue_id);
@@ -381,7 +409,9 @@ Deno.serve(async (req: Request) => {
       expires_at:    expiresAt.toISOString(),
       opening_par_config: openingParConfig,
     })
-    .select()
+    .select(
+      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, opening_par_config",
+    )
     .single();
   if (insErr || !session) {
     return errorResponse("failed to create session: " + (insErr?.message ?? "?"), 500);
