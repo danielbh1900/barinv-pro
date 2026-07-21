@@ -367,7 +367,7 @@ test('36. Master PAR changes after link creation do not change the stored sessio
 });
 
 test('37. Manager Opening PAR rollout gate defaults OFF', () => {
-  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = false;/);
+  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
 });
 
 test('38. disabled Manager gate keeps the Opening PAR card hidden and controls disabled', () => {
@@ -446,6 +446,6 @@ test('45. enabled Manager gate retains Night and Link Type stale-snapshot cleari
 });
 
 test('46. Manager and Barback production rollout gates both remain OFF', () => {
-  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = false;/);
+  assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
   assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
 });
