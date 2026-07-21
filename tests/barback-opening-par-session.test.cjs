@@ -215,8 +215,9 @@ test('15. vip_only item is rejected for regular-bar Opening PAR', () => {
 });
 
 test('16. invalid Night is rejected inside the authorized venue', () => {
-  assert.match(createEdge, /from\("nights"\)\.select\("id, venue_id"\)[\s\S]*\.eq\("id", body\.night_id\)\.eq\("venue_id", body\.venue_id\)/);
+  assert.match(createEdge, /from\("nights"\)\.select\("id, venue_id, active"\)[\s\S]*\.eq\("id", body\.night_id\)\.eq\("venue_id", body\.venue_id\)/);
   assert.match(createEdge, /night does not belong to the authorised venue/);
+  assert.match(createEdge, /This night is closed\. Reopen it in BARINV PRO before creating a Barback session\./);
 });
 
 test('17. invalid destination is rejected', () => {
@@ -287,31 +288,30 @@ test('27. enabled session plus eventual global gate uses the session snapshot', 
   assert.equal(model.items[0].opening_par_qty, 2);
 });
 
-test('28. Barback editor has no fallback to live Master PAR', () => {
+test('28. Barback checklist has no fallback to live Master PAR', () => {
   const ui = between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
-  assert.doesNotMatch(ui, /Number\(item\.par_level\)|state\.openingParQty\[item\.id\]\s*=\s*Number\(item\.par_level\)/);
-  assert.match(ui, /state\.openingParQty\[item\.id\] = Number\(item\.opening_par_qty\)/);
+  assert.doesNotMatch(ui, /item\.par_level|openingParQty|type="number"/);
+  assert.match(ui, /Target: ' \+ row\.targetQty/);
   assert.match(ui, /state\.openingParSession/);
 });
 
-test('29. Barback local override changes generated drafts only', () => {
+test('29. Barback target quantity cannot be overridden', () => {
   const snapshot = { enabled: true, version: 1, items: [{ item_id: 'heineken', qty: 4 }] };
   const visible = [{ id: 'heineken', name: 'Heineken', par_level: 4 }];
   const joined = barbackCore.normalizeSessionSnapshot(snapshot, visible);
-  const plan = barbackCore.buildPlan({
+  const checklist = barbackCore.buildChecklist({
     items: joined.items,
-    bars: [{ id: 'bar-1' }],
-    qtyByItem: { heineken: 2 },
-    drafts: [],
-    nightId: 'night-1',
+    destinations: [{ id: 'bar-1' }],
+    completions: [],
+    sessionId: 'session-1',
   });
-  assert.equal(plan.rows[0].qty, 2);
+  assert.equal(checklist.groups[0].rows[0].targetQty, 4);
   assert.equal(snapshot.items[0].qty, 4);
   assert.equal(visible[0].par_level, 4);
 });
 
 test('30. existing TAKEN flow remains wired to addToReview', () => {
-  assert.match(barbackHtml, /action:\s*'TAKEN'/);
+  assert.match(barbackHtml, /data-action="TAKEN"/);
   assert.match(barbackHtml, /function addToReview\(payload\)/);
 });
 
@@ -323,7 +323,7 @@ test('31. existing RETURN flow remains wired to addToReview', () => {
 
 test('32. existing PARTIAL restrictions remain unchanged', () => {
   assert.match(barbackHtml, /bottleState === 'PARTIAL' && multiBarDestCount\(\) > 1/);
-  assert.match(between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /bottle_state: 'UNOPENED'/);
+  assert.doesNotMatch(between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /bottle_state|addToReview/);
 });
 
 test('33. Review Edit/Delete remains Drafts-backed', () => {
@@ -340,20 +340,17 @@ test('34. Submit All payload schema remains unchanged', () => {
   assert.doesNotMatch(between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /eventsInsert\(/);
 });
 
-test('35. offline/reload add-missing duplicate protection remains draft-local', () => {
-  const draft = {
-    night_id: 'night-1', bar_id: 'bar-1', item_id: 'heineken',
-    notes: barbackCore.marker, opening_par_v1: true,
-  };
-  const restored = JSON.parse(JSON.stringify([draft]));
-  const plan = barbackCore.buildPlan({
+test('35. reload reconstruction uses persisted checklist receipts, not local drafts', () => {
+  const completion = { destination_id: 'bar-1', item_id: 'heineken', confirmed_at: 'stamp' };
+  const checklist = barbackCore.buildChecklist({
     items: [{ id: 'heineken', opening_par_qty: 2 }],
-    bars: [{ id: 'bar-1' }],
-    qtyByItem: {}, drafts: restored, nightId: 'night-1',
+    destinations: [{ id: 'bar-1' }],
+    completions: [completion], sessionId: 'session-1',
   });
-  assert.equal(plan.duplicateCount, 1);
-  assert.equal(plan.rows.length, 0);
-  assert.match(barbackHtml, /reviewDrafts:\s*'barinv_barback_review_drafts'/);
+  assert.equal(checklist.receivedCount, 1);
+  const ui = between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /openingParChecklistInvoke\('list'\)/);
+  assert.doesNotMatch(ui, /Drafts\.|Outbox\./);
 });
 
 test('36. Master PAR changes after link creation do not change the stored session snapshot', () => {
@@ -366,7 +363,7 @@ test('36. Master PAR changes after link creation do not change the stored sessio
   assert.equal(visible[0].par_level, 12);
 });
 
-test('37. Manager Opening PAR rollout gate defaults OFF', () => {
+test('37. Manager Opening PAR rollout gate remains ON', () => {
   assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
 });
 
@@ -445,7 +442,7 @@ test('45. enabled Manager gate retains Night and Link Type stale-snapshot cleari
   assert.match(managerHtml, /if \(OPENING_PAR_MANAGER_V1_ENABLED && \$\('c-opening-par-enabled'\)\)/);
 });
 
-test('46. Manager and Barback production rollout gates both remain OFF', () => {
+test('46. Manager gate remains ON while the Barback rollout gate remains OFF', () => {
   assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
   assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
 });

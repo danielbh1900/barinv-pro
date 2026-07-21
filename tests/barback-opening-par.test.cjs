@@ -8,10 +8,8 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'barback.html'), 'utf8');
-const edge = fs.readFileSync(
-  path.join(root, 'supabase/functions/barback-pin-login/index.ts'),
-  'utf8',
-);
+const edge = fs.readFileSync(path.join(root, 'supabase/functions/barback-pin-login/index.ts'), 'utf8');
+const checklistEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-opening-par-checklist/index.ts'), 'utf8');
 
 function between(start, end) {
   const a = html.indexOf(start);
@@ -30,48 +28,24 @@ vm.runInNewContext(
 );
 const core = coreContext.OpeningParV1;
 
-const items = [
-  { id: 'heineken', name: 'Heineken', par_level: 4, service_mode: 'regular_bar' },
-  { id: 'corona', name: 'Corona', par_level: 3, service_mode: 'all_bars' },
-  { id: 'finlandia', name: 'Finlandia', par_level: 4, service_mode: 'regular_bar' },
+const visibleItems = [
+  { id: 'heineken', name: 'Heineken', par_level: 99, service_mode: 'regular_bar', unit: 'bottle' },
+  { id: 'corona', name: 'Corona', par_level: 88, service_mode: 'all_bars', unit: 'case' },
 ];
-const bar1 = { id: 'bar-1', name: 'Main Bar', bar_type: 'bar' };
-const bar2 = { id: 'bar-2', name: 'Patio Bar', bar_type: 'bar' };
+const snapshot = {
+  enabled: true, version: 1,
+  items: [{ item_id: 'heineken', qty: 4 }, { item_id: 'corona', qty: 3 }],
+};
+const model = core.normalizeSessionSnapshot(snapshot, visibleItems);
+const destinations = [
+  { id: 'bar-1', name: 'Main Bar', bar_type: 'bar' },
+  { id: 'dispatch-1', name: 'Dispatch', bar_type: 'dispatch' },
+];
 
-function plan(overrides = {}) {
-  return core.buildPlan({
-    items,
-    bars: [bar1],
-    qtyByItem: {},
-    drafts: [],
-    nightId: 'night-1',
-    ...overrides,
+function checklist(overrides = {}) {
+  return core.buildChecklist({
+    sessionId: 'session-1', items: model.items, destinations: [destinations[0]], completions: [], ...overrides,
   });
-}
-
-function scopeFunctions() {
-  const names = [
-    'SCOPE_BAR_ALIASES',
-    'SCOPE_BOTH_ALIASES',
-    'SCOPE_VIP_ALIASES',
-    'SCOPE_HIDDEN_ALIASES',
-  ];
-  const declarations = names.map(name => {
-    const match = html.match(new RegExp(`const ${name}\\s*=\\s*\\[[^;]+;`));
-    assert.ok(match, `missing ${name}`);
-    return match[0];
-  }).join('\n');
-  const start = html.indexOf('function normalizeItemScope(item)');
-  const end = html.indexOf('// Is this item selectable by the given role?', start);
-  const start2 = html.indexOf('function isItemAllowedForRole(item, role)', end);
-  const end2 = html.indexOf('function getAllowedItemsForCurrentSession(items)', start2);
-  const context = {};
-  vm.runInNewContext(
-    declarations + '\n' + html.slice(start, end) + '\n' + html.slice(start2, end2) +
-      '\nthis.isItemAllowedForRole = isItemAllowedForRole;',
-    context,
-  );
-  return context;
 }
 
 function addToReviewHarness() {
@@ -83,182 +57,130 @@ function addToReviewHarness() {
   const context = {
     state: {
       tokenPayload: { venue_id: 'venue-1', night_id: 'night-1', session_id: 'session-1' },
-      serverSession: { session_id: 'session-1' },
-      jwt: 'scoped-jwt',
-      staffId: 'staff-1',
-      staffName: 'Bar Back',
+      serverSession: { session_id: 'session-1' }, jwt: 'jwt', staffId: 'staff-1', staffName: 'Bar Back',
     },
-    cache: { items },
+    cache: { items: visibleItems },
     isItemAllowedForRole: () => true,
     getCurrentUserRole: () => 'barback',
     scopeBlockReason: () => 'blocked',
-    isAreaAllowedForSession: id => id === 'bar-1' || id === 'bar-2',
+    isAreaAllowedForSession: id => id === 'bar-1',
     normalizeBottleState: (state, weight) => state || (weight ? 'PARTIAL' : 'UNOPENED'),
-    normalizeWeightG: value => {
-      const n = Number(value);
-      return Number.isFinite(n) && n > 0 ? n : null;
-    },
+    normalizeWeightG: value => Number(value) > 0 ? Number(value) : null,
     uuidv4: () => `ce-${++sequence}`,
-    STAGING_MODE: false,
-    LIVE_PILOT_MODE: false,
+    STAGING_MODE: false, LIVE_PILOT_MODE: false,
     WeightProfiles: { calcRemaining: () => null },
-    deriveLiquidG: () => null,
-    deriveRemainingMl: () => null,
-    nonNegNum: value => {
-      const n = Number(value);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    },
+    deriveLiquidG: () => null, deriveRemainingMl: () => null,
+    nonNegNum: value => Number(value) >= 0 ? Number(value) : null,
     Drafts: { add: record => captured.push(record) },
-    StageLog: { push: () => {} },
-    Recent: { add: () => {} },
-    Telemetry: { bump: () => {} },
+    StageLog: { push: () => {} }, Recent: { add: () => {} }, Telemetry: { bump: () => {} },
     renderRecentItemChips: () => {},
   };
   vm.runInNewContext(html.slice(start, end), context, { filename: 'add-to-review.js' });
   return { context, captured };
 }
 
-test('1. one assigned bar generates one row per positive item', () => {
-  const result = plan();
-  assert.equal(result.barCount, 1);
-  assert.equal(result.rows.length, 3);
+test('1. authenticated session snapshot supplies read-only target quantities', () => {
+  assert.equal(model.enabled, true);
+  assert.equal(model.items[0].opening_par_qty, 4);
+  assert.equal(model.items[0].par_level, 99);
 });
 
-test('2. multiple assigned bars generate item x destination rows', () => {
-  const result = plan({ bars: [bar1, bar2] });
-  assert.equal(result.barCount, 2);
-  assert.equal(result.rows.length, 6);
-  const { context, captured } = addToReviewHarness();
-  result.rows.forEach(row => {
-    const added = context.addToReview({
-      item_id: row.item.id, item_name: row.item.name, qty: row.qty,
-      action: 'TAKEN', bar_id: row.bar.id, notes: core.marker,
-      bottle_state: 'UNOPENED', opening_par_v1: true,
-    });
-    assert.equal(added.ok, true);
-  });
-  assert.equal(captured.length, 6);
-  assert.equal(captured.every(draft => draft.opening_par_v1 === true), true);
+test('2. one destination creates one checklist row per positive item', () => {
+  const result = checklist();
+  assert.equal(result.destinationCount, 1);
+  assert.equal(result.rowCount, 2);
 });
 
-test('3. no assigned bars fails closed with zero generated rows', () => {
-  const result = plan({ bars: [] });
-  assert.equal(result.barCount, 0);
-  assert.equal(result.rows.length, 0);
+test('3. multiple destinations are independent and deduplicated', () => {
+  const result = checklist({ destinations: [destinations[0], destinations[1], destinations[0]] });
+  assert.equal(result.destinationCount, 2);
+  assert.equal(result.rowCount, 4);
+  assert.equal(result.groups[1].destination.id, 'dispatch-1');
+});
+
+test('4. no authorized destination fails closed with no checklist rows', () => {
+  const result = checklist({ destinations: [] });
+  assert.equal(result.rowCount, 0);
   assert.match(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /reviewSessionBars\(\)/);
 });
 
-test('4. missing or stale par_level is skipped safely', () => {
-  const visible = core.positiveParItems([
-    { id: 'missing', service_mode: 'regular_bar' },
-    { id: 'stale', par_level: 'not-a-number', service_mode: 'regular_bar' },
-    items[0],
-  ]);
-  assert.equal(visible.length, 1);
-  assert.equal(visible[0].id, 'heineken');
+test('5. zero or malformed snapshot quantities cannot become confirmable rows', () => {
+  const malformed = core.normalizeSessionSnapshot(
+    { enabled: true, version: 1, items: [{ item_id: 'heineken', qty: 0 }] }, visibleItems,
+  );
+  assert.equal(malformed.valid, false);
+  assert.equal(core.positiveParItems([{ id: 'x', opening_par_qty: 0 }]).length, 0);
 });
 
-test('5. par_level zero is excluded', () => {
-  assert.equal(core.positiveParItems([{ id: 'zero', par_level: 0 }]).length, 0);
+test('6. Master PAR changes cannot alter the stored target', () => {
+  visibleItems[0].par_level = 123;
+  assert.equal(model.items[0].opening_par_qty, 4);
 });
 
-test('6. editable override 4 to 2 affects drafts only', () => {
-  const result = plan({ items: [items[0]], qtyByItem: { heineken: 2 } });
-  assert.equal(result.rows[0].qty, 2);
-  assert.equal(items[0].par_level, 4);
+test('7. receipt state is keyed by session, destination, and item', () => {
+  assert.equal(core.checklistKey('s', 'd', 'i'), 's|d|i');
+  assert.notEqual(core.checklistKey('s', 'd1', 'i'), core.checklistKey('s', 'd2', 'i'));
 });
 
-test('7. regular-bar filtering reuses the existing service_mode predicate', () => {
-  const scope = scopeFunctions();
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'regular_bar' }, 'barback'), true);
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'all_bars' }, 'barback'), true);
-  assert.match(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /getAllowedItemsForCurrentSession\(cache\.items\)/);
-});
-
-test('8. vip_only is excluded from regular bar sessions', () => {
-  const scope = scopeFunctions();
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'vip_only' }, 'barback'), false);
-});
-
-test('9. duplicate Opening drafts are add-missing-only for the same night/bar/item', () => {
-  const drafts = [{
-    night_id: 'night-1', bar_id: 'bar-1', item_id: 'heineken', action: 'RETURNED',
-    notes: core.marker, opening_par_v1: true,
-  }];
-  const result = plan({ items: [items[0], items[1]], drafts });
-  assert.equal(result.duplicateCount, 1);
-  assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0].item.id, 'corona');
-  assert.equal(plan({ items: [items[0]], drafts, nightId: 'night-2' }).rows.length, 1);
-});
-
-test('10. editable quantity zero is skipped', () => {
-  const result = plan({ qtyByItem: { heineken: 0, corona: 3, finlandia: 0 } });
-  assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0].item.id, 'corona');
-});
-
-test('11. existing TAKEN draft path remains functional', () => {
-  const { context, captured } = addToReviewHarness();
-  const result = context.addToReview({
-    item_id: 'heineken', item_name: 'Heineken', qty: 2, action: 'TAKEN',
-    bar_id: 'bar-1', notes: '', bottle_state: 'UNOPENED',
+test('8. completing one destination does not complete another', () => {
+  const result = checklist({
+    destinations,
+    completions: [{ destination_id: 'bar-1', item_id: 'heineken', confirmed_at: 'stamp' }],
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.groups[0].receivedCount, 1);
+  assert.equal(result.groups[1].receivedCount, 0);
+});
+
+test('9. duplicate retry receipts reconstruct as one Received state', () => {
+  const completion = { destination_id: 'bar-1', item_id: 'heineken', confirmed_at: 'first' };
+  const result = checklist({ completions: [completion, { ...completion, confirmed_at: 'second' }] });
+  assert.equal(result.receivedCount, 1);
+  assert.equal(result.groups[0].rows[0].completion.confirmed_at, 'first');
+  assert.match(checklistEdge, /insertError\.code !== "23505"/);
+});
+
+test('10. Opening PAR has no quantity editor or Add All action', () => {
+  const ui = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  const markup = html.slice(html.indexOf('id="opening-par-row"'), html.indexOf('id="opening-par-status"'));
+  assert.doesNotMatch(ui + markup, /op-minus|op-plus|opening-par-qty|ADD MISSING|ADD ALL/i);
+});
+
+test('11. Opening PAR never enters Classic Review or Drafts', () => {
+  const ui = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.doesNotMatch(ui, /addToReview|Drafts\.|Outbox\.|eventsInsert/);
+});
+
+test('12. confirmation request contains destination and item but no target quantity', () => {
+  const ui = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /openingParChecklistInvoke\('confirm', \{ destination_id: destinationId, item_id: itemId \}\)/);
+  assert.match(checklistEdge, /target quantity is read-only/);
+});
+
+test('13. reload path lists persisted receipts before rendering', () => {
+  const ui = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /openingParChecklistInvoke\('list'\)/);
+  assert.match(ui, /cacheOpeningParCompletions/);
+});
+
+test('14. Classic TAKEN draft path remains functional', () => {
+  const { context, captured } = addToReviewHarness();
+  assert.equal(context.addToReview({ item_id: 'heineken', item_name: 'Heineken', qty: 2, action: 'TAKEN', bar_id: 'bar-1', notes: '' }).ok, true);
   assert.equal(captured[0].action, 'TAKEN');
-  assert.equal(captured[0].qty, 2);
 });
 
-test('12. existing RETURN draft path remains functional', () => {
+test('15. Classic RETURN draft path remains functional', () => {
   const { context, captured } = addToReviewHarness();
-  const result = context.addToReview({
-    item_id: 'heineken', item_name: 'Heineken', qty: 642.5, action: 'RETURNED',
-    bar_id: 'bar-1', notes: '', bottle_state: 'UNOPENED',
-  });
-  assert.equal(result.ok, true);
+  assert.equal(context.addToReview({ item_id: 'heineken', item_name: 'Heineken', qty: 642.5, action: 'RETURNED', bar_id: 'bar-1', notes: '' }).ok, true);
   assert.equal(captured[0].action, 'RETURNED');
-  assert.equal(captured[0].qty, 642.5);
 });
 
-test('13. PARTIAL remains single-destination and Opening rows are UNOPENED', () => {
+test('16. existing PARTIAL and Review protections remain in Classic code', () => {
   assert.match(html, /bottleState === 'PARTIAL' && multiBarDestCount\(\) > 1/);
-  const openingUi = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
-  assert.match(openingUi, /bottle_state: 'UNOPENED'/);
-  assert.doesNotMatch(openingUi, /bottle_state: 'PARTIAL'/);
-});
-
-test('14. Review Edit/Delete paths remain wired to Drafts', () => {
-  assert.match(html, /function onDraftDelete\(ce\)/);
-  assert.match(html, /Drafts\.removeById\(ce\)/);
   assert.match(html, /function onDraftEditSave\(ce, form\)/);
-  assert.match(html, /Drafts\.save\(arr\)/);
+  assert.match(html, /async function submitAllDraftsToBarinv\(\)/);
 });
 
-test('15. Submit All strips Opening metadata and keeps the existing event payload path', () => {
-  const submitStart = html.indexOf('async function submitAllDraftsToBarinv()');
-  const submitEnd = html.indexOf('// Keep the SUBMIT ALL button label', submitStart);
-  const submit = html.slice(submitStart, submitEnd);
-  assert.match(submit, /drafted_at, opening_par_v1, weight_g/);
-  assert.match(submit, /Outbox\.push\(rec\)/);
-  assert.match(html, /const \{ queued_at, attempts, last_error, last_attempt_at, \.\.\.rec \} = ev;/);
-  assert.match(html, /eventsInsert\(rec\)/);
-  assert.doesNotMatch(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /from\(['"]events['"]\)|eventsInsert\(/);
-});
-
-test('16. offline/reload duplicate state survives local draft serialization', () => {
-  const draft = {
-    night_id: 'night-1', bar_id: 'bar-1', item_id: 'heineken', action: 'TAKEN',
-    notes: core.marker, opening_par_v1: true,
-  };
-  const restored = JSON.parse(JSON.stringify([draft]));
-  assert.equal(core.isOpeningDraft(restored[0]), true);
-  assert.equal(plan({ items: [items[0]], drafts: restored }).duplicateCount, 1);
-  assert.match(html, /reviewDrafts:\s+'barinv_barback_review_drafts'/);
-});
-
-test('feature is reversible, defaults OFF, and login projection is additive', () => {
+test('17. feature remains gated OFF and PIN login projection stays additive', () => {
   assert.match(html, /const OPENING_PAR_V1_ENABLED = false;/);
-  assert.match(edge, /full_bottle_weight_g, par_level"\)/);
-  assert.match(edge, /\.or\("active\.is\.true,active\.is\.null"\)/);
-  assert.match(edge, /\.eq\("venue_id", venueId\)/);
+  assert.match(edge, /opening_par: openingParResult\.value/);
 });
