@@ -1,75 +1,86 @@
-# Barback Opening PAR checklist persistence decision — V1
+# Barback Opening PAR Checklist persistence decision — V1
 
-Status: design checkpoint only. No migration was authored or executed because the repository migration baseline is incomplete.
+Status: approved local implementation checkpoint. The verified 86-file baseline was restored and migration `20260722063733_barback_opening_par_checklist_persistence.sql` was authored. It has not been executed or deployed.
 
-## Decision
+## Workflow decision
 
-The Received checklist requires a new session-scoped table. Existing storage does not safely satisfy the contract:
+When both the compile gate and venue runtime flag are enabled, PIN login performs an authoritative staff-specific status check before normal operations:
 
-- `events` is an append-only TAKEN/RETURN stream and has no unique `(session, destination, item)` state.
-- the browser Review drafts and outbox are device-local, editable Classic transaction queues and cannot reconstruct authoritative state across devices;
-- `opening_runs` / `opening_run_items` are profile/run based, not session based, and do not store independent item confirmation identity and time per session and destination.
+1. no applicable Opening PAR configuration or runtime gate off → Classic TAKEN / RETURN;
+2. completed `(session_id, staff_id)` → Classic TAKEN / RETURN;
+3. incomplete → dedicated, non-dismissible Opening PAR Checklist;
+4. unavailable or inconsistent status → fail closed on the checklist screen.
 
-Those stores must remain unchanged so Opening PAR never enters the Classic Review queue.
+The checklist never writes to Classic Review, Drafts, Outbox, or `events`.
 
-## Proposed table
+## Receipt persistence
 
-`public.barback_opening_par_receipts`
+`public.barback_opening_par_receipts` stores immutable actual counts:
 
-| Column | Type | Contract |
-| --- | --- | --- |
-| `session_id` | `uuid` | FK to `barback_sessions(id)`, required |
-| `destination_id` | `uuid` | FK to `bars(id)`, required |
-| `item_id` | `uuid` | FK to `items(id)`, required |
-| `status` | `text` | required, check `status = 'received'` |
-| `confirmed_at` | `timestamptz` | required, server timestamp |
-| `confirmed_by` | `uuid` | FK to `staff(id)`, required |
+| Column | Contract |
+| --- | --- |
+| `session_id` | required FK, `ON DELETE RESTRICT` |
+| `destination_id` | required `bars` FK, `ON DELETE RESTRICT` |
+| `staff_id` | required staff FK, `ON DELETE RESTRICT` |
+| `item_id` | required item FK, `ON DELETE RESTRICT` |
+| `expected_quantity` | positive integer copied from the immutable session snapshot |
+| `received_quantity` | staff-entered whole integer greater than or equal to zero |
+| `confirmed_at` | immutable server timestamp |
 
-Primary key: `(session_id, destination_id, item_id)`.
+Primary key: `(session_id, destination_id, staff_id, item_id)`.
 
-The primary key is the idempotency and retry boundary. A repeated confirmation returns the existing row without changing `confirmed_at` or `confirmed_by`.
+An exact retry returns the existing row without changing its quantity, identity, or timestamp. A retry with a different received quantity is rejected.
 
-Recommended supporting index: `(confirmed_by, confirmed_at desc)` for audit support. The primary key already supports session reconstruction.
+## Completion persistence
 
-Foreign-key deletion behavior should preserve audit history: use `ON DELETE RESTRICT` for session, destination, item, and staff references. Historical sessions and closed nights must not cascade-delete checklist state.
+`public.barback_opening_par_completions` records exactly one completion per `(session_id, staff_id)` with `completed_by`, `completed_at`, and the confirmed row count. Completion does not require actual quantity to equal Expected PAR.
 
-## Security model
+The service-only `public.barback_confirm_opening_par(...)` RPC:
 
-- Enable RLS.
-- Grant no direct browser `SELECT`, `INSERT`, `UPDATE`, or `DELETE` policy to `anon`, `authenticated`, or `barback_user`.
-- Use only the server-mediated `barback-opening-par-checklist` Edge Function with the service role.
-- The function verifies the signed Barback JWT and derives `session_id`, venue, night, and staff from its claims.
-- Every request rechecks session existence, revocation, expiration, allowed staff, active night, active night destination, and positive item membership in `opening_par_config`.
-- The client cannot submit a target quantity or a different session ID.
-- There is no update/delete/unconfirm or Confirm All operation in V1.
+- revalidates venue, active session/night/staff/destination/item, assignment scope, and session snapshot;
+- derives Expected PAR from `opening_par_config` and never accepts it from the browser;
+- serializes concurrent confirmations per staff/session with a transaction advisory lock;
+- inserts with `ON CONFLICT DO NOTHING`;
+- calculates staff-specific required, confirmed, and remaining counts;
+- creates the final receipt and completion in the same transaction;
+- appends `opening_par_received` and `opening_par_completed` audit entries;
+- returns only safe receipt, variance, progress, and completion data.
 
-Manager history, if later required, should also use a manager-authenticated Edge Function rather than a broad table RLS policy.
+## Quantity and variance
 
-## API path
+Expected PAR is read-only. Received quantity can be zero, below, equal to, or above Expected PAR and has no application-defined cap. Reporting classifies each receipt as:
 
-`barback-opening-par-checklist` accepts two actions:
+- `MATCH`: received equals expected;
+- `SHORT n`: received is below expected;
+- `OVER n`: received is above expected.
 
-- `list`: returns only destination ID, item ID, status, confirmation time, and confirming staff ID for the JWT session;
-- `confirm`: accepts only destination ID and item ID, inserts one receipt, and reconstructs the existing receipt on unique-key retry.
+Manager session reporting returns aggregate match/short/over counts plus safe shortage/overage rows. It never returns PINs, tokens, URLs, QR data, or credentials.
 
-No PIN, token, link, QR payload, JWT, target override, or credential field is returned.
+## Security and rollout
 
-When it is eventually deployed, gateway JWT verification must remain disabled for this function because it accepts the separately signed Barback session JWT and performs its own issuer, role, subject, expiry, session, staff, venue, night, destination, and item checks. This is not permission to deploy it in the current checkpoint.
+- Both tables have RLS enabled and no browser policies.
+- All table privileges are revoked from `PUBLIC`, `anon`, `authenticated`, and `barback_user`.
+- The confirmation RPC is executable only by `service_role`.
+- The Edge Function derives session and staff identity from the signed Barback JWT and lists receipts only for that staff.
+- A later approved deployment must publish `barback-opening-par-checklist` with gateway JWT verification disabled, matching the existing Barback functions; the function itself verifies the custom signed Barback JWT before using the service client.
+- `venues.barback_opening_par_enabled` is the authoritative venue-scoped runtime flag. The additive column defaults to false, and a missing venue fails safely to false.
+- The existing `events_barback_insert` policy is unchanged.
+- A separate `AS RESTRICTIVE` insert policy calls a hardened security-definer helper. It is a no-op when the runtime gate is off, permits sessions without Opening PAR, and denies applicable incomplete staff checklists.
+- `OPENING_PAR_V1_ENABLED` remains `false` until a separate rollout approval.
 
-## Rollback
+## Indexes
 
-Before rollout, keep `OPENING_PAR_V1_ENABLED = false`. If a future rollout must be reversed:
+The composite primary keys cover session reconstruction. Additional indexes start with each otherwise-uncovered foreign-key column: receipt staff, destination, and item; completion staff and completed-by.
 
-1. turn the Barback gate off;
-2. undeploy or disable the checklist function;
-3. retain/export receipt rows for audit;
-4. remove policies/grants and drop the table only in a separately reviewed migration after migration-baseline recovery.
+## Forward-only rollback
 
-Migration-baseline recovery is required before any schema implementation of this design.
+1. Set/keep the runtime flag false; Classic behavior is immediately restored.
+2. Revert the Barback and Edge Function build to the previous gated version.
+3. In a separately reviewed migration, drop only `events_opening_par_completion_gate` and revoke helper/RPC execution.
+4. Retain receipt/completion rows for audit. Export and separate destructive approval are required before any table drop.
 
-## Recorded out-of-scope production defects
+Rollout order is separately approved and forward-only: execute the persistence migration, deploy the new checklist and reporting functions, verify the runtime flag remains false, publish the gated UI, and only then consider a venue-specific flag activation. None of those production steps occurred in this checkpoint.
 
-- `public.v_barback_diagnostics` is missing, so the Diagnostics tab remains a separate telemetry defect.
-- `public.barback_mark_pilot` is missing, so Pilot marking remains a separate defect. The Manager continues to distinguish “session created” from a failed Pilot mark and does not report full Pilot success.
+## Unrelated production defects
 
-Neither dependency is required by the Opening PAR snapshot, secure Manager session list/revoke functions, or the gated checklist source. This checkpoint does not repair, migrate, or deploy either defect.
+`public.v_barback_diagnostics` and `public.barback_mark_pilot` remain separate defects. This work does not repair, migrate, or deploy either one.

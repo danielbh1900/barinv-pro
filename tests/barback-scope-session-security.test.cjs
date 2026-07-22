@@ -13,6 +13,10 @@ const createEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-c
 const listEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-manager-sessions/index.ts'), 'utf8');
 const revokeEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-revoke-session/index.ts'), 'utf8');
 const checklistEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-opening-par-checklist/index.ts'), 'utf8');
+const persistenceMigration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20260722063733_barback_opening_par_checklist_persistence.sql'),
+  'utf8',
+);
 
 function between(source, start, end) {
   const a = source.indexOf(start);
@@ -178,7 +182,7 @@ test('24. credentials re-hide when leaving or creating another result', () => {
 
 test('25. checklist authorization derives session identity from signed JWT', () => {
   assert.match(checklistEdge, /decodeJwt\(\s*authorization\.slice\(7\)\.trim\(\),\s*getSupabaseJwtSecret\(\)/);
-  assert.match(checklistEdge, /session_id is derived from authorization/);
+  assert.match(checklistEdge, /session and staff are derived from authorization/);
   assert.match(checklistEdge, /claims\.role !== "barback_user"/);
 });
 
@@ -192,9 +196,10 @@ test('26. checklist rejects revoked, expired, closed-night, cross-staff, and out
 });
 
 test('27. confirmation is retry-safe and cannot change target quantity', () => {
-  assert.match(checklistEdge, /insertError\.code !== "23505"/);
-  assert.match(checklistEdge, /confirmation retry could not be reconstructed/);
-  assert.match(checklistEdge, /target quantity is read-only/);
+  assert.match(checklistEdge, /barback_confirm_opening_par/);
+  assert.match(checklistEdge, /Expected PAR is read-only/);
+  assert.match(persistenceMigration, /ON CONFLICT \(session_id, destination_id, staff_id, item_id\) DO NOTHING/);
+  assert.match(persistenceMigration, /confirmation retry could not be reconstructed/);
   assert.doesNotMatch(checklistEdge, /update\(\{[^}]*qty/);
 });
 
@@ -223,9 +228,11 @@ test('32. revoke audit failure triggers an exact guarded rollback', () => {
   assert.match(revokeEdge, /\.eq\("revoked_at", revokedAt\)/);
 });
 
-test('33. no checklist migration was authored while baseline is incomplete', () => {
+test('33. verified baseline and one authored checklist migration are present', () => {
   const migrations = fs.readdirSync(path.join(root, 'supabase/migrations')).filter(name => name.endsWith('.sql'));
-  assert.deepEqual(migrations, ['20260720171358_add_barback_sessions_opening_par_config.sql']);
+  assert.equal(migrations.length, 87);
+  assert.ok(migrations.includes('20260720171358_add_barback_sessions_opening_par_config.sql'));
+  assert.ok(migrations.includes('20260722063733_barback_opening_par_checklist_persistence.sql'));
 });
 
 test('34. active nights remain selectable while closed nights remain available to safe history', () => {

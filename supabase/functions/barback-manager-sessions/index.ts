@@ -31,6 +31,25 @@ function openingParItemCount(raw: unknown): number {
   }).length;
 }
 
+function wholeQuantityText(raw: unknown): string {
+  const text = String(raw ?? "").trim();
+  if (!/^(0|[1-9][0-9]*)$/.test(text)) {
+    throw new Error("invalid persisted Opening PAR quantity");
+  }
+  return BigInt(text).toString();
+}
+
+function varianceStatus(
+  expected: string,
+  received: string,
+): "match" | "short" | "over" {
+  return BigInt(received) === BigInt(expected)
+    ? "match"
+    : BigInt(received) < BigInt(expected)
+    ? "short"
+    : "over";
+}
+
 Deno.serve(async (req: Request) => {
   const pre = corsPreflight(req);
   if (pre) return pre;
@@ -93,6 +112,57 @@ Deno.serve(async (req: Request) => {
   const { data, error } = await query;
   if (error) return errorResponse("session list failed: " + error.message, 500);
 
+  const sessionIds = (data ?? []).map((row) => row.id);
+  let receiptRows: Array<Record<string, unknown>> = [];
+  let completionRows: Array<Record<string, unknown>> = [];
+  if (sessionIds.length) {
+    const [receiptResult, completionResult] = await Promise.all([
+      svc.from("barback_opening_par_receipts")
+        .select(
+          "session_id, destination_id, staff_id, item_id, expected_quantity, received_quantity:received_quantity::text, confirmed_at",
+        )
+        .in("session_id", sessionIds),
+      svc.from("barback_opening_par_completions")
+        .select(
+          "session_id, staff_id, completed_by, completed_at, confirmed_row_count",
+        )
+        .in("session_id", sessionIds),
+    ]);
+    if (receiptResult.error) {
+      return errorResponse(
+        "Opening PAR reporting failed: " + receiptResult.error.message,
+        500,
+      );
+    }
+    if (completionResult.error) {
+      return errorResponse(
+        "Opening PAR completion reporting failed: " +
+          completionResult.error.message,
+        500,
+      );
+    }
+    receiptRows = (receiptResult.data ?? []) as Array<Record<string, unknown>>;
+    completionRows = (completionResult.data ?? []) as Array<
+      Record<string, unknown>
+    >;
+  }
+
+  const receiptsBySession = new Map<string, Array<Record<string, unknown>>>();
+  for (const receipt of receiptRows) {
+    const id = String(receipt.session_id || "");
+    if (!receiptsBySession.has(id)) receiptsBySession.set(id, []);
+    receiptsBySession.get(id)?.push(receipt);
+  }
+  const completionsBySession = new Map<
+    string,
+    Array<Record<string, unknown>>
+  >();
+  for (const completion of completionRows) {
+    const id = String(completion.session_id || "");
+    if (!completionsBySession.has(id)) completionsBySession.set(id, []);
+    completionsBySession.get(id)?.push(completion);
+  }
+
   const now = Date.now();
   const sessions = (data ?? []).map((row) => {
     const destinations = new Set<string>();
@@ -103,6 +173,27 @@ Deno.serve(async (req: Request) => {
     const status = row.revoked_at
       ? "revoked"
       : (+new Date(row.expires_at) <= now ? "expired" : "active");
+    const openingParCount = openingParItemCount(row.opening_par_config);
+    const sessionReceipts = receiptsBySession.get(row.id) ?? [];
+    const sessionCompletions = completionsBySession.get(row.id) ?? [];
+    const varianceCounts = { match: 0, short: 0, over: 0 };
+    const varianceRows = sessionReceipts.map((receipt) => {
+      const expected = wholeQuantityText(receipt.expected_quantity);
+      const received = wholeQuantityText(receipt.received_quantity);
+      const variance = (BigInt(received) - BigInt(expected)).toString();
+      const variance_status = varianceStatus(expected, received);
+      varianceCounts[variance_status] += 1;
+      return {
+        destination_id: receipt.destination_id,
+        staff_id: receipt.staff_id,
+        item_id: receipt.item_id,
+        expected_quantity: expected,
+        received_quantity: received,
+        variance,
+        variance_status,
+        confirmed_at: receipt.confirmed_at,
+      };
+    }).filter((receipt) => receipt.variance !== "0");
     return {
       session_id: row.id,
       venue_id: row.venue_id,
@@ -118,7 +209,22 @@ Deno.serve(async (req: Request) => {
         ? row.allowed_staff.length
         : 0,
       destination_count: destinations.size,
-      opening_par_item_count: openingParItemCount(row.opening_par_config),
+      opening_par_item_count: openingParCount,
+      opening_par_required_per_staff: openingParCount * destinations.size,
+      opening_par_progress: {
+        confirmed_count: sessionReceipts.length,
+        completed_staff_count: sessionCompletions.length,
+        match_count: varianceCounts.match,
+        short_count: varianceCounts.short,
+        over_count: varianceCounts.over,
+        variance_rows: varianceRows,
+        completions: sessionCompletions.map((completion) => ({
+          staff_id: completion.staff_id,
+          completed_by: completion.completed_by,
+          completed_at: completion.completed_at,
+          confirmed_row_count: completion.confirmed_row_count,
+        })),
+      },
       pilot_mode: row.pilot_mode === true,
       rehearsal_mode: row.rehearsal_mode === true,
     };
