@@ -1,0 +1,55 @@
+
+-- Unique indexes
+CREATE UNIQUE INDEX bar_close_summaries_night_id_bar_id_key ON public.bar_close_summaries USING btree (night_id, bar_id);
+CREATE UNIQUE INDEX ux_bar_item_shot_snapshots_unique ON public.bar_item_shot_snapshots USING btree (connection_id, bar_id, item_id, snapshot_ts, bucket_minutes);
+CREATE UNIQUE INDEX bars_name_venue_unique ON public.bars USING btree (name, venue_id);
+CREATE UNIQUE INDEX nights_code_key ON public.nights USING btree (code);
+CREATE UNIQUE INDEX pos_bar_mappings_connection_id_pos_location_id_key ON public.pos_bar_mappings USING btree (connection_id, pos_location_id);
+CREATE UNIQUE INDEX pos_bar_product_snapshots_connection_id_bar_id_snapshot_ts__key ON public.pos_bar_product_snapshots USING btree (connection_id, bar_id, snapshot_ts, bucket_minutes, product_key);
+CREATE UNIQUE INDEX pos_bar_snapshots_connection_id_bar_id_snapshot_ts_bucket_m_key ON public.pos_bar_snapshots USING btree (connection_id, bar_id, snapshot_ts, bucket_minutes);
+CREATE UNIQUE INDEX ux_pos_product_item_mappings_unique ON public.pos_product_item_mappings USING btree (connection_id, product_key, inventory_item_id);
+CREATE UNIQUE INDEX pos_transactions_square_payment_id_key ON public.pos_transactions USING btree (square_payment_id);
+CREATE UNIQUE INDEX profiles_username_key ON public.profiles USING btree (username);
+CREATE UNIQUE INDEX stations_bar_id_name_key ON public.stations USING btree (bar_id, name);
+
+-- Regular indexes
+CREATE INDEX idx_bar_close_summaries_bar ON public.bar_close_summaries USING btree (bar_id);
+CREATE INDEX idx_bar_close_summaries_night ON public.bar_close_summaries USING btree (night_id);
+CREATE INDEX ix_bar_item_dispatch_snapshots_bar_ts ON public.bar_item_dispatch_snapshots USING btree (bar_id, snapshot_ts DESC);
+CREATE INDEX ix_bar_item_shot_snapshots_bar_ts ON public.bar_item_shot_snapshots USING btree (bar_id, snapshot_ts DESC);
+CREATE INDEX idx_bars_venue ON public.bars USING btree (venue_id);
+CREATE INDEX idx_events_created ON public.events USING btree (created_at DESC);
+CREATE INDEX idx_events_night ON public.events USING btree (night_id);
+CREATE INDEX idx_events_status ON public.events USING btree (status);
+CREATE INDEX idx_events_venue ON public.events USING btree (venue_id);
+CREATE INDEX idx_guestlist_venue ON public.guestlist USING btree (venue_id);
+CREATE INDEX idx_invoices_venue ON public.invoices USING btree (venue_id);
+CREATE INDEX idx_items_bottle_size_ml ON public.items USING btree (bottle_size_ml);
+CREATE INDEX idx_items_measurement_mode ON public.items USING btree (measurement_mode);
+CREATE INDEX idx_items_service_mode ON public.items USING btree (service_mode);
+CREATE INDEX idx_items_venue ON public.items USING btree (venue_id);
+CREATE INDEX idx_nights_venue ON public.nights USING btree (venue_id);
+CREATE INDEX idx_placements_venue ON public.placements USING btree (venue_id);
+CREATE INDEX idx_po_items_venue ON public.po_items USING btree (venue_id);
+CREATE INDEX idx_pos_bar_mappings_bar ON public.pos_bar_mappings USING btree (bar_id);
+CREATE INDEX idx_pos_bar_mappings_conn ON public.pos_bar_mappings USING btree (connection_id);
+CREATE INDEX idx_pos_bar_product_bar_time ON public.pos_bar_product_snapshots USING btree (bar_id, snapshot_ts);
+CREATE INDEX idx_pos_bar_product_prod ON public.pos_bar_product_snapshots USING btree (product_key);
+CREATE INDEX idx_pos_bar_product_snapshots_venue ON public.pos_bar_product_snapshots USING btree (venue_id);
+CREATE INDEX idx_pos_bar_snapshots_bar_time ON public.pos_bar_snapshots USING btree (bar_id, snapshot_ts);
+CREATE INDEX idx_pos_bar_snapshots_conn_time ON public.pos_bar_snapshots USING btree (connection_id, snapshot_ts);
+CREATE INDEX idx_pos_bar_snapshots_venue ON public.pos_bar_snapshots USING btree (venue_id);
+CREATE INDEX idx_pos_connections_active ON public.pos_connections USING btree (is_active);
+CREATE INDEX idx_pos_sync_runs_conn ON public.pos_sync_runs USING btree (connection_id);
+CREATE INDEX idx_pos_sync_runs_started ON public.pos_sync_runs USING btree (started_at);
+CREATE INDEX idx_purchase_orders_venue ON public.purchase_orders USING btree (venue_id);
+CREATE INDEX idx_receipts_venue ON public.receipts USING btree (venue_id);
+CREATE INDEX idx_recipe_ingredients_venue ON public.recipe_ingredients USING btree (venue_id);
+CREATE INDEX idx_staff_venue ON public.staff USING btree (venue_id);
+CREATE INDEX idx_stations_venue ON public.stations USING btree (venue_id);
+CREATE INDEX idx_suppliers_venue ON public.suppliers USING btree (venue_id);
+CREATE INDEX idx_vip_tables_night_id ON public.vip_tables USING btree (night_id);
+CREATE INDEX idx_vip_tables_table_name ON public.vip_tables USING btree (table_name);
+CREATE INDEX idx_vip_tables_venue ON public.vip_tables USING btree (venue_id);
+CREATE INDEX idx_warehouse_transfers_venue ON public.warehouse_transfers USING btree (venue_id);
+;
