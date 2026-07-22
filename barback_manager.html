@@ -376,10 +376,10 @@
           <div class="small" id="c-scope-review-body">Select staff to derive assigned destinations.</div>
         </div>
         <section class="opening-par-card" id="c-opening-par-card" style="display:none;" aria-hidden="true">
-          <h3>OPENING STOCK / PAR</h3>
+          <h3>OPENING PAR CHECKLIST</h3>
           <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#ddd;">
             <input type="checkbox" id="c-opening-par-enabled" style="width:auto;">
-            <span>Enable Opening PAR for this link</span>
+            <span>Require Opening PAR Checklist for this link</span>
           </label>
           <div class="small muted" style="margin-top:6px;">
             For this link/session only — BARINV Master PAR is unchanged.
@@ -390,7 +390,7 @@
             </div>
             <div id="c-opening-par-status"></div>
             <div id="c-opening-par-workspace" style="display:none;">
-              <label style="margin-top:12px;">REVIEW / EDIT OPENING PAR</label>
+              <label style="margin-top:12px;">REVIEW / EDIT OPENING PAR CHECKLIST</label>
               <div class="opening-par-summary" id="c-opening-par-summary">—</div>
               <div class="opening-par-list" id="c-opening-par-list"></div>
               <div class="opening-par-actions">
@@ -1220,9 +1220,9 @@ const ManagerOpeningParV1 = Object.freeze({
 
   buildEnabledIntent(quantities, barCount) {
     const result = this.summary(quantities, barCount);
-    if (result.invalid.length) throw new Error('Opening PAR quantities must be non-negative whole bottles.');
-    if (!result.barCount) throw new Error('Opening PAR requires at least one selected operational destination.');
-    if (!result.items.length) throw new Error('Opening PAR requires at least one positive item quantity.');
+    if (result.invalid.length) throw new Error('Opening PAR Checklist quantities must be non-negative whole bottles.');
+    if (!result.barCount) throw new Error('Opening PAR Checklist requires at least one selected operational destination.');
+    if (!result.items.length) throw new Error('Opening PAR Checklist requires at least one positive item quantity.');
     return {
       opening_par_enabled: true,
       opening_par_items: result.items,
@@ -1339,8 +1339,8 @@ function renderManagerOpeningPar() {
 
   let message = op.warning || '';
   let level = 'warn';
-  if (!isRegularLink) message = 'Opening PAR is unavailable for VIP / Table links. Disable it or switch back to Barback / Bars.';
-  else if (!bars.length) message = 'Select staff with at least one active operational destination. Opening PAR fails closed with no destinations.';
+  if (!isRegularLink) message = 'Opening PAR Checklist is unavailable for VIP / Table links. Disable it or switch back to Barback / Bars.';
+  else if (!bars.length) message = 'Select staff with at least one active operational destination. Opening PAR Checklist fails closed with no destinations.';
   else if (currentSnapshot && result.invalid.length) message = 'Correct all quantities to non-negative whole bottle counts before generating the link.';
   else if (!message && currentSnapshot) { message = 'Snapshot reviewed for this night. BARINV Master PAR remains unchanged.'; level = 'ok'; }
   if (message) statusOn('c-opening-par-status', message, level);
@@ -1384,7 +1384,7 @@ async function loadManagerOpeningParDefaults() {
     renderManagerOpeningParRows();
     renderManagerOpeningPar();
   } catch (e) {
-    op.warning = 'Opening PAR defaults unavailable: ' + (e.message || e);
+    op.warning = 'Opening PAR Checklist defaults unavailable: ' + (e.message || e);
     statusOn('c-opening-par-status', op.warning, 'err');
   } finally {
     renderManagerOpeningPar();
@@ -1399,9 +1399,9 @@ function managerOpeningParIntentOrThrow() {
   if (!checkboxEnabled) return null;
   const nightId = ($('c-night') && $('c-night').value) || null;
   if (!op.loaded || !op.nightId || op.nightId !== nightId) {
-    throw new Error('Opening PAR must be loaded and reviewed for the selected night.');
+    throw new Error('Opening PAR Checklist must be loaded and reviewed for the selected night.');
   }
-  if ($('c-linktype').value !== 'bar') throw new Error('Opening PAR is only available for Barback / Bars links.');
+  if ($('c-linktype').value !== 'bar') throw new Error('Opening PAR Checklist is only available for Barback / Bars links.');
   return ManagerOpeningParV1.buildEnabledIntent(op.quantities, managerOpeningParEffectiveBarIds().length);
 }
 
@@ -1499,7 +1499,7 @@ async function loadVenueContext() {
     $('c-night')._wired = true;
     $('c-night').addEventListener('change', async () => {
       if (state.openingPar.loaded && state.openingPar.nightId !== $('c-night').value) {
-        managerOpeningParClear('Night changed. The previous Opening PAR snapshot was cleared; load and review this night’s defaults.');
+        managerOpeningParClear('Night changed. The previous Opening PAR Checklist snapshot was cleared; load and review this night’s defaults.');
       }
       await renderNightScoped($('c-night').value);
       updateNightCreationState();
@@ -1518,7 +1518,7 @@ async function loadVenueContext() {
     $('c-linktype')._wired = true;
     $('c-linktype').addEventListener('change', async () => {
       if (state.openingPar.loaded) {
-        managerOpeningParClear('Link Type changed. The previous regular-bar Opening PAR snapshot was cleared; reload it if Opening PAR still applies.');
+        managerOpeningParClear('Link Type changed. The previous regular-bar Opening PAR Checklist snapshot was cleared; reload it if Opening PAR still applies.');
       }
       await renderNightScoped($('c-night').value);
       renderManagerOpeningPar();
@@ -1875,7 +1875,7 @@ if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-reset')) $('c-opening-par
 });
 if (OPENING_PAR_MANAGER_V1_ENABLED && $('c-opening-par-close')) $('c-opening-par-close').addEventListener('click', () => {
   state.openingPar.workspaceOpen = false;
-  state.openingPar.warning = 'Opening PAR review closed; your session-only edits are retained. Reopen before generating if you want to review them again.';
+  state.openingPar.warning = 'Opening PAR Checklist review closed; your session-only edits are retained. Reopen before generating if you want to review them again.';
   renderManagerOpeningPar();
 });
 
@@ -2168,6 +2168,31 @@ async function renderSessions(silent) {
       : '(any destination)';
     const nightInfo = state.nights.find(n => n.id === s.night_id);
     const nightLabel = nightInfo ? ((nightInfo.date || '') + (nightInfo.name ? ' · ' + nightInfo.name : '')) : s.night_id.slice(0,8);
+    const op = s.opening_par_progress || {};
+    const opRequired = (s.opening_par_required_per_staff || 0) * (s.allowed_staff_count || 0);
+    const opSummary = (s.opening_par_item_count || 0) > 0
+      ? '<span class="muted">Opening PAR Checklist · ' + (op.confirmed_count || 0) + ' / ' + opRequired +
+        ' confirmations · ' + (op.completed_staff_count || 0) + ' / ' + (s.allowed_staff_count || 0) + ' staff complete · ' +
+        (op.match_count || 0) + ' MATCH · ' + (op.short_count || 0) + ' SHORT · ' + (op.over_count || 0) + ' OVER</span><br>'
+      : '';
+    const opVariances = Array.isArray(op.variance_rows) ? op.variance_rows : [];
+    const opVarianceDetails = opVariances.length
+      ? '<details style="margin-top:5px;"><summary class="muted small">Opening PAR shortages / overages (' + opVariances.length + ')</summary>' +
+        '<div class="small" style="margin-top:5px;line-height:1.6;">' + opVariances.map(row => {
+          const staff = (state.staffList || []).find(x => x.id === row.staff_id);
+          const destination = (state.bars || []).find(x => x.id === row.destination_id);
+          const item = (state.openingPar.items || []).find(x => x.id === row.item_id);
+          const varianceText = String(row.variance || '0');
+          const label = row.variance_status === 'short'
+            ? ('SHORT ' + (varianceText.startsWith('-') ? varianceText.slice(1) : varianceText))
+            : ('OVER ' + varianceText);
+          return '<div style="color:' + (row.variance_status === 'short' ? '#fbbf24' : '#93c5fd') + ';">' +
+            esc((staff && staff.name) || String(row.staff_id || '').slice(0,8)) + ' · ' +
+            esc((destination && destination.name) || String(row.destination_id || '').slice(0,8)) + ' · ' +
+            esc((item && item.name) || String(row.item_id || '').slice(0,8)) + ' · Expected ' +
+            esc(String(row.expected_quantity)) + ' / Received ' + esc(String(row.received_quantity)) + ' · ' + esc(label) + '</div>';
+        }).join('') + '</div></details>'
+      : '';
 
     const canAct = !revoked && !expired;
     return '<div class="session-row' + (revoked || expired ? ' revoked' : '') + '">' +
@@ -2177,7 +2202,8 @@ async function renderSessions(silent) {
         '<span class="muted">expires ' + fmtTime(s.expires_at) +
         (revoked ? ' · revoked ' + fmtTime(s.revoked_at) : '') + '</span><br>' +
         '<span class="muted">' + (s.allowed_staff_count || 0) + ' staff · ' +
-        (s.destination_count || 0) + ' destinations · ' + (s.opening_par_item_count || 0) + ' Opening PAR items</span><br>' +
+        (s.destination_count || 0) + ' destinations · ' + (s.opening_par_item_count || 0) + ' Opening PAR Checklist items</span><br>' +
+        opSummary + opVarianceDetails +
       '</div>' +
       '<div class="actions">' +
         (canAct

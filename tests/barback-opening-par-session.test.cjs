@@ -244,12 +244,12 @@ test('20. invalid allowed_staff is rejected through assignment, role, and covera
 });
 
 test('21. Link Type change invalidates a stale regular-bar Manager snapshot', () => {
-  assert.match(managerHtml, /Link Type changed\. The previous regular-bar Opening PAR snapshot was cleared/);
+  assert.match(managerHtml, /Link Type changed\. The previous regular-bar Opening PAR Checklist snapshot was cleared/);
   assert.equal(createValidation.wrongType.ok, false);
 });
 
 test('22. Night change clears a stale Manager snapshot', () => {
-  assert.match(managerHtml, /Night changed\. The previous Opening PAR snapshot was cleared/);
+  assert.match(managerHtml, /Night changed\. The previous Opening PAR Checklist snapshot was cleared/);
   assert.match(managerHtml, /managerOpeningParClear\('Night changed/);
 });
 
@@ -273,9 +273,9 @@ test('25. malformed stored config fails closed without failing login', () => {
   assert.match(loginEdge, /malformed Opening PAR config; feature disabled for session/);
 });
 
-test('26. global feature gate remains OFF and hides the panel', () => {
+test('26. global feature gate remains OFF and bypasses checklist routing', () => {
   assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
-  assert.match(barbackHtml, /OPENING_PAR_V1_ENABLED &&[\s\S]*sessionModel\.valid && sessionModel\.enabled/);
+  assert.match(barbackHtml, /if \(!OPENING_PAR_V1_ENABLED \|\| !state\.jwt \|\| state\.authPath !== 'phase3'\)[\s\S]*return enterMain\(\)/);
 });
 
 test('27. enabled session plus eventual global gate uses the session snapshot', () => {
@@ -290,8 +290,9 @@ test('27. enabled session plus eventual global gate uses the session snapshot', 
 
 test('28. Barback checklist has no fallback to live Master PAR', () => {
   const ui = between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
-  assert.doesNotMatch(ui, /item\.par_level|openingParQty|type="number"/);
-  assert.match(ui, /Target: ' \+ row\.targetQty/);
+  assert.doesNotMatch(ui, /item\.par_level|openingParQty/);
+  assert.match(ui, /EXPECTED PAR/);
+  assert.match(ui, /row\.expectedQty/);
   assert.match(ui, /state\.openingParSession/);
 });
 
@@ -302,10 +303,11 @@ test('29. Barback target quantity cannot be overridden', () => {
   const checklist = barbackCore.buildChecklist({
     items: joined.items,
     destinations: [{ id: 'bar-1' }],
-    completions: [],
+    receipts: [],
     sessionId: 'session-1',
+    staffId: 'staff-1',
   });
-  assert.equal(checklist.groups[0].rows[0].targetQty, 4);
+  assert.equal(checklist.groups[0].rows[0].expectedQty, 4);
   assert.equal(snapshot.items[0].qty, 4);
   assert.equal(visible[0].par_level, 4);
 });
@@ -341,15 +343,15 @@ test('34. Submit All payload schema remains unchanged', () => {
 });
 
 test('35. reload reconstruction uses persisted checklist receipts, not local drafts', () => {
-  const completion = { destination_id: 'bar-1', item_id: 'heineken', confirmed_at: 'stamp' };
+  const receipt = { destination_id: 'bar-1', staff_id: 'staff-1', item_id: 'heineken', expected_quantity: 2, received_quantity: 2, confirmed_at: 'stamp' };
   const checklist = barbackCore.buildChecklist({
     items: [{ id: 'heineken', opening_par_qty: 2 }],
     destinations: [{ id: 'bar-1' }],
-    completions: [completion], sessionId: 'session-1',
+    receipts: [receipt], sessionId: 'session-1', staffId: 'staff-1',
   });
-  assert.equal(checklist.receivedCount, 1);
+  assert.equal(checklist.confirmedCount, 1);
   const ui = between(barbackHtml, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
-  assert.match(ui, /openingParChecklistInvoke\('list'\)/);
+  assert.match(ui, /openingParChecklistInvoke\('status'\)/);
   assert.doesNotMatch(ui, /Drafts\.|Outbox\./);
 });
 
@@ -437,8 +439,8 @@ test('44. enabled Manager gate preserves the compact validated Opening PAR contr
 });
 
 test('45. enabled Manager gate retains Night and Link Type stale-snapshot clearing', () => {
-  assert.match(managerHtml, /Night changed\. The previous Opening PAR snapshot was cleared/);
-  assert.match(managerHtml, /Link Type changed\. The previous regular-bar Opening PAR snapshot was cleared/);
+  assert.match(managerHtml, /Night changed\. The previous Opening PAR Checklist snapshot was cleared/);
+  assert.match(managerHtml, /Link Type changed\. The previous regular-bar Opening PAR Checklist snapshot was cleared/);
   assert.match(managerHtml, /if \(OPENING_PAR_MANAGER_V1_ENABLED && \$\('c-opening-par-enabled'\)\)/);
 });
 
