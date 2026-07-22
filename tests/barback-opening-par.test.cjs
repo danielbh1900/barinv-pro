@@ -8,70 +8,51 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'barback.html'), 'utf8');
-const edge = fs.readFileSync(
-  path.join(root, 'supabase/functions/barback-pin-login/index.ts'),
+const manager = fs.readFileSync(path.join(root, 'barback_manager.html'), 'utf8');
+const loginEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-pin-login/index.ts'), 'utf8');
+const checklistEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-opening-par-checklist/index.ts'), 'utf8');
+const managerEdge = fs.readFileSync(path.join(root, 'supabase/functions/barback-manager-sessions/index.ts'), 'utf8');
+const migration = fs.readFileSync(
+  path.join(root, 'supabase/migrations/20260722063733_barback_opening_par_checklist_persistence.sql'),
   'utf8',
 );
 
-function between(start, end) {
-  const a = html.indexOf(start);
-  const b = html.indexOf(end);
+function between(source, start, end) {
+  const a = source.indexOf(start);
+  const b = source.indexOf(end);
   assert.notEqual(a, -1, `missing marker: ${start}`);
   assert.notEqual(b, -1, `missing marker: ${end}`);
-  return html.slice(a + start.length, b);
+  return source.slice(a + start.length, b);
 }
 
 const coreContext = {};
 vm.runInNewContext(
-  between('// OPENING_PAR_V1_CORE_START', '// OPENING_PAR_V1_CORE_END') +
+  between(html, '// OPENING_PAR_V1_CORE_START', '// OPENING_PAR_V1_CORE_END') +
     '\nthis.OpeningParV1 = OpeningParV1;',
   coreContext,
   { filename: 'barback-opening-par-core.js' },
 );
 const core = coreContext.OpeningParV1;
 
-const items = [
-  { id: 'heineken', name: 'Heineken', par_level: 4, service_mode: 'regular_bar' },
-  { id: 'corona', name: 'Corona', par_level: 3, service_mode: 'all_bars' },
-  { id: 'finlandia', name: 'Finlandia', par_level: 4, service_mode: 'regular_bar' },
+const visibleItems = [
+  { id: 'heineken', name: 'Heineken', par_level: 99, service_mode: 'regular_bar', unit: 'bottle' },
+  { id: 'corona', name: 'Corona', par_level: 88, service_mode: 'all_bars', unit: 'case' },
 ];
-const bar1 = { id: 'bar-1', name: 'Main Bar', bar_type: 'bar' };
-const bar2 = { id: 'bar-2', name: 'Patio Bar', bar_type: 'bar' };
+const snapshot = {
+  enabled: true, version: 1,
+  items: [{ item_id: 'heineken', qty: 4 }, { item_id: 'corona', qty: 3 }],
+};
+const model = core.normalizeSessionSnapshot(snapshot, visibleItems);
+const destinations = [
+  { id: 'bar-1', name: 'Main Bar', bar_type: 'bar' },
+  { id: 'dispatch-1', name: 'Dispatch', bar_type: 'dispatch' },
+];
 
-function plan(overrides = {}) {
-  return core.buildPlan({
-    items,
-    bars: [bar1],
-    qtyByItem: {},
-    drafts: [],
-    nightId: 'night-1',
-    ...overrides,
+function checklist(overrides = {}) {
+  return core.buildChecklist({
+    sessionId: 'session-1', staffId: 'staff-1', items: model.items,
+    destinations: [destinations[0]], receipts: [], ...overrides,
   });
-}
-
-function scopeFunctions() {
-  const names = [
-    'SCOPE_BAR_ALIASES',
-    'SCOPE_BOTH_ALIASES',
-    'SCOPE_VIP_ALIASES',
-    'SCOPE_HIDDEN_ALIASES',
-  ];
-  const declarations = names.map(name => {
-    const match = html.match(new RegExp(`const ${name}\\s*=\\s*\\[[^;]+;`));
-    assert.ok(match, `missing ${name}`);
-    return match[0];
-  }).join('\n');
-  const start = html.indexOf('function normalizeItemScope(item)');
-  const end = html.indexOf('// Is this item selectable by the given role?', start);
-  const start2 = html.indexOf('function isItemAllowedForRole(item, role)', end);
-  const end2 = html.indexOf('function getAllowedItemsForCurrentSession(items)', start2);
-  const context = {};
-  vm.runInNewContext(
-    declarations + '\n' + html.slice(start, end) + '\n' + html.slice(start2, end2) +
-      '\nthis.isItemAllowedForRole = isItemAllowedForRole;',
-    context,
-  );
-  return context;
 }
 
 function addToReviewHarness() {
@@ -83,182 +64,207 @@ function addToReviewHarness() {
   const context = {
     state: {
       tokenPayload: { venue_id: 'venue-1', night_id: 'night-1', session_id: 'session-1' },
-      serverSession: { session_id: 'session-1' },
-      jwt: 'scoped-jwt',
-      staffId: 'staff-1',
-      staffName: 'Bar Back',
+      serverSession: { session_id: 'session-1' }, jwt: 'jwt', staffId: 'staff-1', staffName: 'Bar Back',
     },
-    cache: { items },
+    cache: { items: visibleItems },
     isItemAllowedForRole: () => true,
     getCurrentUserRole: () => 'barback',
     scopeBlockReason: () => 'blocked',
-    isAreaAllowedForSession: id => id === 'bar-1' || id === 'bar-2',
+    isAreaAllowedForSession: id => id === 'bar-1',
     normalizeBottleState: (state, weight) => state || (weight ? 'PARTIAL' : 'UNOPENED'),
-    normalizeWeightG: value => {
-      const n = Number(value);
-      return Number.isFinite(n) && n > 0 ? n : null;
-    },
+    normalizeWeightG: value => Number(value) > 0 ? Number(value) : null,
     uuidv4: () => `ce-${++sequence}`,
-    STAGING_MODE: false,
-    LIVE_PILOT_MODE: false,
+    STAGING_MODE: false, LIVE_PILOT_MODE: false,
     WeightProfiles: { calcRemaining: () => null },
-    deriveLiquidG: () => null,
-    deriveRemainingMl: () => null,
-    nonNegNum: value => {
-      const n = Number(value);
-      return Number.isFinite(n) && n >= 0 ? n : null;
-    },
+    deriveLiquidG: () => null, deriveRemainingMl: () => null,
+    nonNegNum: value => Number(value) >= 0 ? Number(value) : null,
     Drafts: { add: record => captured.push(record) },
-    StageLog: { push: () => {} },
-    Recent: { add: () => {} },
-    Telemetry: { bump: () => {} },
+    StageLog: { push: () => {} }, Recent: { add: () => {} }, Telemetry: { bump: () => {} },
     renderRecentItemChips: () => {},
   };
   vm.runInNewContext(html.slice(start, end), context, { filename: 'add-to-review.js' });
   return { context, captured };
 }
 
-test('1. one assigned bar generates one row per positive item', () => {
-  const result = plan();
-  assert.equal(result.barCount, 1);
-  assert.equal(result.rows.length, 3);
+test('1. session snapshot remains the read-only Expected PAR source', () => {
+  assert.equal(model.enabled, true);
+  assert.equal(model.items[0].opening_par_qty, 4);
+  visibleItems[0].par_level = 123;
+  assert.equal(model.items[0].opening_par_qty, 4);
 });
 
-test('2. multiple assigned bars generate item x destination rows', () => {
-  const result = plan({ bars: [bar1, bar2] });
-  assert.equal(result.barCount, 2);
-  assert.equal(result.rows.length, 6);
-  const { context, captured } = addToReviewHarness();
-  result.rows.forEach(row => {
-    const added = context.addToReview({
-      item_id: row.item.id, item_name: row.item.name, qty: row.qty,
-      action: 'TAKEN', bar_id: row.bar.id, notes: core.marker,
-      bottle_state: 'UNOPENED', opening_par_v1: true,
-    });
-    assert.equal(added.ok, true);
-  });
-  assert.equal(captured.length, 6);
-  assert.equal(captured.every(draft => draft.opening_par_v1 === true), true);
+test('2. all assigned destinations create independent required rows', () => {
+  const result = checklist({ destinations: [destinations[0], destinations[1], destinations[0]] });
+  assert.equal(result.destinationCount, 2);
+  assert.equal(result.rowCount, 4);
+  assert.equal(result.groups[1].destination.id, 'dispatch-1');
 });
 
-test('3. no assigned bars fails closed with zero generated rows', () => {
-  const result = plan({ bars: [] });
-  assert.equal(result.barCount, 0);
-  assert.equal(result.rows.length, 0);
-  assert.match(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /reviewSessionBars\(\)/);
+test('3. receipt identity includes session, destination, staff, and item', () => {
+  assert.equal(core.checklistKey('s', 'd', 'staff-a', 'i'), 's|d|staff-a|i');
+  assert.notEqual(core.checklistKey('s', 'd', 'staff-a', 'i'), core.checklistKey('s', 'd', 'staff-b', 'i'));
+  assert.match(migration, /PRIMARY KEY \(session_id, destination_id, staff_id, item_id\)/);
 });
 
-test('4. missing or stale par_level is skipped safely', () => {
-  const visible = core.positiveParItems([
-    { id: 'missing', service_mode: 'regular_bar' },
-    { id: 'stale', par_level: 'not-a-number', service_mode: 'regular_bar' },
-    items[0],
-  ]);
-  assert.equal(visible.length, 1);
-  assert.equal(visible[0].id, 'heineken');
-});
-
-test('5. par_level zero is excluded', () => {
-  assert.equal(core.positiveParItems([{ id: 'zero', par_level: 0 }]).length, 0);
-});
-
-test('6. editable override 4 to 2 affects drafts only', () => {
-  const result = plan({ items: [items[0]], qtyByItem: { heineken: 2 } });
-  assert.equal(result.rows[0].qty, 2);
-  assert.equal(items[0].par_level, 4);
-});
-
-test('7. regular-bar filtering reuses the existing service_mode predicate', () => {
-  const scope = scopeFunctions();
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'regular_bar' }, 'barback'), true);
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'all_bars' }, 'barback'), true);
-  assert.match(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /getAllowedItemsForCurrentSession\(cache\.items\)/);
-});
-
-test('8. vip_only is excluded from regular bar sessions', () => {
-  const scope = scopeFunctions();
-  assert.equal(scope.isItemAllowedForRole({ service_mode: 'vip_only' }, 'barback'), false);
-});
-
-test('9. duplicate Opening drafts are add-missing-only for the same night/bar/item', () => {
-  const drafts = [{
-    night_id: 'night-1', bar_id: 'bar-1', item_id: 'heineken', action: 'RETURNED',
-    notes: core.marker, opening_par_v1: true,
-  }];
-  const result = plan({ items: [items[0], items[1]], drafts });
-  assert.equal(result.duplicateCount, 1);
-  assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0].item.id, 'corona');
-  assert.equal(plan({ items: [items[0]], drafts, nightId: 'night-2' }).rows.length, 1);
-});
-
-test('10. editable quantity zero is skipped', () => {
-  const result = plan({ qtyByItem: { heineken: 0, corona: 3, finlandia: 0 } });
-  assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0].item.id, 'corona');
-});
-
-test('11. existing TAKEN draft path remains functional', () => {
-  const { context, captured } = addToReviewHarness();
-  const result = context.addToReview({
-    item_id: 'heineken', item_name: 'Heineken', qty: 2, action: 'TAKEN',
-    bar_id: 'bar-1', notes: '', bottle_state: 'UNOPENED',
-  });
-  assert.equal(result.ok, true);
-  assert.equal(captured[0].action, 'TAKEN');
-  assert.equal(captured[0].qty, 2);
-});
-
-test('12. existing RETURN draft path remains functional', () => {
-  const { context, captured } = addToReviewHarness();
-  const result = context.addToReview({
-    item_id: 'heineken', item_name: 'Heineken', qty: 642.5, action: 'RETURNED',
-    bar_id: 'bar-1', notes: '', bottle_state: 'UNOPENED',
-  });
-  assert.equal(result.ok, true);
-  assert.equal(captured[0].action, 'RETURNED');
-  assert.equal(captured[0].qty, 642.5);
-});
-
-test('13. PARTIAL remains single-destination and Opening rows are UNOPENED', () => {
-  assert.match(html, /bottleState === 'PARTIAL' && multiBarDestCount\(\) > 1/);
-  const openingUi = between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
-  assert.match(openingUi, /bottle_state: 'UNOPENED'/);
-  assert.doesNotMatch(openingUi, /bottle_state: 'PARTIAL'/);
-});
-
-test('14. Review Edit/Delete paths remain wired to Drafts', () => {
-  assert.match(html, /function onDraftDelete\(ce\)/);
-  assert.match(html, /Drafts\.removeById\(ce\)/);
-  assert.match(html, /function onDraftEditSave\(ce, form\)/);
-  assert.match(html, /Drafts\.save\(arr\)/);
-});
-
-test('15. Submit All strips Opening metadata and keeps the existing event payload path', () => {
-  const submitStart = html.indexOf('async function submitAllDraftsToBarinv()');
-  const submitEnd = html.indexOf('// Keep the SUBMIT ALL button label', submitStart);
-  const submit = html.slice(submitStart, submitEnd);
-  assert.match(submit, /drafted_at, opening_par_v1, weight_g/);
-  assert.match(submit, /Outbox\.push\(rec\)/);
-  assert.match(html, /const \{ queued_at, attempts, last_error, last_attempt_at, \.\.\.rec \} = ev;/);
-  assert.match(html, /eventsInsert\(rec\)/);
-  assert.doesNotMatch(between('// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END'), /from\(['"]events['"]\)|eventsInsert\(/);
-});
-
-test('16. offline/reload duplicate state survives local draft serialization', () => {
-  const draft = {
-    night_id: 'night-1', bar_id: 'bar-1', item_id: 'heineken', action: 'TAKEN',
-    notes: core.marker, opening_par_v1: true,
+test('4. two staff sharing one session have independent progress', () => {
+  const receipt = {
+    destination_id: 'bar-1', staff_id: 'staff-a', item_id: 'heineken',
+    expected_quantity: 4, received_quantity: 4, confirmed_at: 'first',
   };
-  const restored = JSON.parse(JSON.stringify([draft]));
-  assert.equal(core.isOpeningDraft(restored[0]), true);
-  assert.equal(plan({ items: [items[0]], drafts: restored }).duplicateCount, 1);
-  assert.match(html, /reviewDrafts:\s+'barinv_barback_review_drafts'/);
+  const staffA = checklist({ staffId: 'staff-a', receipts: [receipt] });
+  const staffB = checklist({ staffId: 'staff-b', receipts: [receipt] });
+  assert.equal(staffA.confirmedCount, 1);
+  assert.equal(staffB.confirmedCount, 0);
 });
 
-test('feature is reversible, defaults OFF, and login projection is additive', () => {
+test('5. duplicate receipt reconstruction preserves the original timestamp', () => {
+  const receipt = {
+    destination_id: 'bar-1', staff_id: 'staff-1', item_id: 'heineken',
+    expected_quantity: 4, received_quantity: 7, confirmed_at: 'first',
+  };
+  const result = checklist({ receipts: [receipt, { ...receipt, confirmed_at: 'second' }] });
+  assert.equal(result.confirmedCount, 1);
+  assert.equal(result.groups[0].rows[0].receipt.confirmed_at, 'first');
+  assert.match(migration, /ON CONFLICT \(session_id, destination_id, staff_id, item_id\) DO NOTHING/);
+  assert.doesNotMatch(migration, /DO UPDATE SET/);
+});
+
+test('6. concurrent final confirmations are serialized and completion is unique', () => {
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /PRIMARY KEY \(session_id, staff_id\)/);
+  assert.match(migration, /INSERT INTO public\.barback_opening_par_completions[\s\S]*ON CONFLICT \(session_id, staff_id\) DO NOTHING/);
+});
+
+test('7. Received quantity accepts shortage, zero, exact, and overage whole counts', () => {
+  for (const input of ['0', '7', '10', '12']) assert.equal(core.parseReceivedQuantity(input), input);
+  for (const input of ['', '-1', '1.5', '2e3', 'abc']) assert.equal(core.parseReceivedQuantity(input), null);
+  assert.equal(core.parseReceivedQuantity('90071992547409931234567890'), '90071992547409931234567890');
+  assert.deepEqual(JSON.parse(JSON.stringify(core.variance(10, 10))), { delta: '0', status: 'match', label: 'MATCH' });
+  assert.deepEqual(JSON.parse(JSON.stringify(core.variance(10, 7))), { delta: '-3', status: 'short', label: 'SHORT 3' });
+  assert.deepEqual(JSON.parse(JSON.stringify(core.variance(10, 0))), { delta: '-10', status: 'short', label: 'SHORT 10' });
+  assert.deepEqual(JSON.parse(JSON.stringify(core.variance(10, 12))), { delta: '2', status: 'over', label: 'OVER 2' });
+});
+
+test('8. Expected and Received quantities are persisted independently', () => {
+  assert.match(migration, /expected_quantity\s+integer\s+NOT NULL CHECK \(expected_quantity > 0\)/);
+  assert.match(migration, /received_quantity\s+numeric\s+NOT NULL[\s\S]*received_quantity >= 0 AND received_quantity = trunc\(received_quantity\)/);
+  assert.match(migration, /received_quantity text,[\s\S]*variance text,/);
+  assert.match(checklistEdge, /received_quantity:received_quantity::text/);
+  assert.match(migration, /v_expected_quantity, p_received_quantity/);
+  assert.match(checklistEdge, /body\?\.expected_quantity !== undefined/);
+});
+
+test('9. dedicated checklist is non-dismissible and precedes Classic entry', () => {
+  const screen = html.slice(html.indexOf('id="screen-opening-par-checklist"'), html.indexOf('id="screen-main"'));
+  assert.match(screen, /OPENING PAR CHECKLIST/);
+  assert.doesNotMatch(screen, /CLOSE CHECKLIST|Cancel|Back/);
+  assert.match(html, /await routeAfterAuthenticatedLogin\(\)/);
+  assert.match(html, /Opening PAR must be completed before normal inventory operations/);
+});
+
+test('10. status failure is fail-closed and supports retry', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /state\.openingParClassicUnlocked = false/);
+  assert.match(ui, /Opening PAR status could not be verified/);
+  assert.match(ui, /opening-par-retry/);
+});
+
+test('11. resume loads staff-scoped persisted receipts from status', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /openingParChecklistInvoke\('status'\)/);
+  assert.match(ui, /cacheOpeningParReceipts\(result\.receipts \|\| \[\]\)/);
+  assert.doesNotMatch(ui, /Drafts\.|Outbox\.|eventsInsert/);
+  assert.match(checklistEdge, /\.eq\("session_id", sessionId\)\.eq\("staff_id", staffId\)/);
+});
+
+test('12. completed staff bypasses the checklist on subsequent login', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /result\.completed === true[\s\S]*state\.openingParClassicUnlocked = true[\s\S]*return enterMain\(\)/);
+  assert.match(ui, /Opening PAR Complete/);
+});
+
+test('13. browser confirmation sends actual quantity but never Expected PAR', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(ui, /received_quantity: receivedQuantity/);
+  assert.doesNotMatch(ui, /expected_quantity:/);
+  assert.match(checklistEdge, /p_received_quantity: receivedQuantity/);
+});
+
+test('14. checklist API derives both session and staff from signed authorization', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.match(checklistEdge, /session and staff are derived from authorization/);
+  assert.match(checklistEdge, /claims\.sub !== sessionId/);
+  assert.match(checklistEdge, /claims\.barback_role !== "barback"/);
+  assert.match(ui, /row\.staff_id !== state\.staffId/);
+});
+
+test('15. default-deny RLS and service-only RPC prevent browser table writes', () => {
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/g);
+  assert.match(migration, /REVOKE ALL ON TABLE public\.barback_opening_par_receipts[\s\S]*FROM PUBLIC, anon, authenticated, barback_user/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.barback_confirm_opening_par[\s\S]*FROM PUBLIC, anon, authenticated, barback_user/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.barback_confirm_opening_par[\s\S]*TO service_role/);
+});
+
+test('16. runtime-gated restrictive policy leaves the existing event policy unchanged', () => {
+  assert.match(migration, /barback_opening_par_runtime_enabled/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS barback_opening_par_enabled boolean NOT NULL DEFAULT false/);
+  assert.match(migration, /SELECT v\.barback_opening_par_enabled/);
+  assert.doesNotMatch(migration, /public\.feature_flags/);
+  assert.match(migration, /CREATE POLICY events_opening_par_completion_gate[\s\S]*AS RESTRICTIVE/);
+  assert.match(migration, /IF NOT public\.barback_opening_par_runtime_enabled\(v_venue_id\)[\s\S]*RETURN true/);
+  assert.doesNotMatch(migration, /DROP POLICY.*events_barback_insert/i);
+});
+
+test('17. Manager reporting returns separate progress and visible variance data', () => {
+  assert.match(managerEdge, /opening_par_progress/);
+  assert.match(managerEdge, /variance_status/);
+  assert.match(managerEdge, /short_count/);
+  assert.match(managerEdge, /over_count/);
+  assert.match(manager, /Opening PAR shortages \/ overages/);
+});
+
+test('18. Classic TAKEN and RETURN draft paths remain functional', () => {
+  const first = addToReviewHarness();
+  assert.equal(first.context.addToReview({ item_id: 'heineken', item_name: 'Heineken', qty: 2, action: 'TAKEN', bar_id: 'bar-1', notes: '' }).ok, true);
+  assert.equal(first.captured[0].action, 'TAKEN');
+  const second = addToReviewHarness();
+  assert.equal(second.context.addToReview({ item_id: 'heineken', item_name: 'Heineken', qty: 642.5, action: 'RETURNED', bar_id: 'bar-1', notes: '' }).ok, true);
+  assert.equal(second.captured[0].action, 'RETURNED');
+});
+
+test('19. Partial, Review, Drafts, and Outbox code remains outside checklist code', () => {
+  const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
+  assert.doesNotMatch(ui, /bottle_state|addToReview|Drafts\.|Outbox\.|eventsInsert/);
+  assert.match(html, /bottleState === 'PARTIAL' && multiBarDestCount\(\) > 1/);
+  assert.match(html, /function onDraftEditSave\(ce, form\)/);
+  assert.match(html, /async function submitAllDraftsToBarinv\(\)/);
+});
+
+test('20. Manager gate remains on and Barback compile gate remains off', () => {
+  assert.match(manager, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
   assert.match(html, /const OPENING_PAR_V1_ENABLED = false;/);
-  assert.match(edge, /full_bottle_weight_g, par_level"\)/);
-  assert.match(edge, /\.or\("active\.is\.true,active\.is\.null"\)/);
-  assert.match(edge, /\.eq\("venue_id", venueId\)/);
+  assert.match(loginEdge, /opening_par: openingParResult\.value/);
+});
+
+test('21. an incomplete staff member cannot insert Classic events while enforcement is on', () => {
+  assert.match(migration, /IF NOT public\.barback_opening_par_runtime_enabled\(v_venue_id\) THEN\s+RETURN true;/);
+  assert.match(migration, /RETURN EXISTS \(\s+SELECT 1\s+FROM public\.barback_opening_par_completions AS c\s+WHERE c\.session_id = v_session_id AND c\.staff_id = v_staff_id\s+\);/);
+  assert.match(migration, /WITH CHECK \(public\.barback_opening_par_classic_unlocked\(\)\)/);
+});
+
+test('22. one completed staff member never unlocks another staff member in the same session', () => {
+  const completionLookup = migration.match(/RETURN EXISTS \([\s\S]*?\n  \);/);
+  assert.ok(completionLookup);
+  assert.match(completionLookup[0], /c\.session_id = v_session_id/);
+  assert.match(completionLookup[0], /c\.staff_id = v_staff_id/);
+  assert.doesNotMatch(completionLookup[0], /OR c\.staff_id/);
+});
+
+test('23. runtime gate off preserves Classic event behavior', () => {
+  assert.match(migration, /IF NOT public\.barback_opening_par_runtime_enabled\(v_venue_id\) THEN\s+RETURN true;\s+END IF;/);
+  assert.match(migration, /barback_opening_par_enabled boolean NOT NULL DEFAULT false/);
+  assert.doesNotMatch(migration, /DROP POLICY.*events_barback_insert/i);
+  const gateCheck = migration.indexOf('IF NOT public.barback_opening_par_runtime_enabled(v_venue_id)');
+  const sessionClaimCheck = migration.indexOf("v_session_id := NULLIF(v_claims ->> 'session_id'");
+  assert.ok(gateCheck > 0 && sessionClaimCheck > gateCheck);
 });

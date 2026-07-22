@@ -218,7 +218,7 @@ export async function verifyBarbackSessionToken(
     const sigOk = await crypto.subtle.verify(
       "HMAC",
       key,
-      sigBytes,
+      sigBytes as BufferSource,
       ENC.encode(payloadB64),
     );
     if (!sigOk) return { ok: false, reason: "signature mismatch" };

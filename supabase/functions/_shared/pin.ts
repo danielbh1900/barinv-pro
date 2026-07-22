@@ -49,7 +49,7 @@ export async function hashPin(pin: string, saltB64u: string): Promise<string> {
   const bits = await crypto.subtle.deriveBits(
     {
       name: "PBKDF2",
-      salt: saltBytes,
+      salt: saltBytes as BufferSource,
       iterations: 100_000,
       hash: "SHA-256",
     },

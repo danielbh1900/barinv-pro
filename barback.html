@@ -227,7 +227,7 @@
     .bm-scope-warn { background:#3f2c0a; color:#fbbf24; border:1px solid #7a5a12; border-radius:6px;
                      padding:7px 9px; font-size:11px; font-weight:700; line-height:1.3; }
     .bm-debug { font-size:10px; color:#6b7280; letter-spacing:0.02em; }
-    /* Opening / Multi-Bar selector chips (mobile-friendly, 2-col grid) */
+    /* Multi-Destination selector chips (mobile-friendly, 2-col grid) */
     #multibar-list { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
     .mb-chip { width:100%; padding:13px 10px; font-size:14px; font-weight:800; letter-spacing:0.02em;
                text-align:center; background:#1f2937; color:#cbd5e1; border:1px solid #374151;
@@ -236,32 +236,40 @@
     .mb-chip.on { background:#064e3b; color:#6ee7b7; border-color:#10b981; }
     .mb-chip:active { transform:scale(0.98); }
 
-    /* Opening PAR V1 — isolated bulk draft builder; classic entry stays below. */
-    .opening-par-card { padding:12px; background:#111827; border:1px solid #475569; border-radius:10px; }
-    .opening-par-title { color:#fbbf24; font-size:12px; font-weight:900; letter-spacing:0.12em; }
-    #opening-par-bars { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
-    .op-bar-chip { width:100%; padding:12px 8px; font-size:13px; font-weight:800; background:#1f2937;
-                   color:#cbd5e1; border:1px solid #475569; border-radius:8px; cursor:pointer;
-                   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .op-bar-chip.on { background:#064e3b; color:#a7f3d0; border-color:#10b981; }
-    .opening-par-list { display:flex; flex-direction:column; gap:8px; margin-top:10px; max-height:52vh;
-                        overflow-y:auto; -webkit-overflow-scrolling:touch; padding-right:2px; }
-    .opening-par-item { display:grid; grid-template-columns:minmax(0,1fr) 42px 74px 42px; gap:6px;
-                        align-items:center; padding:9px; background:#0b1220; border:1px solid #334155;
-                        border-radius:8px; }
+    /* Opening PAR Checklist — dedicated pre-operations workflow. */
+    .opening-par-shell { padding-bottom:calc(28px + env(safe-area-inset-bottom, 0px)); }
+    .opening-par-card { padding:14px; background:#111827; border:1px solid #475569; border-radius:10px; }
+    .opening-par-title { color:#fbbf24; font-size:13px; font-weight:900; letter-spacing:0.10em; }
+    .opening-par-progress { margin:10px 0 4px; color:#cbd5e1; font-size:12px; font-weight:800; }
+    .opening-par-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+    .opening-par-destination { padding:10px; background:#0b1220; border:1px solid #334155; border-radius:8px; }
+    .opening-par-destination-head { display:flex;justify-content:space-between;gap:8px;color:#fbbf24;
+                                    font-size:12px;font-weight:900;margin-bottom:8px; }
+    .opening-par-item { display:grid; grid-template-columns:minmax(0,1fr) minmax(86px,0.45fr) minmax(104px,0.55fr);
+                        gap:8px; align-items:center; padding:10px; margin-top:7px; background:#111827;
+                        border:1px solid #334155; border-radius:8px; }
+    .opening-par-item.match { border-color:#10b981; }
+    .opening-par-item.short { border-color:#f59e0b; background:#241b0b; }
+    .opening-par-item.over { border-color:#60a5fa; background:#0c1b30; }
     .opening-par-name { min-width:0; font-size:13px; font-weight:800; color:#f3f4f6; line-height:1.2; }
     .opening-par-meta { display:block; margin-top:3px; color:#94a3b8; font-size:10px; font-weight:500; }
-    .opening-par-step { width:42px; height:42px; padding:0; font-size:22px; font-weight:900; background:#1f2937;
-                        color:#fff; border:1px solid #475569; border-radius:8px; cursor:pointer; }
-    .opening-par-qty { width:74px; height:42px; padding:4px; font-size:20px; font-weight:900; text-align:center;
-                       background:#020617; color:#fff; border:1px solid #64748b; border-radius:8px; }
-    .opening-par-summary { margin-top:10px; padding:9px; background:#3f2c0a; color:#fbbf24;
-                           border:1px solid #7a5a12; border-radius:7px; font-size:12px; font-weight:800;
-                           line-height:1.4; }
-    @media (max-width:380px) {
-      .opening-par-item { grid-template-columns:minmax(0,1fr) 38px 62px 38px; gap:4px; padding:7px; }
-      .opening-par-step { width:38px; height:40px; }
-      .opening-par-qty { width:62px; height:40px; }
+    .opening-par-expected { color:#fbbf24; font-size:14px; font-weight:900; text-align:center; }
+    .opening-par-qty-wrap { display:flex; flex-direction:column; gap:5px; }
+    .opening-par-qty { width:100%; box-sizing:border-box; padding:9px 7px; font-size:18px; font-weight:900;
+                       text-align:center; background:#0b1220; color:#fff; border:1px solid #64748b; border-radius:7px; }
+    .opening-par-confirm { width:100%; padding:9px 7px; border-radius:7px; border:1px solid #64748b;
+                           background:#1f2937; color:#f3f4f6; font-weight:900; cursor:pointer; }
+    .opening-par-confirm.done { background:#064e3b; color:#a7f3d0; border-color:#10b981; }
+    .opening-par-variance { min-height:13px; text-align:center; font-size:10px; font-weight:900; }
+    .opening-par-variance.match { color:#6ee7b7; }
+    .opening-par-variance.short { color:#fbbf24; }
+    .opening-par-variance.over { color:#93c5fd; }
+    .opening-par-complete { display:none; margin-top:14px; padding:18px; text-align:center; background:#064e3b;
+                            color:#d1fae5; border:2px solid #10b981; border-radius:10px; }
+    @media (max-width:520px) {
+      .opening-par-item { grid-template-columns:minmax(0,1fr) 72px; }
+      .opening-par-qty-wrap { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0,1fr) minmax(110px,0.65fr); }
+      .opening-par-variance { grid-column:1 / -1; }
     }
 
     /* ── Scanner modal ───────────────────────────────────────────── */
@@ -488,7 +496,33 @@
   </div>
 </div>
 
-<!-- ============================ SCREEN 3: MAIN WORKFLOW ============================ -->
+<!-- ==================== SCREEN 3: OPENING PAR CHECKLIST ==================== -->
+<div class="screen" id="screen-opening-par-checklist">
+  <div class="identity-bar">
+    <div class="who" id="opening-par-who-line">—</div>
+    <button class="logout" id="opening-par-logout">Logout</button>
+  </div>
+  <div class="wrap opening-par-shell">
+    <div class="opening-par-card">
+      <div class="opening-par-title">OPENING PAR CHECKLIST</div>
+      <h1 style="margin:8px 0 4px;font-size:22px;">Confirm received opening stock</h1>
+      <div class="muted small">Expected PAR is read-only. Enter the actual whole quantity received for every item and destination.</div>
+      <div id="opening-par-progress" class="opening-par-progress">Checking status…</div>
+      <div id="opening-par-list" class="opening-par-list"></div>
+      <div id="opening-par-status"></div>
+      <div id="opening-par-complete" class="opening-par-complete">
+        <div style="font-size:22px;font-weight:900;">✓ Opening PAR Complete</div>
+        <div class="small" style="margin:6px 0 12px;color:#a7f3d0;">Normal TAKEN / RETURN operations are now unlocked.</div>
+        <button type="button" class="btn btn-success" id="opening-par-continue" style="margin:0;">CONTINUE TO TAKEN / RETURN</button>
+      </div>
+      <div id="opening-par-retry-wrap" style="display:none;margin-top:12px;">
+        <button type="button" class="btn btn-secondary" id="opening-par-retry" style="margin:0;">RETRY STATUS CHECK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SCREEN 4: MAIN WORKFLOW ============================ -->
 <div class="screen" id="screen-main">
   <div class="identity-bar">
     <div class="who" id="who-line">—</div>
@@ -576,13 +610,13 @@
       <select id="bar-pick"><option value="">(no bar)</option></select>
     </div>
 
-    <!-- Opening / Multi-Bar mode (barback only; hidden in VIP/Table mode and
+    <!-- Multi-Destination mode (barback only; hidden in VIP/Table mode and
          when ≤1 assigned bar). Adds the same item+qty to several assigned
          bars in one entry — one draft row per bar. Frontend-only. -->
     <div class="row" id="multibar-row" style="display:none;">
       <div class="checkbox-row" style="padding-bottom:2px;">
         <input type="checkbox" id="multibar-toggle">
-        <label for="multibar-toggle" style="margin:0;letter-spacing:normal;color:#cbd5e1;">📦 Opening / Multi-Bar — add to several bars at once</label>
+        <label for="multibar-toggle" style="margin:0;letter-spacing:normal;color:#cbd5e1;">📦 Multi-Destination — add to several destinations at once</label>
       </div>
       <div id="multibar-panel" style="display:none;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
@@ -591,28 +625,7 @@
           <span id="multibar-count" class="small" style="color:#fbbf24;font-weight:700;">0 bars selected</span>
         </div>
         <div id="multibar-list"></div>
-        <div class="muted small" style="margin-top:4px;">Opening items only. PARTIAL bottles must be added one bar at a time.</div>
-      </div>
-    </div>
-
-    <!-- BARBACK_OPENING_PAR_V1: optional, feature-flagged draft builder.
-         It does not replace or submit the classic TAKEN / RETURN form. -->
-    <div class="row" id="opening-par-row" style="display:none;">
-      <div class="opening-par-card">
-        <div class="opening-par-title">OPENING STOCK</div>
-        <div class="muted small" style="margin:5px 0 9px;">Load assigned opening quantities, adjust them, then add missing rows to Review.</div>
-        <button type="button" class="btn btn-secondary" id="opening-par-load" style="margin:0;">LOAD OPENING PAR</button>
-        <div id="opening-par-workspace" style="display:none;margin-top:12px;">
-          <label>ASSIGNED BARS</label>
-          <div id="opening-par-bars"></div>
-          <div id="opening-par-list" class="opening-par-list"></div>
-          <div id="opening-par-summary" class="opening-par-summary"></div>
-          <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:8px;margin-top:10px;">
-            <button type="button" class="btn btn-secondary" id="opening-par-cancel" style="margin:0;">CANCEL</button>
-            <button type="button" class="btn btn-success" id="opening-par-add" style="margin:0;">ADD MISSING TO REVIEW</button>
-          </div>
-        </div>
-        <div id="opening-par-status"></div>
+        <div class="muted small" style="margin-top:4px;">PARTIAL bottles must be added one destination at a time.</div>
       </div>
     </div>
 
@@ -1133,8 +1146,9 @@ const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
 const AUTH_MODE = 'phase3';
 const PHASE3_SESSION_KEEPALIVE_MS = 60_000;
 
-// BARBACK_OPENING_PAR_V1 — single reversible feature gate. Keep OFF until
-// local verification and an explicit production-enablement decision.
+// BARBACK_OPENING_PAR_V1 — compile-time safety gate. Runtime enforcement also
+// requires venues.barback_opening_par_enabled=true. Keep this OFF until an
+// explicit production-enablement decision.
 const OPENING_PAR_V1_ENABLED = false;
 
 // ════════════════════════════════════════════════════════════════════
@@ -1701,11 +1715,13 @@ const state = {
   staffId: null,
   staffName: null,
   staffRole: null,        // comma-separated staff.role from login bundle → operator mode
-  multiBarMode: false,    // Opening / Multi-Bar mode (barback only)
+  multiBarMode: false,    // Multi-Destination mode (barback only)
   multiBars: [],          // selected assigned bar_ids for multi-bar add
-  openingParOpen: false,  // isolated Opening PAR editor state (never persisted)
-  openingParBars: [],     // selected server-authorized destination IDs
-  openingParQty: {},      // item_id -> one-night editable quantity override
+  openingParReceipts: {}, // session|destination|staff|item -> persisted receipt
+  openingParBusyKey: null,
+  openingParStatus: null, // authoritative staff-specific API progress
+  openingParClassicUnlocked: true,
+  openingParRouteBusy: false,
   qtyModalItem: null,     // item awaiting qty confirmation from a single scan
   selectedAction: null,
   selectedItemId: null,
@@ -1812,7 +1828,7 @@ function boot() {
       } else {
         state.authPath = 'phase2_test';
       }
-      return enterMain();
+      return routeAfterAuthenticatedLogin();
     } else {
       Auth.clearSession();
     }
@@ -2010,7 +2026,7 @@ $('pin-submit').addEventListener('click', async () => {
     startJwtKeepalive();
   }
   Auth.saveSession(res.session);
-  enterMain();
+  await routeAfterAuthenticatedLogin();
 });
 $('pin-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('pin-submit').click();
@@ -2020,6 +2036,10 @@ $('pin-input').addEventListener('keydown', (e) => {
 //  MAIN — enter
 // ════════════════════════════════════════════════════════════════════
 function enterMain() {
+  if (OPENING_PAR_V1_ENABLED && !state.openingParClassicUnlocked) {
+    showOpeningParFailure('Opening PAR must be completed before normal inventory operations.');
+    return;
+  }
   const p = state.tokenPayload;
   const venue  = (cache.venues || []).find(v => v.id === p.venue_id);
   const night  = (cache.nights || []).find(n => n.id === p.night_id);
@@ -2093,11 +2113,9 @@ function enterMain() {
     $('bar-pick-row').style.display = 'none';
   }
 
-  // Opening / Multi-Bar UI — shown only for a barback session with >1
+  // Multi-Destination UI — shown only for a barback session with >1
   // assigned bar; hidden in VIP/Table mode and single-bar sessions.
   try { renderMultiBarUI(); } catch (_) {}
-  // Optional Opening PAR is isolated behind its own OFF-by-default flag.
-  try { resetOpeningParPanel(); renderOpeningParUI(); } catch (_) {}
 
   // Restore rapid-mode preference
   const prefs = Prefs.get();
@@ -5171,7 +5189,7 @@ function addToReview(payload) {
 //  Save button (manual flow)
 // ════════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════════
-//  Opening / Multi-Bar mode (PLAN-2026-06-13) — barback only, frontend-only
+//  Multi-Destination mode (PLAN-2026-06-13) — barback only, frontend-only
 // ════════════════════════════════════════════════════════════════════
 // Adds the same item+qty to several ASSIGNED bars in one tap (one draft row
 // per bar) via the existing addToReview/Drafts/Submit-All path — no backend
@@ -5267,18 +5285,11 @@ if ($('multibar-none')) $('multibar-none').addEventListener('click', () => {
 
 // ════════════════════════════════════════════════════════════════════
 // OPENING_PAR_V1_CORE_START
-// Pure planning helpers are dependency-free so fixtures can exercise filtering,
-// overrides, duplicate protection, and fan-out without a browser.
+// Pure checklist helpers are dependency-free so fixtures can exercise snapshot
+// validation, staff-specific state, actual quantities, and resume reconstruction.
 const OpeningParV1 = Object.freeze({
-  marker: 'Opening Stock — Barback PAR',
-
   itemOpeningQty(item) {
-    if (item && Object.prototype.hasOwnProperty.call(item, 'opening_par_qty')) {
-      return Number(item.opening_par_qty);
-    }
-    // Retained only for the Manager/default-PAR fixture helpers. The Barback
-    // session path below always joins an explicit opening_par_qty snapshot.
-    return Number(item && item.par_level);
+    return Number(item && item.opening_par_qty);
   },
 
   positiveParItems(visibleItems) {
@@ -5316,81 +5327,72 @@ const OpeningParV1 = Object.freeze({
     return { enabled: true, valid: true, items: joined };
   },
 
-  draftKey(nightId, barId, itemId) {
-    return [nightId || '', barId || '', itemId || ''].join('|');
+  checklistKey(sessionId, destinationId, staffId, itemId) {
+    return [sessionId || '', destinationId || '', staffId || '', itemId || ''].join('|');
   },
 
-  isOpeningDraft(draft) {
-    if (!draft) return false;
-    return draft.opening_par_v1 === true ||
-      String(draft.notes || '').indexOf(this.marker) >= 0;
+  parseReceivedQuantity(raw) {
+    const text = String(raw == null ? '' : raw).trim();
+    if (!/^(0|[1-9][0-9]*)$/.test(text)) return null;
+    return BigInt(text).toString();
   },
 
-  existingDraftKeys(drafts, nightId) {
-    const keys = new Set();
-    (drafts || []).forEach(draft => {
-      if (!this.isOpeningDraft(draft)) return;
-      if (draft.night_id !== nightId) return;
-      if (!draft.bar_id || !draft.item_id) return;
-      keys.add(this.draftKey(nightId, draft.bar_id, draft.item_id));
-    });
-    return keys;
+  variance(expected, received) {
+    const delta = BigInt(String(received)) - BigInt(String(expected));
+    const magnitude = delta < 0n ? -delta : delta;
+    return {
+      delta: delta.toString(),
+      status: delta === 0n ? 'match' : (delta < 0n ? 'short' : 'over'),
+      label: delta === 0n ? 'MATCH' : (delta < 0n ? ('SHORT ' + magnitude) : ('OVER ' + delta)),
+    };
   },
 
-  buildPlan(opts) {
+  buildChecklist(opts) {
     opts = opts || {};
     const items = this.positiveParItems(opts.items);
-    const bars = [];
-    const seenBars = new Set();
-    (opts.bars || []).forEach(bar => {
-      if (bar && bar.id && !seenBars.has(bar.id)) {
-        seenBars.add(bar.id);
-        bars.push(bar);
+    const destinations = [];
+    const seenDestinations = new Set();
+    (opts.destinations || []).forEach(destination => {
+      if (destination && destination.id && !seenDestinations.has(destination.id)) {
+        seenDestinations.add(destination.id);
+        destinations.push(destination);
       }
     });
-    const qtyByItem = opts.qtyByItem || {};
-    const existing = this.existingDraftKeys(opts.drafts, opts.nightId);
-    const rows = [];
-    const invalid = [];
-    let duplicateCount = 0;
-    let positiveItemCount = 0;
-
-    items.forEach(item => {
-      const hasOverride = Object.prototype.hasOwnProperty.call(qtyByItem, item.id);
-      const qty = Number(hasOverride ? qtyByItem[item.id] : this.itemOpeningQty(item));
-      if (!Number.isFinite(qty) || qty <= 0) return; // zero is an intentional skip
-      positiveItemCount++;
-      if (!Number.isInteger(qty)) {
-        invalid.push({ item: item, qty: qty });
-        return;
-      }
-      bars.forEach(bar => {
-        const key = this.draftKey(opts.nightId, bar.id, item.id);
-        if (existing.has(key)) duplicateCount++;
-        else rows.push({ item: item, bar: bar, qty: qty, key: key });
+    const receiptByKey = new Map();
+    (opts.receipts || []).forEach(receipt => {
+      if (!receipt || !receipt.destination_id || !receipt.staff_id || !receipt.item_id) return;
+      const key = this.checklistKey(opts.sessionId, receipt.destination_id, receipt.staff_id, receipt.item_id);
+      if (!receiptByKey.has(key)) receiptByKey.set(key, receipt);
+    });
+    const groups = destinations.map(destination => {
+      const rows = items.map(item => {
+        const key = this.checklistKey(opts.sessionId, destination.id, opts.staffId, item.id);
+        const receipt = receiptByKey.get(key) || null;
+        return { key, destination, item, expectedQty: this.itemOpeningQty(item), receipt };
       });
+      return {
+        destination,
+        rows,
+        confirmedCount: rows.filter(row => !!row.receipt).length,
+        totalCount: rows.length,
+      };
     });
-
     return {
-      rows: rows,
-      invalid: invalid,
-      duplicateCount: duplicateCount,
-      barCount: bars.length,
-      positiveItemCount: positiveItemCount,
-      requestedRowCount: bars.length * positiveItemCount,
+      groups,
+      destinationCount: destinations.length,
+      itemCount: items.length,
+      rowCount: destinations.length * items.length,
+      confirmedCount: groups.reduce((sum, group) => sum + group.confirmedCount, 0),
     };
   },
 });
 // OPENING_PAR_V1_CORE_END
 
 // OPENING_PAR_V1_UI_START
-function openingParAuthorizedBars() {
-  if (getCurrentUserRole() !== 'barback') return [];
-  // reviewSessionBars() is the existing server-session-authoritative source.
-  // Opening stock narrows further to explicit regular service areas and fails
-  // closed when bar_type is missing/stale; it never broadens the allowed set.
-  return reviewSessionBars().filter(bar =>
-    areaTypeToMode(String((bar && bar.bar_type) || '').toLowerCase().trim()) === 'barback');
+function openingParAuthorizedDestinations() {
+  // The authenticated session's destination scope is authoritative. Bartenders
+  // and Barbacks use the same assignment model and cannot broaden this list.
+  return reviewSessionBars();
 }
 
 function openingParSessionModel() {
@@ -5398,7 +5400,7 @@ function openingParSessionModel() {
   // existing session-visible item predicate; never fall back to par_level.
   return OpeningParV1.normalizeSessionSnapshot(
     state.openingParSession,
-    getAllowedItemsForCurrentSession(cache.items),
+    cache.items,
   );
 }
 
@@ -5407,230 +5409,232 @@ function openingParVisibleItems() {
   return model.enabled && model.valid ? model.items : [];
 }
 
-function resetOpeningParPanel() {
-  state.openingParOpen = false;
-  state.openingParBars = [];
-  state.openingParQty = {};
-  const workspace = $('opening-par-workspace');
-  if (workspace) workspace.style.display = 'none';
+function openingParSessionId() {
+  return (state.serverSession && (state.serverSession.session_id || state.serverSession.id)) ||
+    (state.tokenPayload && state.tokenPayload.session_id) || '';
+}
+
+function resetOpeningParChecklistState() {
+  state.openingParReceipts = {};
+  state.openingParBusyKey = null;
+  state.openingParStatus = null;
   clearStatus('opening-par-status');
 }
 
-function openingParSelectedBars() {
-  const allowed = openingParAuthorizedBars();
-  const selected = new Set(state.openingParBars || []);
-  return allowed.filter(bar => selected.has(bar.id));
-}
-
-function openingParCurrentPlan() {
-  const p = state.tokenPayload || {};
-  return OpeningParV1.buildPlan({
+function openingParCurrentChecklist() {
+  return OpeningParV1.buildChecklist({
     items: openingParVisibleItems(),
-    bars: openingParSelectedBars(),
-    qtyByItem: state.openingParQty || {},
-    drafts: Drafts.load(),
-    nightId: p.night_id || null,
+    destinations: openingParAuthorizedDestinations(),
+    receipts: Object.values(state.openingParReceipts || {}),
+    sessionId: openingParSessionId(),
+    staffId: state.staffId,
   });
 }
 
-function updateOpeningParSummary() {
-  const summary = $('opening-par-summary');
-  const addBtn = $('opening-par-add');
-  if (!summary || !addBtn || !state.openingParOpen) return;
-  const plan = openingParCurrentPlan();
-  const bits = [
-    plan.barCount + ' bar' + (plan.barCount !== 1 ? 's' : ''),
-    plan.positiveItemCount + ' positive item' + (plan.positiveItemCount !== 1 ? 's' : ''),
-    plan.requestedRowCount + ' requested row' + (plan.requestedRowCount !== 1 ? 's' : ''),
-  ];
-  if (plan.duplicateCount) bits.push(plan.duplicateCount + ' existing draft' + (plan.duplicateCount !== 1 ? 's' : '') + ' skipped');
-  bits.push(plan.rows.length + ' missing row' + (plan.rows.length !== 1 ? 's' : '') + ' will be added');
-  if (plan.invalid.length) bits.push(plan.invalid.length + ' quantity ' + (plan.invalid.length !== 1 ? 'values need' : 'value needs') + ' a whole number');
-  summary.textContent = bits.join(' · ');
-  addBtn.disabled = plan.barCount === 0 || plan.rows.length === 0 || plan.invalid.length > 0;
-  addBtn.textContent = plan.rows.length > 0
-    ? 'ADD ' + plan.rows.length + ' MISSING TO REVIEW'
-    : (plan.duplicateCount > 0 ? 'ALL ROWS ALREADY IN REVIEW' : 'ADD MISSING TO REVIEW');
+async function openingParChecklistInvoke(action, payload) {
+  if (!state.jwt) throw new Error('Sign in again before using Opening PAR.');
+  const response = await fetch(FN_BASE + '/barback-opening-par-checklist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.jwt },
+    body: JSON.stringify(Object.assign({ action }, payload || {})),
+  });
+  let body = {};
+  try { body = await response.json(); } catch (_) {}
+  if (!response.ok) throw new Error(body.error || ('Checklist request failed (' + response.status + ')'));
+  return body;
 }
 
-function renderOpeningParUI() {
-  const row = $('opening-par-row');
-  if (!row) return;
-  const sessionModel = openingParSessionModel();
-  const enabledForSession = OPENING_PAR_V1_ENABLED &&
-    getCurrentUserRole() === 'barback' &&
-    sessionModel.valid && sessionModel.enabled &&
-    openingParAuthorizedBars().length > 0;
-  row.style.display = enabledForSession ? '' : 'none';
-  if (!enabledForSession) {
-    resetOpeningParPanel();
-    return;
-  }
-
-  const workspace = $('opening-par-workspace');
-  if (workspace) workspace.style.display = state.openingParOpen ? '' : 'none';
-  if (!state.openingParOpen) return;
-
-  const allowedBars = openingParAuthorizedBars();
-  const allowedIds = new Set(allowedBars.map(bar => bar.id));
-  state.openingParBars = (state.openingParBars || []).filter(id => allowedIds.has(id));
-  const selected = new Set(state.openingParBars);
-  const barsEl = $('opening-par-bars');
-  if (barsEl) {
-    barsEl.innerHTML = allowedBars.map(bar => {
-      const on = selected.has(bar.id);
-      return '<button type="button" class="op-bar-chip' + (on ? ' on' : '') + '" data-bar="' + esc(bar.id) + '">' +
-        (on ? '✓ ' : '') + esc(bar.name || '?') + '</button>';
-    }).join('');
-    Array.from(barsEl.querySelectorAll('.op-bar-chip')).forEach(chip => {
-      chip.addEventListener('click', () => {
-        const id = chip.getAttribute('data-bar');
-        const next = new Set(state.openingParBars || []);
-        if (next.has(id)) next.delete(id); else next.add(id);
-        state.openingParBars = Array.from(next).filter(barId => allowedIds.has(barId));
-        renderOpeningParUI();
-      });
-    });
-  }
-
-  const items = openingParVisibleItems();
-  const liveIds = new Set(items.map(item => item.id));
-  Object.keys(state.openingParQty || {}).forEach(id => {
-    if (!liveIds.has(id)) delete state.openingParQty[id];
+function cacheOpeningParReceipts(rows) {
+  const next = {};
+  (rows || []).forEach(row => {
+    if (!row || !row.destination_id || row.staff_id !== state.staffId || !row.item_id) return;
+    next[OpeningParV1.checklistKey(openingParSessionId(), row.destination_id, row.staff_id, row.item_id)] = row;
   });
-  items.forEach(item => {
-    if (!Object.prototype.hasOwnProperty.call(state.openingParQty, item.id)) {
-      state.openingParQty[item.id] = Number(item.opening_par_qty);
-    }
-  });
+  state.openingParReceipts = next;
+}
 
+function openingParIdentityLine() {
+  const p = state.tokenPayload || {};
+  const venue = (cache.venues || []).find(v => v.id === p.venue_id);
+  const night = (cache.nights || []).find(n => n.id === p.night_id);
+  const nightLabel = p.night_label || (night && [night.date, night.name].filter(Boolean).join(' · ')) || 'assigned night';
+  return [state.staffName || 'staff', (venue && venue.name) || p.venue_name || 'venue', nightLabel].join(' · ');
+}
+
+function renderOpeningParChecklist() {
   const list = $('opening-par-list');
-  if (list) {
-    list.innerHTML = items.map(item => {
-      const meta = [itemSizeLabel(item), item.unit].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · ');
-      return '<div class="opening-par-item" data-item="' + esc(item.id) + '">' +
-        '<div class="opening-par-name">' + esc(item.name || '?') +
-          (meta ? '<span class="opening-par-meta">' + esc(meta) + '</span>' : '') + '</div>' +
-        '<button type="button" class="opening-par-step op-minus" aria-label="Decrease ' + esc(item.name || 'item') + '">−</button>' +
-        '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" value="' +
-          esc(String(state.openingParQty[item.id])) + '" aria-label="Opening quantity for ' + esc(item.name || 'item') + '">' +
-        '<button type="button" class="opening-par-step op-plus" aria-label="Increase ' + esc(item.name || 'item') + '">+</button>' +
-      '</div>';
-    }).join('');
+  if (!list) return;
+  const checklist = openingParCurrentChecklist();
+  const status = state.openingParStatus || {};
+  $('opening-par-who-line').textContent = openingParIdentityLine();
+  $('opening-par-progress').textContent = checklist.confirmedCount + ' of ' + checklist.rowCount + ' confirmed · ' +
+    Math.max(checklist.rowCount - checklist.confirmedCount, 0) + ' remaining';
+  const completed = status.completed === true;
+  $('opening-par-complete').style.display = completed ? '' : 'none';
+  $('opening-par-retry-wrap').style.display = 'none';
 
-    Array.from(list.querySelectorAll('.opening-par-item')).forEach(itemRow => {
-      const itemId = itemRow.getAttribute('data-item');
-      const input = itemRow.querySelector('.opening-par-qty');
-      const setQty = value => {
-        const n = Number(value);
-        state.openingParQty[itemId] = Number.isFinite(n) ? Math.max(0, n) : 0;
-        input.value = String(state.openingParQty[itemId]);
-        updateOpeningParSummary();
-      };
-      input.addEventListener('input', () => {
-        const n = Number(input.value);
-        state.openingParQty[itemId] = Number.isFinite(n) ? n : 0;
-        updateOpeningParSummary();
-      });
-      itemRow.querySelector('.op-minus').addEventListener('click', () => setQty(Number(input.value || 0) - 1));
-      itemRow.querySelector('.op-plus').addEventListener('click', () => setQty(Number(input.value || 0) + 1));
+  list.innerHTML = checklist.groups.map(group =>
+      '<section class="opening-par-destination">' +
+        '<div class="opening-par-destination-head"><span>' + esc(group.destination.name || '?') + '</span>' +
+          '<span>' + group.confirmedCount + ' / ' + group.totalCount + ' Confirmed</span></div>' +
+        group.rows.map(row => {
+          const meta = [itemSizeLabel(row.item), row.item.unit]
+            .filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ');
+          const receipt = row.receipt;
+          const variance = receipt ? OpeningParV1.variance(row.expectedQty, receipt.received_quantity) : null;
+          const timestamp = receipt && receipt.confirmed_at ? new Date(receipt.confirmed_at).toLocaleString() : '';
+          const busy = state.openingParBusyKey === row.key;
+          return '<div class="opening-par-item' + (variance ? (' ' + variance.status) : '') + '" data-key="' + esc(row.key) +
+            '" data-destination="' + esc(group.destination.id) + '" data-item="' + esc(row.item.id) +
+            '" data-expected="' + esc(String(row.expectedQty)) + '">' +
+            '<div class="opening-par-name">' + esc(row.item.name || '?') +
+              '<span class="opening-par-meta">' + esc(meta) + (timestamp ? ' · ' + esc(timestamp) : '') + '</span></div>' +
+            '<div class="opening-par-expected"><span class="opening-par-meta">EXPECTED PAR</span>' + esc(String(row.expectedQty)) + '</div>' +
+            '<div class="opening-par-qty-wrap">' +
+              '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="Received"' +
+                (receipt ? (' value="' + esc(String(receipt.received_quantity)) + '"') : '') +
+                (receipt || busy || completed ? ' disabled' : '') + '>' +
+              '<button type="button" class="opening-par-confirm' + (receipt ? ' done' : '') + '"' +
+                (receipt || busy || completed ? ' disabled' : '') + '>' +
+                (receipt ? '✓ Confirmed' : (busy ? 'Saving…' : 'Confirm')) + '</button>' +
+              '<div class="opening-par-variance' + (variance ? (' ' + variance.status) : '') + '">' +
+                (variance ? esc(variance.label) : '') + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</section>'
+  ).join('');
+
+  Array.from(list.querySelectorAll('.opening-par-item:not(.match):not(.short):not(.over)')).forEach(itemRow => {
+    const input = itemRow.querySelector('.opening-par-qty');
+    const varianceEl = itemRow.querySelector('.opening-par-variance');
+    if (!input || !varianceEl) return;
+    input.addEventListener('input', () => {
+      const value = OpeningParV1.parseReceivedQuantity(input.value);
+      const expected = Number(itemRow.getAttribute('data-expected'));
+      itemRow.classList.remove('match', 'short', 'over');
+      varianceEl.classList.remove('match', 'short', 'over');
+      if (value == null) { varianceEl.textContent = ''; return; }
+      const variance = OpeningParV1.variance(expected, value);
+      itemRow.classList.add(variance.status);
+      varianceEl.classList.add(variance.status);
+      varianceEl.textContent = variance.label;
     });
-  }
-  updateOpeningParSummary();
+  });
+
+  Array.from(list.querySelectorAll('.opening-par-confirm:not(.done)')).forEach(button => {
+    button.addEventListener('click', async () => {
+      const itemRow = button.closest('.opening-par-item');
+      const input = itemRow && itemRow.querySelector('.opening-par-qty');
+      const key = itemRow && itemRow.getAttribute('data-key');
+      const destinationId = itemRow && itemRow.getAttribute('data-destination');
+      const itemId = itemRow && itemRow.getAttribute('data-item');
+      const receivedQuantity = OpeningParV1.parseReceivedQuantity(input && input.value);
+      if (receivedQuantity == null) {
+        statusOn('opening-par-status', 'Received quantity must be a whole number greater than or equal to zero.', 'err');
+        if (input) input.focus();
+        return;
+      }
+      if (!key || !destinationId || !itemId || state.openingParBusyKey) return;
+      state.openingParBusyKey = key;
+      clearStatus('opening-par-status');
+      renderOpeningParChecklist();
+      try {
+        const result = await openingParChecklistInvoke('confirm', {
+          destination_id: destinationId,
+          item_id: itemId,
+          received_quantity: receivedQuantity,
+        });
+        if (!result.receipt || result.receipt.staff_id !== state.staffId) {
+          throw new Error('Confirmation identity could not be verified.');
+        }
+        state.openingParReceipts[key] = result.receipt;
+        state.openingParStatus = result;
+        state.openingParClassicUnlocked = result.completed === true;
+        statusOn('opening-par-status', result.completed ? 'Opening PAR Complete.' : 'Received quantity confirmed.', 'ok');
+      } catch (error) {
+        statusOn('opening-par-status', error.message || String(error), 'err');
+        try {
+          const refreshed = await openingParChecklistInvoke('status');
+          if (refreshed.required === true) {
+            cacheOpeningParReceipts(refreshed.receipts || []);
+            state.openingParStatus = refreshed;
+            state.openingParClassicUnlocked = refreshed.completed === true;
+          }
+        } catch (_) { /* remain fail-closed on the checklist screen */ }
+      } finally {
+        state.openingParBusyKey = null;
+        renderOpeningParChecklist();
+      }
+    });
+  });
 }
 
-if ($('opening-par-load')) $('opening-par-load').addEventListener('click', () => {
-  clearStatus('opening-par-status');
-  if (!OPENING_PAR_V1_ENABLED) return;
-  const sessionModel = openingParSessionModel();
-  if (!sessionModel.valid || !sessionModel.enabled) {
-    resetOpeningParPanel();
-    return;
-  }
-  const bars = openingParAuthorizedBars();
-  if (!bars.length) {
-    resetOpeningParPanel();
-    statusOn('opening-par-status', 'Opening PAR unavailable: this session has no authorized regular-bar destinations. Manual TAKEN / RETURN is still available.', 'err');
-    return;
-  }
-  const items = openingParVisibleItems();
-  if (!items.length) {
-    resetOpeningParPanel();
-    statusOn('opening-par-status', 'Opening PAR unavailable: the authenticated session snapshot contains no visible regular-bar items. Manual TAKEN / RETURN is still available.', 'info');
-    return;
-  }
+function showOpeningParFailure(message) {
+  state.openingParClassicUnlocked = false;
+  state.openingParStatus = null;
+  $('opening-par-who-line').textContent = openingParIdentityLine();
+  $('opening-par-progress').textContent = 'Normal inventory operations remain locked.';
+  $('opening-par-list').innerHTML = '';
+  $('opening-par-complete').style.display = 'none';
+  $('opening-par-retry-wrap').style.display = '';
+  statusOn('opening-par-status', message, 'err');
+  showScreen('screen-opening-par-checklist');
+  startExpirationTimer();
+}
 
-  const allowedIds = new Set(bars.map(bar => bar.id));
-  const preferred = state.multiBarMode && (state.multiBars || []).length
-    ? state.multiBars : [state.selectedBarId];
-  state.openingParBars = preferred.filter(id => id && allowedIds.has(id));
-  if (!state.openingParBars.length && bars.length === 1) state.openingParBars = [bars[0].id];
-  state.openingParQty = {};
-  items.forEach(item => { state.openingParQty[item.id] = Number(item.opening_par_qty); });
-  state.openingParOpen = true;
-  renderOpeningParUI();
+async function routeAfterAuthenticatedLogin() {
+  if (!OPENING_PAR_V1_ENABLED || !state.jwt || state.authPath !== 'phase3') {
+    state.openingParClassicUnlocked = true;
+    return enterMain();
+  }
+  if (state.openingParRouteBusy) return;
+  state.openingParRouteBusy = true;
+  state.openingParClassicUnlocked = false;
+  resetOpeningParChecklistState();
+  try {
+    const result = await openingParChecklistInvoke('status');
+    if (result.runtime_enabled !== true || result.required !== true || result.completed === true) {
+      state.openingParStatus = result;
+      state.openingParClassicUnlocked = true;
+      return enterMain();
+    }
+    const model = openingParSessionModel();
+    const destinations = openingParAuthorizedDestinations();
+    if (!model.valid || !model.enabled || !model.items.length || !destinations.length) {
+      throw new Error('Opening PAR scope could not be reconstructed from the authenticated session.');
+    }
+    cacheOpeningParReceipts(result.receipts || []);
+    state.openingParStatus = result;
+    const checklist = openingParCurrentChecklist();
+    if (checklist.rowCount !== result.required_count || checklist.confirmedCount !== result.confirmed_count) {
+      throw new Error('Opening PAR progress does not match the authenticated session scope.');
+    }
+    for (const group of checklist.groups) {
+      for (const row of group.rows) {
+        if (row.receipt && row.receipt.expected_quantity !== row.expectedQty) {
+          throw new Error('Opening PAR Expected PAR integrity check failed.');
+        }
+      }
+    }
+    showScreen('screen-opening-par-checklist');
+    startExpirationTimer();
+    renderOpeningParChecklist();
+  } catch (error) {
+    showOpeningParFailure(
+      'Opening PAR status could not be verified. ' + (error && error.message ? error.message : String(error))
+    );
+  } finally {
+    state.openingParRouteBusy = false;
+  }
+}
+
+$('opening-par-retry').addEventListener('click', routeAfterAuthenticatedLogin);
+$('opening-par-continue').addEventListener('click', () => {
+  if (state.openingParClassicUnlocked && state.openingParStatus && state.openingParStatus.completed === true) enterMain();
 });
+$('opening-par-logout').addEventListener('click', logout);
 
-if ($('opening-par-cancel')) $('opening-par-cancel').addEventListener('click', () => {
-  resetOpeningParPanel();
-  renderOpeningParUI();
-});
-
-if ($('opening-par-add')) $('opening-par-add').addEventListener('click', () => {
-  clearStatus('opening-par-status');
-  if (!OPENING_PAR_V1_ENABLED || !state.openingParOpen) return;
-  const sessionModel = openingParSessionModel();
-  if (!sessionModel.valid || !sessionModel.enabled) {
-    resetOpeningParPanel();
-    return;
-  }
-  const btn = $('opening-par-add');
-  const plan = openingParCurrentPlan(); // re-resolves scope, bars, items, drafts
-  if (!plan.barCount) {
-    statusOn('opening-par-status', 'Select at least one assigned bar.', 'err');
-    return;
-  }
-  if (plan.invalid.length) {
-    statusOn('opening-par-status', 'Opening TAKEN quantities must be whole bottles. Correct the quantity values.', 'err');
-    return;
-  }
-  if (!plan.rows.length) {
-    statusOn('opening-par-status', plan.duplicateCount ? 'All selected Opening PAR rows are already in Review.' : 'No positive quantities to add.', 'info');
-    return;
-  }
-
-  if (btn) { btn.disabled = true; btn.dataset.busy = '1'; btn.textContent = '… ADDING TO REVIEW'; }
-  let added = 0, failed = 0, lastError = '';
-  plan.rows.forEach(rowPlan => {
-    // addToReview is the existing final safety gate for current item scope,
-    // session destination scope, action, integer qty, and PARTIAL rules.
-    const result = addToReview({
-      item_id: rowPlan.item.id,
-      item_name: rowPlan.item.name,
-      qty: rowPlan.qty,
-      action: 'TAKEN',
-      bar_id: rowPlan.bar.id,
-      notes: OpeningParV1.marker,
-      bottle_state: 'UNOPENED',
-      weight_g: null,
-      opening_par_v1: true,
-    });
-    if (result && result.ok) added++;
-    else { failed++; lastError = (result && result.error) || 'add failed'; }
-  });
-  if (btn) delete btn.dataset.busy;
-  try { refreshDraftCount(); } catch (_) {}
-  try { refreshQueueCount(); } catch (_) {}
-  try { renderRecentMini(); } catch (_) {}
-  try { renderReview(); } catch (_) {}
-  renderOpeningParUI();
-  if (added) Feedback.ok(); else Feedback.err();
-  statusOn('opening-par-status',
-    added + ' Opening row' + (added !== 1 ? 's' : '') + ' added to Review' +
-      (failed ? (' · ' + failed + ' failed: ' + lastError) : '') +
-      (plan.duplicateCount ? (' · ' + plan.duplicateCount + ' existing skipped') : ''),
-    failed ? 'warn' : 'ok');
-});
 // OPENING_PAR_V1_UI_END
 
 //  Shared Add-to-Review CORE (PLAN-2026-06-13) — used by BOTH the manual
@@ -5964,7 +5968,6 @@ $('sync-btn').addEventListener('click', async () => {
 // Footer
 $('reload-cache-btn').addEventListener('click', () => {
   loadProductionCache();
-  try { renderOpeningParUI(); } catch (_) {}
   statusOn('save-status','Reloaded: ' + (cache.items || []).length + ' items · ' + (cache.bars || []).length + ' bars', 'info');
 });
 function refreshQueueCount() {
@@ -5991,9 +5994,11 @@ function logout() {
   state.selectedItemId = null;
   state.selectedItemName = null;
   state.selectedBarId = null;
-  state.openingParOpen = false;
-  state.openingParBars = [];
-  state.openingParQty = {};
+  state.openingParReceipts = {};
+  state.openingParBusyKey = null;
+  state.openingParStatus = null;
+  state.openingParClassicUnlocked = true;
+  state.openingParRouteBusy = false;
   state.jwt = null;
   state.jwtExpiresAt = null;
   state.serverSession = null;
@@ -6994,7 +6999,8 @@ function refreshDraftCount() {
 $('review-submit-all').addEventListener('click', submitAllDraftsToBarinv);
 
 $('review-back').addEventListener('click', () => {
-  if (state.tokenPayload) showScreen('screen-main');
+  if (state.tokenPayload && (!OPENING_PAR_V1_ENABLED || state.openingParClassicUnlocked)) showScreen('screen-main');
+  else if (state.tokenPayload) showScreen('screen-opening-par-checklist');
   else showScreen('screen-token');
 });
 $('review-sync').addEventListener('click', async () => {
