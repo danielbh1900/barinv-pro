@@ -273,9 +273,10 @@ test('25. malformed stored config fails closed without failing login', () => {
   assert.match(loginEdge, /malformed Opening PAR config; feature disabled for session/);
 });
 
-test('26. global feature gate remains OFF and bypasses checklist routing', () => {
-  assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
+test('26. compile gate is ON and runtime-not-applicable bypasses checklist routing', () => {
+  assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = true;/);
   assert.match(barbackHtml, /if \(!OPENING_PAR_V1_ENABLED \|\| !state\.jwt \|\| state\.authPath !== 'phase3'\)[\s\S]*return enterMain\(\)/);
+  assert.match(barbackHtml, /result\.runtime_enabled !== true \|\| result\.required !== true \|\| result\.completed === true[\s\S]*return enterMain\(\)/);
 });
 
 test('27. enabled session plus eventual global gate uses the session snapshot', () => {
@@ -444,7 +445,7 @@ test('45. enabled Manager gate retains Night and Link Type stale-snapshot cleari
   assert.match(managerHtml, /if \(OPENING_PAR_MANAGER_V1_ENABLED && \$\('c-opening-par-enabled'\)\)/);
 });
 
-test('46. Manager gate remains ON while the Barback rollout gate remains OFF', () => {
+test('46. Manager and Barback compile gates remain ON', () => {
   assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
-  assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = false;/);
+  assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = true;/);
 });

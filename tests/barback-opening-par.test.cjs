@@ -240,9 +240,9 @@ test('19. Partial, Review, Drafts, and Outbox code remains outside checklist cod
   assert.match(html, /async function submitAllDraftsToBarinv\(\)/);
 });
 
-test('20. Manager gate remains on and Barback compile gate remains off', () => {
+test('20. Manager and Barback compile gates remain on', () => {
   assert.match(manager, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
-  assert.match(html, /const OPENING_PAR_V1_ENABLED = false;/);
+  assert.match(html, /const OPENING_PAR_V1_ENABLED = true;/);
   assert.match(loginEdge, /opening_par: openingParResult\.value/);
 });
 

@@ -207,9 +207,9 @@ test('28. no Confirm All or bulk confirmation path exists', () => {
   assert.doesNotMatch(barback + checklistEdge, /Confirm All|confirm_all|confirmAll/);
 });
 
-test('29. rollout gates remain Manager true and Barback false', () => {
+test('29. rollout compile gates remain Manager true and Barback true', () => {
   assert.match(manager, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
-  assert.match(barback, /const OPENING_PAR_V1_ENABLED = false;/);
+  assert.match(barback, /const OPENING_PAR_V1_ENABLED = true;/);
 });
 
 test('30. create-session rejects empty staff/destination scopes and assignment tampering', () => {
