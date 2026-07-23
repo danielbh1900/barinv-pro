@@ -309,7 +309,14 @@
 <div class="screen" id="screen-main">
   <div class="wrap">
     <h1>Barback session manager</h1>
-    <h2 id="venue-meta">—</h2>
+    <div style="display:flex;gap:12px;align-items:end;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;">
+      <h2 id="venue-meta" style="margin:0;">—</h2>
+      <label style="min-width:260px;margin:0;">
+        ACTIVE VENUE
+        <select id="manager-venue-selector" style="margin-top:4px;"></select>
+      </label>
+    </div>
+    <div id="manager-venue-status"></div>
 
     <div style="display:flex;gap:6px;margin:6px 0 14px;">
       <button class="btn btn-secondary" data-tab="create">+ NEW</button>
@@ -840,6 +847,7 @@ const state = {
   staff: null,
   venueId: null,
   venueName: null,
+  authorizedVenues: [],
   nights: [],
   allNights: [],
   bars: [],
@@ -860,6 +868,56 @@ const state = {
     warning: '',
   },
 };
+
+// MANAGER_VENUE_SELECTION_V1_CORE_START
+const MANAGER_VENUE_ROLES = ['manager', 'admin', 'owner'];
+const ManagerVenueSelectionV1 = Object.freeze({
+  authorizedMemberships(memberships, venues) {
+    const allowedIds = new Set((memberships || [])
+      .filter(row => row && MANAGER_VENUE_ROLES.includes(String(row.role || '').toLowerCase()))
+      .map(row => row.venue_id));
+    return (venues || [])
+      .filter(venue => venue && allowedIds.has(venue.id))
+      .map(venue => ({
+        id: venue.id,
+        name: venue.name || venue.id,
+        role: String(((memberships || []).find(row => row.venue_id === venue.id) || {}).role || '').toLowerCase(),
+      }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  },
+
+  chooseInitial(authorizedVenues, savedVenueId, legacyStaffVenueId) {
+    const allowed = new Set((authorizedVenues || []).map(venue => venue.id));
+    if (savedVenueId && allowed.has(savedVenueId)) return savedVenueId;
+    if (legacyStaffVenueId && allowed.has(legacyStaffVenueId)) return legacyStaffVenueId;
+    return authorizedVenues && authorizedVenues[0] ? authorizedVenues[0].id : null;
+  },
+
+  clearScopedState(target) {
+    target.venueName = null;
+    target.nights = [];
+    target.allNights = [];
+    target.bars = [];
+    target.staffList = [];
+    target.nightAssignments = [];
+    target.nightDestinationIds = [];
+    target.destinationCustomization = false;
+    target.lastCreate = null;
+    target.credentialReveal = { link: false, qr: false, pins: new Set() };
+    target.openingPar = {
+      enabled: false,
+      loaded: false,
+      workspaceOpen: false,
+      nightId: null,
+      items: [],
+      defaults: {},
+      quantities: {},
+      warning: '',
+    };
+    return target;
+  },
+});
+// MANAGER_VENUE_SELECTION_V1_CORE_END
 
 // ════════════════════════════════════════════════════════════════════
 //  Utils
@@ -921,6 +979,161 @@ function showTab(name) {
 function statusOn(id, msg, level) {
   $(id).innerHTML = '<div class="status ' + (level || 'warn') + '">' + esc(msg) + '</div>';
 }
+
+function clearManagerVenueScopedState() {
+  stopSessionsAutoRefresh();
+  stopDiagAutoRefresh();
+  ManagerVenueSelectionV1.clearScopedState(state);
+  try { _sessionsLastData = []; } catch (_) {}
+
+  const emptyHtml = {
+    'c-night': '',
+    'c-bar': '<option value="">(any destination)</option>',
+    'c-allowed-bars': '<div class="muted small">Select a venue and night.</div>',
+    'c-staff': '<div class="muted small">Select a venue and night.</div>',
+    'c-scope-review-body': 'Select staff to derive assigned destinations.',
+    'sessions-list': '<div class="muted small">Select a venue.</div>',
+    'diag-list': '<div class="muted small">Select a venue.</div>',
+    'diag-analytics': '<div class="muted small">Select a venue.</div>',
+    'audit-list': '<div class="muted small">Select a venue.</div>',
+    'pilot-alerts-list': '—',
+    'pilot-timeline': '—',
+    'pilot-feedback-list': '—',
+    'pilot-notes-list': '—',
+    'pilot-night': '',
+    'audit-filter-staff': '<option value="">all staff</option>',
+  };
+  Object.entries(emptyHtml).forEach(([id, html]) => {
+    const node = $(id);
+    if (node) node.innerHTML = html;
+  });
+
+  ['c-status', 'c-opening-par-status', 'pilot-status', 'pilot-readiness-status',
+    'pilot-emergency-status', 'pilot-export-status', 'pilot-close-status', 'reh-status']
+    .forEach(id => { if ($(id)) $(id).innerHTML = ''; });
+  ['c-nickname', 'sessions-search', 'reh-nickname'].forEach(id => {
+    if ($(id)) $(id).value = '';
+  });
+  ['c-rotate-pins', 'c-pilot', 'c-show-closed-nights', 'c-customize-destinations',
+    'c-opening-par-enabled'].forEach(id => {
+    if ($(id)) $(id).checked = false;
+  });
+  if ($('c-linktype')) $('c-linktype').value = 'bar';
+  if ($('venue-meta')) $('venue-meta').textContent = '—';
+  if ($('c-result-card')) $('c-result-card').style.display = 'none';
+  if ($('c-url')) $('c-url').textContent = '••••••••••••••••••••••••';
+  if ($('c-pins')) $('c-pins').textContent = '—';
+  if ($('qr-out')) { $('qr-out').innerHTML = ''; $('qr-out').style.display = 'none'; }
+  if ($('reh-result-row')) $('reh-result-row').style.display = 'none';
+  if ($('reh-url')) $('reh-url').textContent = '';
+  enforceManagerOpeningParRolloutGate();
+}
+
+async function fetchAuthorizedManagerVenues() {
+  if (!state.user || !state.user.id) throw new Error('Manager login required.');
+  const { data: memberships, error: membershipError } = await SB.from('venue_members')
+    .select('venue_id, role')
+    .eq('user_id', state.user.id)
+    .in('role', MANAGER_VENUE_ROLES);
+  if (membershipError) throw new Error('Unable to load authorized venue memberships.');
+  const venueIds = Array.from(new Set((memberships || []).map(row => row.venue_id).filter(Boolean)));
+  if (!venueIds.length) return [];
+  const { data: venues, error: venueError } = await SB.from('venues')
+    .select('id, name')
+    .in('id', venueIds)
+    .order('name');
+  if (venueError) throw new Error('Unable to load authorized venues.');
+  return ManagerVenueSelectionV1.authorizedMemberships(memberships || [], venues || []);
+}
+
+function renderManagerVenueSelector() {
+  const selector = $('manager-venue-selector');
+  if (!selector) return;
+  selector.innerHTML = (state.authorizedVenues || []).map(venue =>
+    '<option value="' + esc(venue.id) + '">' + esc(venue.name) + ' · ' + esc(venue.role) + '</option>'
+  ).join('');
+  selector.value = state.venueId || '';
+  selector.disabled = (state.authorizedVenues || []).length <= 1;
+}
+
+async function assertSelectedManagerVenueAuthorized() {
+  if (!state.user || !state.venueId) throw new Error('No authorized Manager venue selected.');
+  const { data, error } = await SB.from('venue_members')
+    .select('venue_id, role')
+    .eq('user_id', state.user.id)
+    .eq('venue_id', state.venueId)
+    .in('role', MANAGER_VENUE_ROLES)
+    .maybeSingle();
+  if (error || !data) {
+    try { localStorage.removeItem('barinv_manager_venue_id'); } catch (_) {}
+    state.venueId = null;
+    state.authorizedVenues = [];
+    clearManagerVenueScopedState();
+    renderManagerVenueSelector();
+    statusOn('manager-venue-status', 'Selected venue access is no longer authorized. Reload or sign in again.', 'err');
+    throw new Error('Selected venue access is no longer authorized.');
+  }
+  return true;
+}
+
+async function loadInitialManagerVenue() {
+  state.authorizedVenues = await fetchAuthorizedManagerVenues();
+  if (!state.authorizedVenues.length) {
+    clearManagerVenueScopedState();
+    renderManagerVenueSelector();
+    throw new Error('No manager-authorized venues are assigned to this account.');
+  }
+  let savedVenueId = null;
+  try { savedVenueId = localStorage.getItem('barinv_manager_venue_id'); } catch (_) {}
+  const selectedVenueId = ManagerVenueSelectionV1.chooseInitial(
+    state.authorizedVenues,
+    savedVenueId,
+    state.staff && state.staff.venue_id,
+  );
+  if (savedVenueId && savedVenueId !== selectedVenueId) {
+    try { localStorage.removeItem('barinv_manager_venue_id'); } catch (_) {}
+  }
+  clearManagerVenueScopedState();
+  state.venueId = selectedVenueId;
+  try { localStorage.setItem('barinv_manager_venue_id', selectedVenueId); } catch (_) {}
+  renderManagerVenueSelector();
+  await loadVenueContext();
+}
+
+async function switchManagerVenue(venueId) {
+  const selector = $('manager-venue-selector');
+  if (selector) selector.disabled = true;
+  try {
+    const authorizedVenues = await fetchAuthorizedManagerVenues();
+    const selected = authorizedVenues.find(venue => venue.id === venueId);
+    if (!selected) {
+      try { localStorage.removeItem('barinv_manager_venue_id'); } catch (_) {}
+      clearManagerVenueScopedState();
+      state.venueId = null;
+      state.authorizedVenues = authorizedVenues;
+      renderManagerVenueSelector();
+      throw new Error('Selected venue access is no longer authorized.');
+    }
+    clearManagerVenueScopedState();
+    state.authorizedVenues = authorizedVenues;
+    state.venueId = selected.id;
+    try { localStorage.setItem('barinv_manager_venue_id', selected.id); } catch (_) {}
+    renderManagerVenueSelector();
+    await loadVenueContext();
+    showTab('create');
+    statusOn('manager-venue-status', 'Active venue switched to ' + selected.name + '.', 'ok');
+  } catch (e) {
+    statusOn('manager-venue-status', e.message || e, 'err');
+    throw e;
+  } finally {
+    if (selector) selector.disabled = (state.authorizedVenues || []).length <= 1;
+  }
+}
+
+$('manager-venue-selector')?.addEventListener('change', event => {
+  switchManagerVenue(event.target.value).catch(() => {});
+});
+
 function fmtTime(d) {
   if (!d) return '—';
   const x = new Date(d);
@@ -968,6 +1181,7 @@ async function getFreshManagerAccessTokenOrThrow() {
 }
 
 async function fnInvoke(path, body) {
+  await assertSelectedManagerVenueAuthorized();
   let tok;
   try {
     tok = await getFreshManagerAccessTokenOrThrow();
@@ -1035,29 +1249,33 @@ $('signin-btn').addEventListener('click', async () => {
 });
 $('signout-btn').addEventListener('click', async () => {
   await SB.auth.signOut();
+  clearManagerVenueScopedState();
   state.user = null;
   state.staff = null;
+  state.venueId = null;
+  state.authorizedVenues = [];
+  renderManagerVenueSelector();
   $('topbar').style.display = 'none';
   showScreen('screen-signin');
 });
 
 async function afterSignedIn() {
-  // Identify the staff record linked to this auth user
+  // The linked staff row is a legacy display/audit identity only. Venue access
+  // is always resolved independently from the current user's venue_members.
   const { data: srow } = await SB.from('staff')
     .select('id, name, venue_id')
     .eq('auth_user_id', state.user.id)
     .maybeSingle();
-  state.staff = srow;
-  if (!state.staff) {
-    statusOn('signin-status',
-      'No staff row linked to this auth user (staff.auth_user_id is unset). ' +
-      'Ask an admin to set it before you can issue barback links.', 'err');
+  state.staff = srow || null;
+  try {
+    await loadInitialManagerVenue();
+  } catch (e) {
+    $('topbar').style.display = 'none';
+    statusOn('signin-status', e.message || e, 'err');
     return;
   }
-  state.venueId = state.staff.venue_id;
   $('topbar').style.display = '';
-  $('who-line').innerHTML = '<b>' + esc(state.staff.name) + '</b> · ' + esc(state.user.email || '');
-  await loadVenueContext();
+  $('who-line').innerHTML = '<b>' + esc(state.staff?.name || 'Manager') + '</b> · ' + esc(state.user.email || '');
   showScreen('screen-main');
   showTab('create');
 }
@@ -1448,6 +1666,7 @@ function renderNewNightOptions() {
 }
 
 async function loadVenueContext() {
+  await assertSelectedManagerVenueAuthorized();
   // Venue name
   const { data: vrow } = await SB.from('venues').select('id, name').eq('id', state.venueId).maybeSingle();
   state.venueName = vrow?.name || state.venueId;
@@ -2265,6 +2484,7 @@ async function extendSession(sid) {
   try {
     const res = await fnInvoke('barback-extend-session', {
       session_id: sid,
+      venue_id: state.venueId,
       new_expires_at: newExp.toISOString(),
       reason: 'manager extend',
     });
@@ -3017,7 +3237,14 @@ const Pilot = {
         .is('revoked_at', null).gt('expires_at', new Date().toISOString());
       let ok = 0, bad = 0;
       for (const r of (data || [])) {
-        try { await fnInvoke('barback-revoke-session', { session_id: r.id, reason: 'emergency' }); ok++; }
+        try {
+          await fnInvoke('barback-revoke-session', {
+            session_id: r.id,
+            venue_id: state.venueId,
+            reason: 'emergency',
+          });
+          ok++;
+        }
         catch (_) { bad++; }
       }
       statusOn('pilot-emergency-status', '✓ Revoked ' + ok + ' · failed ' + bad, bad ? 'warn' : 'ok');
