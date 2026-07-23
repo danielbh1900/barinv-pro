@@ -9566,8 +9566,41 @@ window.setDspMode = function(mode) {
 };
 
 let DSP_LOCKED_NIGHT = null;
+let DSP_NIGHT_ASSIGNMENTS = [];
 
-window.dspNightChanged = function(sel) {
+// SELECTED_NIGHT_STAFF_ROLE_V1_CORE_START
+const SelectedNightStaffRoleV1 = Object.freeze({
+  roles(value) {
+    const tokens = new Set();
+    String(value || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
+      const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
+      if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
+      if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
+      ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
+        if (words.includes(role)) tokens.add(role);
+      });
+    });
+    return Array.from(tokens);
+  },
+  has(assignment, role) {
+    return !!assignment && !assignment.revoked && this.roles(assignment.role).includes(String(role || '').toLowerCase().trim());
+  },
+  staffIds(assignments, role) {
+    return new Set((assignments || []).filter(assignment => this.has(assignment, role)).map(assignment => assignment.staff_id));
+  },
+});
+// SELECTED_NIGHT_STAFF_ROLE_V1_CORE_END
+
+async function dspLoadNightAssignments(nightId) {
+  if (!nightId) { DSP_NIGHT_ASSIGNMENTS = []; return; }
+  const { data, error } = await SB.from('night_staff_assignments')
+    .select('staff_id, role, revoked')
+    .eq('venue_id', SESSION.venueId)
+    .eq('night_id', nightId);
+  DSP_NIGHT_ASSIGNMENTS = error ? [] : (data || []).filter(assignment => assignment && !assignment.revoked);
+}
+
+window.dspNightChanged = async function(sel) {
   const hasData = Object.values(DSP_STATE).some(s => s.taken + s.returned + s.comp + s.shot > 0);
   if(hasData && DSP_LOCKED_NIGHT && sel.value !== DSP_LOCKED_NIGHT) {
     if(!confirm('⚠ You have unsaved dispatch data!\n\nChanging the night will keep your counts but save them under the new night.\n\nAre you sure?')) {
@@ -9576,6 +9609,8 @@ window.dspNightChanged = function(sel) {
     }
   }
   DSP_LOCKED_NIGHT = sel.value;
+  await dspLoadNightAssignments(sel.value);
+  dspRenderStaffAssign();
 };
 
 // Per-bar staff assignment: { barId: { bartender: staffId, barback: staffId } }
@@ -9620,7 +9655,8 @@ function dspRenderStaffAssign() {
 
   const staffOpts = (role, barId, field) => {
     const current = DSP_STAFF_MAP[barId]?.[field] || '';
-    const filtered = staff.filter(s => !role || (s.role||'').split(',').some(r => r.trim() === role) || (s.role||'').includes('other'));
+    const eligibleStaffIds = SelectedNightStaffRoleV1.staffIds(DSP_NIGHT_ASSIGNMENTS, role);
+    const filtered = staff.filter(s => !role || eligibleStaffIds.has(s.id));
     return `<select onchange="dspSetStaff('${barId}','${field}',this.value)">
       <option value="">— ${field} —</option>
       ${filtered.map(s => `<option value="${s.id}" ${s.id === current ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
@@ -9709,6 +9745,7 @@ async function loadDispatch() {
     nSel.innerHTML = nights.filter(n => n.active).map(n => `<option value="${n.id}" ${n.id === nv ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
     if (nv) nSel.value = nv;
     DSP_LOCKED_NIGHT = nSel.value;
+    await dspLoadNightAssignments(nSel.value);
   }
 
   // Render staff assignment

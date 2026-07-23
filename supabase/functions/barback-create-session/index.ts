@@ -117,10 +117,18 @@ function resolveSessionDestinations(
 }
 
 function staffRoleEligible(staff: { role?: string | null }, assignment: { role?: string | null }, mode: SessionLinkMode) {
-  const blob = [staff?.role, assignment?.role]
-    .map((role) => String(role || "").toLowerCase()).join(" ").replace(/[^a-z]/g, "");
+  if (!staff) return false;
+  const selectedNightRoles = new Set<string>();
+  String(assignment?.role || "").toLowerCase().split(/[,;|/]+/).forEach((part) => {
+    const words = part.trim().replace(/[_-]+/g, " ").split(/\s+/).filter(Boolean);
+    if (words.includes("barback") || (words.includes("bar") && words.includes("back"))) selectedNightRoles.add("barback");
+    if (words.includes("bartender") || (words.includes("bar") && words.includes("tender"))) selectedNightRoles.add("bartender");
+    ["server", "table", "vip", "manager", "admin", "lead", "supervisor"].forEach((role) => {
+      if (words.includes(role)) selectedNightRoles.add(role);
+    });
+  });
   const keywords = mode === "table" ? SESSION_TABLE_ROLE_KEYWORDS : SESSION_BAR_ROLE_KEYWORDS;
-  return keywords.some((keyword) => blob.includes(keyword));
+  return keywords.some((keyword) => selectedNightRoles.has(keyword));
 }
 
 function staffHasModeCoverage(

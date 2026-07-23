@@ -1092,10 +1092,9 @@ async function afterSignedIn() {
 // keywords below after stripping non-letters, e.g. "server manager" →
 // "servermanager" → has "manager"). Plain servers remain excluded from
 // Barback/Bars.
-// Combined, normalized role string from BOTH the staff record's role AND the
-// night assignment's role (lowercase, punctuation/spaces stripped). Either
-// source can carry the operational designation, e.g. a person whose
-// staff.role is "bartender" but who is assigned as a "table manager" tonight.
+// Role eligibility is derived only from the active selected-night assignment.
+// Venue-wide staff.role remains display metadata and cannot promote a person
+// into a selected-night role.
 // WEBLINK_HELPERS (Stage 1, 2026-06-16) — centralized constants/predicates so
 // the role-keyword lists and area-type lists are defined ONCE. No behavior
 // change: values are byte-identical to the previous inline literals.
@@ -1106,24 +1105,32 @@ const AREA_TABLE_TYPES         = ['table', 'vip', 'booth'];
 function isBarArea(bt)      { return String(bt || '').toLowerCase() === 'bar'; }
 function isTableArea(bt)    { return AREA_TABLE_TYPES.indexOf(String(bt || '').toLowerCase()) >= 0; }
 function isInternalArea(bt) { const t = String(bt || '').toLowerCase(); return !!t && !isBarArea(t) && !isTableArea(t); }
-function _roleBlob(staff, assignment) {
-  return [staff && staff.role, assignment && assignment.role]
-    .map(r => String(r || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
+function _selectedNightRoleTokens(assignment) {
+  const tokens = new Set();
+  String(assignment && assignment.role || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
+    const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
+    if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
+    if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
+    ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
+      if (words.includes(role)) tokens.add(role);
+    });
+  });
+  return Array.from(tokens);
 }
 // Barback / Bars login-eligible: Barback, Bartender, and manager-level
 // (manager/admin/lead/supervisor). Excludes a plain server.
 function canUseBarLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
-  const b = _roleBlob(staff, assignment);
-  return BAR_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
+  const roles = _selectedNightRoleTokens(assignment);
+  return BAR_LINK_ROLE_KEYWORDS.some(role => roles.includes(role));
 }
 // VIP / Tables login-eligible: server / table / vip (covers table server, VIP
 // server, server manager, table manager) + manager-level. Excludes plain
 // barback/bartender unless also server/table/manager-level.
 function canUseTableLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
-  const b = _roleBlob(staff, assignment);
-  return TABLE_LINK_ROLE_KEYWORDS.some(k => b.indexOf(k) !== -1);
+  const roles = _selectedNightRoleTokens(assignment);
+  return TABLE_LINK_ROLE_KEYWORDS.some(role => roles.includes(role));
 }
 
 // MANAGER_DESTINATION_SCOPE_V1_CORE_START
@@ -1134,6 +1141,23 @@ const ManagerDestinationScopeV1 = Object.freeze({
   barRoles: ['barback', 'bartender', 'manager', 'admin', 'lead', 'supervisor'],
   tableRoles: ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'],
 
+  selectedNightRoles(assignment) {
+    const tokens = new Set();
+    String(assignment && assignment.role || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
+      const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
+      if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
+      if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
+      ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
+        if (words.includes(role)) tokens.add(role);
+      });
+    });
+    return Array.from(tokens);
+  },
+
+  hasSelectedNightRole(assignment, role) {
+    return this.selectedNightRoles(assignment).includes(String(role || '').toLowerCase().trim());
+  },
+
   destinationMode(destination) {
     const type = String(destination && destination.bar_type || '').toLowerCase().trim();
     if (!type) return null;
@@ -1142,10 +1166,9 @@ const ManagerDestinationScopeV1 = Object.freeze({
 
   roleEligible(staff, assignment, mode) {
     if (!staff || staff.active === false) return false;
-    const blob = [staff.role, assignment && assignment.role]
-      .map(value => String(value || '').toLowerCase()).join(' ').replace(/[^a-z]/g, '');
+    const selectedNightRoles = this.selectedNightRoles(assignment);
     const roles = mode === 'table' ? this.tableRoles : this.barRoles;
-    return roles.some(role => blob.includes(role));
+    return roles.some(role => selectedNightRoles.includes(role));
   },
 
   derive(selectedStaffIds, assignments, activeDestinations, mode) {
