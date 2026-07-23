@@ -72,7 +72,7 @@ function uniqueIdArray(value: unknown, field: string): string[] {
 
 // BARBACK_CREATE_SESSION_VALIDATION_START
 const SESSION_TABLE_TYPES = ["table", "vip", "booth"];
-const SESSION_BAR_ROLE_KEYWORDS = ["barback", "bartender", "manager", "admin", "lead", "supervisor"];
+const SESSION_BAR_ROLE_KEYWORDS = ["barback", "bartender"];
 const SESSION_TABLE_ROLE_KEYWORDS = ["server", "table", "vip", "manager", "admin", "lead", "supervisor"];
 const OPENING_PAR_REGULAR_MODES = ["regular_bar", "bar", "bar_only", "all_bars", "both"];
 const OPENING_PAR_MAX_ITEMS = 500;
@@ -118,15 +118,9 @@ function resolveSessionDestinations(
 
 function staffRoleEligible(staff: { role?: string | null }, assignment: { role?: string | null }, mode: SessionLinkMode) {
   if (!staff) return false;
-  const selectedNightRoles = new Set<string>();
-  String(assignment?.role || "").toLowerCase().split(/[,;|/]+/).forEach((part) => {
-    const words = part.trim().replace(/[_-]+/g, " ").split(/\s+/).filter(Boolean);
-    if (words.includes("barback") || (words.includes("bar") && words.includes("back"))) selectedNightRoles.add("barback");
-    if (words.includes("bartender") || (words.includes("bar") && words.includes("tender"))) selectedNightRoles.add("bartender");
-    ["server", "table", "vip", "manager", "admin", "lead", "supervisor"].forEach((role) => {
-      if (words.includes(role)) selectedNightRoles.add(role);
-    });
-  });
+  const selectedNightRoles = new Set(
+    String(assignment?.role || "").toLowerCase().split(/[,;|/]+/).map((part) => part.trim()).filter(Boolean),
+  );
   const keywords = mode === "table" ? SESSION_TABLE_ROLE_KEYWORDS : SESSION_BAR_ROLE_KEYWORDS;
   return keywords.some((keyword) => selectedNightRoles.has(keyword));
 }

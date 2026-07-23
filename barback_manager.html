@@ -1099,26 +1099,17 @@ async function afterSignedIn() {
 // the role-keyword lists and area-type lists are defined ONCE. No behavior
 // change: values are byte-identical to the previous inline literals.
 // Removal: grep WEBLINK_HELPERS.
-const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'bartender', 'manager', 'admin', 'lead', 'supervisor'];
+const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'bartender'];
 const TABLE_LINK_ROLE_KEYWORDS = ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'];
 const AREA_TABLE_TYPES         = ['table', 'vip', 'booth'];
 function isBarArea(bt)      { return String(bt || '').toLowerCase() === 'bar'; }
 function isTableArea(bt)    { return AREA_TABLE_TYPES.indexOf(String(bt || '').toLowerCase()) >= 0; }
 function isInternalArea(bt) { const t = String(bt || '').toLowerCase(); return !!t && !isBarArea(t) && !isTableArea(t); }
 function _selectedNightRoleTokens(assignment) {
-  const tokens = new Set();
-  String(assignment && assignment.role || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
-    const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
-    if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
-    if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
-    ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
-      if (words.includes(role)) tokens.add(role);
-    });
-  });
-  return Array.from(tokens);
+  return Array.from(new Set(String(assignment && assignment.role || '').toLowerCase()
+    .split(/[,;|/]+/).map(part => part.trim()).filter(Boolean)));
 }
-// Barback / Bars login-eligible: Barback, Bartender, and manager-level
-// (manager/admin/lead/supervisor). Excludes a plain server.
+// Barback / Bars login-eligible: exact selected-night Barback or Bartender.
 function canUseBarLink(staff, assignment) {
   if (!staff || staff.active === false) return false;
   const roles = _selectedNightRoleTokens(assignment);
@@ -1138,20 +1129,12 @@ function canUseTableLink(staff, assignment) {
 // every activated non-table operational area is supported by Barback/Bars.
 const ManagerDestinationScopeV1 = Object.freeze({
   tableTypes: ['table', 'vip', 'booth'],
-  barRoles: ['barback', 'bartender', 'manager', 'admin', 'lead', 'supervisor'],
+  barRoles: ['barback', 'bartender'],
   tableRoles: ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'],
 
   selectedNightRoles(assignment) {
-    const tokens = new Set();
-    String(assignment && assignment.role || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
-      const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
-      if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
-      if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
-      ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
-        if (words.includes(role)) tokens.add(role);
-      });
-    });
-    return Array.from(tokens);
+    return Array.from(new Set(String(assignment && assignment.role || '').toLowerCase()
+      .split(/[,;|/]+/).map(part => part.trim()).filter(Boolean)));
   },
 
   hasSelectedNightRole(assignment, role) {

@@ -9571,16 +9571,7 @@ let DSP_NIGHT_ASSIGNMENTS = [];
 // SELECTED_NIGHT_STAFF_ROLE_V1_CORE_START
 const SelectedNightStaffRoleV1 = Object.freeze({
   roles(value) {
-    const tokens = new Set();
-    String(value || '').toLowerCase().split(/[,;|/]+/).forEach(part => {
-      const words = part.trim().replace(/[_-]+/g, ' ').split(/\s+/).filter(Boolean);
-      if (words.includes('barback') || (words.includes('bar') && words.includes('back'))) tokens.add('barback');
-      if (words.includes('bartender') || (words.includes('bar') && words.includes('tender'))) tokens.add('bartender');
-      ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'].forEach(role => {
-        if (words.includes(role)) tokens.add(role);
-      });
-    });
-    return Array.from(tokens);
+    return Array.from(new Set(String(value || '').toLowerCase().split(/[,;|/]+/).map(part => part.trim()).filter(Boolean)));
   },
   has(assignment, role) {
     return !!assignment && !assignment.revoked && this.roles(assignment.role).includes(String(role || '').toLowerCase().trim());
