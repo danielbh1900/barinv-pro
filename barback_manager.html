@@ -340,7 +340,7 @@
             <option value="bar" selected>Barback / Bars</option>
             <option value="table">VIP / Tables</option>
           </select>
-          <div class="small muted" id="c-linktype-help">Barbacks and Bartenders operating assigned destinations.</div>
+          <div class="small muted" id="c-linktype-help">Barbacks and active VIP Table Bussers operating assigned destinations.</div>
         </div>
         <div class="row">
           <label>NIGHT</label>
@@ -374,7 +374,7 @@
             <div class="row">
               <label>WHO CAN USE THIS LINK</label>
               <div class="multi-select" id="c-staff"></div>
-              <div class="small muted" id="c-staff-helper">Selected-night Barbacks and Bartenders; assigned destinations are shown per person.</div>
+              <div class="small muted" id="c-staff-helper">Selected-night Barbacks and active VIP Table Bussers</div>
             </div>
           </div>
         </div>
@@ -1283,71 +1283,23 @@ async function afterSignedIn() {
 // ════════════════════════════════════════════════════════════════════
 //  Capability filter — who can receive a barback link?
 // ════════════════════════════════════════════════════════════════════
-// Business rule (PLAN-2026-06-04):
-//   • A staff member is eligible to be checked under STAFF ASSIGNED when the
-//     staff or selected-night assignment role is valid for the link mode.
-//     Barback/Bars includes both Barbacks and Bartenders.
-//   • `staff.role` is a single TEXT column that holds comma-separated
-//     labels in this venue's data — e.g. "bartender, server, manager",
-//     "bartender, barback, other", "manager, liquor room".
-//   • The check is substring-based on a fully-stripped lowercase form
-//     ("[^a-z]" removed), so it tolerates "Tables Manager",
-//     "table_manager", "Floor Manager", "bar manager", etc.
-//   • Inactive staff are always excluded.
-//
-// Examples (real venue rows):
-//   "barback"                       → eligible (barback)
-//   "bartender, barback"            → eligible (barback)
-//   "bartender, server, manager"    → eligible (manager) — Irish
-//   "manager, liquor room"          → eligible (manager)
-//   "tables manager"                → eligible (manager substring)
-//   "bartender"                     → eligible for Barback/Bars
-//   "bartender, server"             → eligible for Barback/Bars or Tables
-//   "coat check" / "security"       → NOT eligible
-// "Who can use this Barback Link" = login-eligible operational staff.
-// Matches Barback, Bartender, and manager-level roles: manager / admin /
-// table manager / floor manager / lead / supervisor (all contain one of the
-// keywords below after stripping non-letters, e.g. "server manager" →
-// "servermanager" → has "manager"). Plain servers remain excluded from
-// Barback/Bars.
-// Role eligibility is derived only from the active selected-night assignment.
-// Venue-wide staff.role remains display metadata and cannot promote a person
-// into a selected-night role.
-// WEBLINK_HELPERS (Stage 1, 2026-06-16) — centralized constants/predicates so
-// the role-keyword lists and area-type lists are defined ONCE. No behavior
-// change: values are byte-identical to the previous inline literals.
-// Removal: grep WEBLINK_HELPERS.
-const BAR_LINK_ROLE_KEYWORDS   = ['barback', 'bartender'];
-const TABLE_LINK_ROLE_KEYWORDS = ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'];
+// Barback-link eligibility is selected-night only: exact `barback`, or exact
+// `busser` with an active selected-night VIP/Table destination. Global role
+// labels, PINs, prior nights, names, and destination coverage without the
+// required role token never promote a staff member. VIP/Table links retain
+// their established exact selected-night role tokens below.
 const AREA_TABLE_TYPES         = ['table', 'vip', 'booth'];
 function isBarArea(bt)      { return String(bt || '').toLowerCase() === 'bar'; }
 function isTableArea(bt)    { return AREA_TABLE_TYPES.indexOf(String(bt || '').toLowerCase()) >= 0; }
 function isInternalArea(bt) { const t = String(bt || '').toLowerCase(); return !!t && !isBarArea(t) && !isTableArea(t); }
-function _selectedNightRoleTokens(assignment) {
-  return Array.from(new Set(String(assignment && assignment.role || '').toLowerCase()
-    .split(/[,;|/]+/).map(part => part.trim()).filter(Boolean)));
-}
-// Barback / Bars login-eligible: exact selected-night Barback or Bartender.
-function canUseBarLink(staff, assignment) {
-  if (!staff || staff.active === false) return false;
-  const roles = _selectedNightRoleTokens(assignment);
-  return BAR_LINK_ROLE_KEYWORDS.some(role => roles.includes(role));
-}
-// VIP / Tables login-eligible: server / table / vip (covers table server, VIP
-// server, server manager, table manager) + manager-level. Excludes plain
-// barback/bartender unless also server/table/manager-level.
-function canUseTableLink(staff, assignment) {
-  if (!staff || staff.active === false) return false;
-  const roles = _selectedNightRoleTokens(assignment);
-  return TABLE_LINK_ROLE_KEYWORDS.some(role => roles.includes(role));
-}
 
 // MANAGER_DESTINATION_SCOPE_V1_CORE_START
 // Pure staff-to-destination helpers. Night assignments are authoritative;
 // every activated non-table operational area is supported by Barback/Bars.
 const ManagerDestinationScopeV1 = Object.freeze({
   tableTypes: ['table', 'vip', 'booth'],
-  barRoles: ['barback', 'bartender'],
+  barRoles: ['barback'],
+  vipBusserRole: 'busser',
   tableRoles: ['server', 'table', 'vip', 'manager', 'admin', 'lead', 'supervisor'],
 
   selectedNightRoles(assignment) {
@@ -1365,24 +1317,47 @@ const ManagerDestinationScopeV1 = Object.freeze({
     return this.tableTypes.includes(type) ? 'table' : 'bar';
   },
 
-  roleEligible(staff, assignment, mode) {
-    if (!staff || staff.active === false) return false;
+  roleEligible(staff, assignment, mode, activeDestinations) {
+    if (!staff || staff.active === false || !assignment || assignment.revoked) return false;
     const selectedNightRoles = this.selectedNightRoles(assignment);
-    const roles = mode === 'table' ? this.tableRoles : this.barRoles;
-    return roles.some(role => selectedNightRoles.includes(role));
+    if (mode === 'table') return this.tableRoles.some(role => selectedNightRoles.includes(role));
+    if (this.barRoles.some(role => selectedNightRoles.includes(role))) return true;
+    if (!selectedNightRoles.includes(this.vipBusserRole)) return false;
+    const activeById = new Map((activeDestinations || [])
+      .filter(destination => destination && destination.id)
+      .map(destination => [destination.id, destination]));
+    return (assignment.allowed_bar_ids || []).some(id => {
+      const destination = activeById.get(id);
+      return destination && this.destinationMode(destination) === 'table';
+    });
+  },
+
+  destinationEligible(assignment, destination, mode) {
+    if (!assignment || assignment.revoked || !destination) return false;
+    const roles = this.selectedNightRoles(assignment);
+    const destinationMode = this.destinationMode(destination);
+    if (mode === 'table') {
+      return destinationMode === 'table' && this.tableRoles.some(role => roles.includes(role));
+    }
+    if (this.barRoles.some(role => roles.includes(role))) return true;
+    return roles.includes(this.vipBusserRole) && destinationMode === 'table';
   },
 
   derive(selectedStaffIds, assignments, activeDestinations, mode) {
     const selected = new Set(selectedStaffIds || []);
     const activeById = new Map((activeDestinations || [])
-      .filter(destination => destination && destination.id && this.destinationMode(destination) === mode)
+      .filter(destination => destination && destination.id &&
+        (mode === 'bar' || this.destinationMode(destination) === mode))
       .map(destination => [destination.id, destination]));
     const ids = [];
     const seen = new Set();
     (assignments || []).forEach(assignment => {
       if (!assignment || assignment.revoked || !selected.has(assignment.staff_id)) return;
       (assignment.allowed_bar_ids || []).forEach(id => {
-        if (activeById.has(id) && !seen.has(id)) { seen.add(id); ids.push(id); }
+        const destination = activeById.get(id);
+        if (destination && this.destinationEligible(assignment, destination, mode) && !seen.has(id)) {
+          seen.add(id); ids.push(id);
+        }
       });
     });
     return {
@@ -1693,12 +1668,8 @@ async function loadVenueContext() {
   // assigned staff name in the label). See below + the #c-night change handler.
 
   // Staff
-  // PLAN-2026-06-04 — barback-link recipients are capability-filtered.
-  // `staff.role` is a single TEXT column that already holds comma-separated
-  // labels (e.g. "bartender, server, manager", "bartender, barback").
-  // Include selected-night Barbacks and Bartenders in Barback/Bars; retain
-  // manager-level roles and the established server/table roles for Tables.
-  // Coat check, security, and unrelated roles remain excluded.
+  // Keep the full venue staff list for display/name lookup. Link eligibility
+  // is applied later from selected-night assignment roles and destinations.
   // state.staffList stays as the FULL list — telemetry tables and the
   // audit-filter dropdown still need every staff name for name lookups
   // on historical events.
@@ -1820,11 +1791,13 @@ async function renderNightScoped(nightId) {
   if ($('c-customize-destinations')) $('c-customize-destinations').checked = false;
 
   // 3. Active areas for this night, filtered by the selected LINK TYPE:
-  //    Barback/Bars → every non-table operational type;
+  //    Barback/Bars → every operational type used by an exact Barback, plus
+  //    VIP/Table destinations used by an exact selected-night Busser;
   //    VIP/Tables → 'table'/'vip'/'booth'.
   const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
   const wantTable = (mode === 'table');
-  const isAreaForMode = (bt) => ManagerDestinationScopeV1.destinationMode({ bar_type: bt }) === mode;
+  const isAreaForMode = (bt) => mode === 'bar' ||
+    ManagerDestinationScopeV1.destinationMode({ bar_type: bt }) === mode;
   const activeBars = (state.bars || []).filter(b =>
     activeBarIds.has(b.id) && isAreaForMode(String(b.bar_type || '').toLowerCase()));
 
@@ -1834,21 +1807,18 @@ async function renderNightScoped(nightId) {
   // manager assigned only to VIP tables must NOT appear in the Barback/Bars
   // staff list, and a barback assigned only to bars must NOT appear in VIP.
   const barTypeById = {}; (state.bars || []).forEach(b => { barTypeById[b.id] = String(b.bar_type || '').toLowerCase(); });
-  const activeBarTypeIds = new Set();    // this night's active operational areas
   const activeTableTypeIds = new Set();  // this night's active 'table'/'vip'/'booth' areas
   activeBarIds.forEach(id => {
     const bt = barTypeById[id];
     const destinationMode = ManagerDestinationScopeV1.destinationMode({ bar_type: bt });
-    if (destinationMode === 'bar') activeBarTypeIds.add(id);
-    else if (destinationMode === 'table') activeTableTypeIds.add(id);
+    if (destinationMode === 'table') activeTableTypeIds.add(id);
   });
-  const hasBarCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeBarTypeIds.has(id));
   const hasTableCoverage = (a) => !!a && (a.allowed_bar_ids || []).some(id => activeTableTypeIds.has(id));
   // Mode-aware labels / helper text
   try {
     if ($('c-linktype-help')) $('c-linktype-help').textContent = wantTable
       ? 'Servers/table managers operating VIP tables.'
-      : 'Barbacks and Bartenders operating their assigned active destinations.';
+      : 'Barbacks and active VIP Table Bussers operating their assigned active destinations.';
     if ($('c-primary-label')) $('c-primary-label').textContent = wantTable
       ? 'PRIMARY TABLE (optional — leave blank for multi-table)'
       : 'PRIMARY DESTINATION (automatic when exactly one is assigned)';
@@ -1857,10 +1827,10 @@ async function renderNightScoped(nightId) {
       : 'ASSIGNED DESTINATIONS';
     if ($('c-additional-help')) $('c-additional-help').textContent = wantTable
       ? 'Selected automatically from the chosen staff assignments for this night.'
-      : 'Bars, stations, dispatch/storage, and other activated operational areas are selected automatically.';
+      : 'Bars, VIP Tables, stations, dispatch/storage, and other activated operational areas are selected automatically.';
     if ($('c-staff-helper')) $('c-staff-helper').textContent = wantTable
       ? 'Only selected-night servers/table managers can log in with this link.'
-      : 'Selected-night Barbacks and Bartenders; each row shows role and assigned destinations.';
+      : 'Selected-night Barbacks and active VIP Table Bussers';
   } catch (_) {}
 
   // 4. bar_id -> assigned staff names (via allowed_bar_ids)
@@ -1894,8 +1864,9 @@ async function renderNightScoped(nightId) {
   }
 
   // RIGHT SIDE — WHO CAN USE THIS LINK = this night's non-revoked assignees
-  // INTERSECT login-eligible roles for the SELECTED LINK TYPE (bars → Barback/
-  // Bartender/manager-level; tables → server/table-manager). Not venue-
+  // INTERSECT login-eligible roles for the SELECTED LINK TYPE (bars → exact
+  // Barback, plus exact Busser with active VIP Table coverage; tables →
+  // server/table-manager). Not venue-
   // wide; never falls back to all staff. PIN is rotate-only (existing PIN is
   // hashed/unreadable; a new PIN is shown once on rotation, never logged).
   if (staffBox) {
@@ -1903,13 +1874,19 @@ async function renderNightScoped(nightId) {
     const eligibleById = new Map();
     assigns.forEach(a => {
       const s = byId[a.staff_id];
-      const roleOk = ManagerDestinationScopeV1.roleEligible(s, a, mode);
-      const covOk = (mode === 'table') ? hasTableCoverage(a) : hasBarCoverage(a);
+      const roleOk = ManagerDestinationScopeV1.roleEligible(s, a, mode, activeBars);
+      const covOk = (mode === 'table')
+        ? hasTableCoverage(a)
+        : (a.allowed_bar_ids || []).some(id => activeBarIds.has(id) &&
+          ManagerDestinationScopeV1.destinationEligible(a, (state.bars || []).find(destination => destination.id === id), mode));
       if (!s || !roleOk || !covOk) return;
       const row = eligibleById.get(s.id) || { staff: s, roles: new Set(), destinationIds: new Set() };
       if (a.role) row.roles.add(a.role);
       (a.allowed_bar_ids || []).forEach(id => {
-        if (activeBars.some(destination => destination.id === id)) row.destinationIds.add(id);
+        const destination = activeBars.find(candidate => candidate.id === id);
+        if (destination && ManagerDestinationScopeV1.destinationEligible(a, destination, mode)) {
+          row.destinationIds.add(id);
+        }
       });
       eligibleById.set(s.id, row);
     });
@@ -1931,7 +1908,7 @@ async function renderNightScoped(nightId) {
             ' <a href="#" data-rotate-staff="' + esc(s.id) + '" data-staff-name="' + esc(s.name || '') +
               '" style="margin-left:6px;color:#fb923c;font-size:11px;text-decoration:underline;">rotate PIN</a></label>';
         }).join('')
-      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'Barback / Bartender') + ' staff assigned for this night.</div>'));
+      : ('<div class="muted small">No ' + (wantTable ? 'server / table-manager' : 'Barback / active VIP Table Busser') + ' staff assigned for this night.</div>'));
     Array.from(staffBox.querySelectorAll('input[type="checkbox"]')).forEach(input => {
       input.addEventListener('change', syncAssignedDestinationsFromStaff);
     });
@@ -1953,7 +1930,8 @@ function currentModeDestinations() {
   const mode = ($('c-linktype') && $('c-linktype').value) || 'bar';
   const active = new Set(state.nightDestinationIds || []);
   return (state.bars || []).filter(destination =>
-    active.has(destination.id) && ManagerDestinationScopeV1.destinationMode(destination) === mode
+    active.has(destination.id) &&
+      (mode === 'bar' || ManagerDestinationScopeV1.destinationMode(destination) === mode)
   );
 }
 

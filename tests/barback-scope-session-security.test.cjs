@@ -42,7 +42,7 @@ const active = [
 ];
 const assignments = [
   { staff_id: 'dussan', role: 'barback', allowed_bar_ids: ['b1', 'b2'], revoked: false },
-  { staff_id: 'alex', role: 'bartender', allowed_bar_ids: ['b2', 'dispatch'], revoked: false },
+  { staff_id: 'alex', role: 'barback', allowed_bar_ids: ['b2', 'dispatch'], revoked: false },
   { staff_id: 'old', role: 'barback', allowed_bar_ids: ['b1'], revoked: true },
 ];
 
@@ -68,16 +68,25 @@ test('5. duplicate assignment destinations are removed', () => {
 });
 
 test('6. exactly one destination becomes primary and is not duplicated', () => {
-  const one = scope.derive(['solo'], [{ staff_id: 'solo', allowed_bar_ids: ['b1'] }], active, 'bar');
+  const one = scope.derive(
+    ['solo'],
+    [{ staff_id: 'solo', role: 'barback', allowed_bar_ids: ['b1'] }],
+    active,
+    'bar',
+  );
   assert.equal(one.primaryId, 'b1');
   assert.deepEqual(Array.from(one.additionalIds), []);
   assert.deepEqual(JSON.parse(JSON.stringify(scope.submittedScope('b1', ['b1', 'b2']))), { primaryId: 'b1', additionalIds: ['b2'] });
 });
 
-test('7. Bartenders are eligible for Barback/Bars scope', () => {
-  assert.equal(scope.roleEligible({ role: 'bartender', active: true }, assignments[1], 'bar'), true);
-  assert.match(manager, /BAR_LINK_ROLE_KEYWORDS\s*=\s*\[[^\]]*'bartender'/);
-  assert.match(createEdge, /SESSION_BAR_ROLE_KEYWORDS = \[[^\]]*"bartender"/);
+test('7. Barback/Bars excludes bartender-only and includes active VIP Table bussers', () => {
+  const bartender = { staff_id: 'bartender', role: 'bartender', allowed_bar_ids: ['b1'], revoked: false };
+  const busser = { staff_id: 'busser', role: 'busser', allowed_bar_ids: ['vip'], revoked: false };
+  assert.equal(scope.roleEligible({ role: 'bartender', active: true }, bartender, 'bar', active), false);
+  assert.equal(scope.roleEligible({ role: 'busser', active: true }, busser, 'bar', active), true);
+  assert.match(manager, /barRoles:\s*\['barback'\]/);
+  assert.match(createEdge, /SESSION_BAR_ROLE_KEYWORDS = \["barback"\]/);
+  assert.doesNotMatch(createEdge, /SESSION_BAR_ROLE_KEYWORDS = \[[^\]]*"bartender"/);
 });
 
 test('8. non-bar operational destinations are supported without hardcoding', () => {

@@ -87,7 +87,7 @@ const out = {
   vip: capture(() => buildOpeningParConfig(true, [{ item_id: "vip", qty: 1 }], items, "stamp")),
   validBars: capture(() => resolveSessionDestinations("bar", "bar-1", ["bar-2"], areas)),
   invalidArea: capture(() => resolveSessionDestinations("bar", "bar-1", ["outside"], areas)),
-  wrongType: capture(() => resolveSessionDestinations("bar", "bar-1", ["table-1"], areas)),
+  wrongType: capture(() => resolveSessionDestinations("table", "bar-1", ["table-1"], areas)),
 };
 console.log(JSON.stringify(out));
 `);
@@ -238,8 +238,8 @@ test('19. tampered allowed_bars cannot broaden session scope', () => {
 
 test('20. invalid allowed_staff is rejected through assignment, role, and coverage checks', () => {
   assert.match(createEdge, /night_staff_assignments/);
-  assert.match(createEdge, /staffRoleEligible\(staff, assignment, mode\)/);
-  assert.match(createEdge, /staffHasModeCoverage\(assignment, mode, activeAreaModeById\)/);
+  assert.match(createEdge, /staffEligibleForSession\(staff, assignment, resolvedMode, activeAreaModeById\)/);
+  assert.match(createEdge, /staffHasModeCoverage\(assignment, "table", activeAreaModeById\)/);
   assert.match(createEdge, /not eligible for this venue\/night\/link type/);
 });
 

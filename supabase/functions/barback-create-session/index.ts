@@ -72,7 +72,8 @@ function uniqueIdArray(value: unknown, field: string): string[] {
 
 // BARBACK_CREATE_SESSION_VALIDATION_START
 const SESSION_TABLE_TYPES = ["table", "vip", "booth"];
-const SESSION_BAR_ROLE_KEYWORDS = ["barback", "bartender"];
+const SESSION_BAR_ROLE_KEYWORDS = ["barback"];
+const SESSION_BAR_VIP_BUSSER_ROLE = "busser";
 const SESSION_TABLE_ROLE_KEYWORDS = ["server", "table", "vip", "manager", "admin", "lead", "supervisor"];
 const OPENING_PAR_REGULAR_MODES = ["regular_bar", "bar", "bar_only", "all_bars", "both"];
 const OPENING_PAR_MAX_ITEMS = 500;
@@ -105,24 +106,17 @@ function resolveSessionDestinations(
     if (!area) throw new SessionInputError("selected destination is not active for this venue/night");
     const mode = sessionModeForBarType(area.bar_type);
     if (!mode) throw new SessionInputError("selected destination has no supported operational type");
-    if (explicitMode && mode !== explicitMode) {
+    if (explicitMode === "table" && mode !== "table") {
       throw new SessionInputError("selected destination is invalid for the requested link type");
     }
     selected.push(id);
   }
   const selectedModes = new Set(selected.map((id) => sessionModeForBarType(byId.get(id)?.bar_type)).filter(Boolean));
-  if (selectedModes.size > 1) throw new SessionInputError("selected destinations mix bar and table link types");
+  if (!explicitMode && selectedModes.size > 1) {
+    throw new SessionInputError("selected destinations mix bar and table link types");
+  }
   const derivedMode = selectedModes.size === 1 ? Array.from(selectedModes)[0] as SessionLinkMode : null;
   return { mode: explicitMode || derivedMode, effectiveDestinationIds: selected };
-}
-
-function staffRoleEligible(staff: { role?: string | null }, assignment: { role?: string | null }, mode: SessionLinkMode) {
-  if (!staff) return false;
-  const selectedNightRoles = new Set(
-    String(assignment?.role || "").toLowerCase().split(/[,;|/]+/).map((part) => part.trim()).filter(Boolean),
-  );
-  const keywords = mode === "table" ? SESSION_TABLE_ROLE_KEYWORDS : SESSION_BAR_ROLE_KEYWORDS;
-  return keywords.some((keyword) => selectedNightRoles.has(keyword));
 }
 
 function staffHasModeCoverage(
@@ -131,6 +125,45 @@ function staffHasModeCoverage(
   activeAreaModeById: Map<string, SessionLinkMode>,
 ) {
   return (assignment?.allowed_bar_ids || []).some((id) => activeAreaModeById.get(id) === mode);
+}
+
+function staffEligibleForSession(
+  staff: { role?: string | null },
+  assignment: { role?: string | null; allowed_bar_ids?: string[] | null; revoked?: boolean | null },
+  mode: SessionLinkMode,
+  activeAreaModeById: Map<string, SessionLinkMode>,
+) {
+  if (!staff || !assignment || assignment.revoked === true) return false;
+  const selectedNightRoles = new Set(
+    String(assignment.role || "").toLowerCase().split(/[,;|/]+/).map((part) => part.trim()).filter(Boolean),
+  );
+  if (mode === "table") {
+    return SESSION_TABLE_ROLE_KEYWORDS.some((role) => selectedNightRoles.has(role)) &&
+      staffHasModeCoverage(assignment, "table", activeAreaModeById);
+  }
+  const hasAnyActiveDestination = (assignment.allowed_bar_ids || []).some((id) => activeAreaModeById.has(id));
+  if (SESSION_BAR_ROLE_KEYWORDS.some((role) => selectedNightRoles.has(role))) {
+    return hasAnyActiveDestination;
+  }
+  return selectedNightRoles.has(SESSION_BAR_VIP_BUSSER_ROLE) &&
+    staffHasModeCoverage(assignment, "table", activeAreaModeById);
+}
+
+function staffDestinationEligible(
+  assignment: { role?: string | null; revoked?: boolean | null },
+  mode: SessionLinkMode,
+  destinationMode: SessionLinkMode | undefined,
+) {
+  if (!assignment || assignment.revoked === true || !destinationMode) return false;
+  const selectedNightRoles = new Set(
+    String(assignment.role || "").toLowerCase().split(/[,;|/]+/).map((part) => part.trim()).filter(Boolean),
+  );
+  if (mode === "table") {
+    return destinationMode === "table" &&
+      SESSION_TABLE_ROLE_KEYWORDS.some((role) => selectedNightRoles.has(role));
+  }
+  if (SESSION_BAR_ROLE_KEYWORDS.some((role) => selectedNightRoles.has(role))) return true;
+  return selectedNightRoles.has(SESSION_BAR_VIP_BUSSER_ROLE) && destinationMode === "table";
 }
 
 function isOpeningRegularItem(item: { active?: boolean | null; service_mode?: string | null }) {
@@ -307,6 +340,7 @@ Deno.serve(async (req: Request) => {
   if (!resolvedScope.mode || !resolvedScope.effectiveDestinationIds.length) {
     return errorResponse("at least one validated destination is required", 400);
   }
+  const resolvedMode = resolvedScope.mode;
 
   if (allowedStaff.length) {
     const [staffRes, assignmentRes] = await Promise.all([
@@ -340,16 +374,17 @@ Deno.serve(async (req: Request) => {
       const staff = staffById.get(staffId);
       if (!staff || staff.active === false) return errorResponse("allowed_staff contains an inactive or cross-venue staff id", 400);
       const assignments = assignmentsByStaff.get(staffId) ?? [];
-      const modes: SessionLinkMode[] = resolvedScope.mode ? [resolvedScope.mode] : ["bar", "table"];
-      const eligible = assignments.some((assignment) => modes.some((mode) =>
-        staffRoleEligible(staff, assignment, mode) &&
-        staffHasModeCoverage(assignment, mode, activeAreaModeById)
-      ));
+      const eligible = assignments.some((assignment) =>
+        staffEligibleForSession(staff, assignment, resolvedMode, activeAreaModeById)
+      );
       if (!eligible) return errorResponse("allowed_staff contains a staff member not eligible for this venue/night/link type", 400);
       for (const assignment of assignments) {
-        if (!staffRoleEligible(staff, assignment, resolvedScope.mode)) continue;
         for (const destinationId of assignment.allowed_bar_ids ?? []) {
-          if (activeAreaModeById.get(destinationId) === resolvedScope.mode) {
+          if (staffDestinationEligible(
+            assignment,
+            resolvedMode,
+            activeAreaModeById.get(destinationId),
+          )) {
             assignedDestinationIds.add(destinationId);
           }
         }
