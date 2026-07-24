@@ -187,7 +187,7 @@ test('13. browser confirmation sends actual quantity but never Expected PAR', ()
   const ui = between(html, '// OPENING_PAR_V1_UI_START', '// OPENING_PAR_V1_UI_END');
   assert.match(ui, /received_quantity: receivedQuantity/);
   assert.doesNotMatch(ui, /expected_quantity:/);
-  assert.match(checklistEdge, /p_received_quantity: receivedQuantity/);
+  assert.match(checklistEdge, /p_received_quantity:\s*Number\(receivedQuantity\)/);
 });
 
 test('14. checklist API derives both session and staff from signed authorization', () => {

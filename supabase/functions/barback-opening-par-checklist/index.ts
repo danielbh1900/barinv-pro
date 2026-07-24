@@ -420,12 +420,22 @@ Deno.serve(async (req: Request) => {
       p_staff_id: staffId,
       p_destination_id: body.destination_id,
       p_item_id: body.item_id,
-      p_received_quantity: receivedQuantity,
+      p_received_quantity: Number(receivedQuantity),
       p_ip: ip,
       p_user_agent: ua,
     },
   );
   if (confirmationError) {
+    console.error("Opening PAR confirmation RPC failed", {
+      code: confirmationError.code,
+      message: confirmationError.message,
+      details: confirmationError.details,
+      hint: confirmationError.hint,
+      session_id: sessionId,
+      staff_id: staffId,
+      destination_id: body.destination_id,
+      item_id: body.item_id,
+    });
     const conflict = confirmationError.code === "23505";
     return errorResponse(
       conflict
