@@ -243,8 +243,14 @@
     .opening-par-progress { margin:10px 0 4px; color:#cbd5e1; font-size:12px; font-weight:800; }
     .opening-par-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
     .opening-par-destination { padding:10px; background:#0b1220; border:1px solid #334155; border-radius:8px; }
-    .opening-par-destination-head { display:flex;justify-content:space-between;gap:8px;color:#fbbf24;
-                                    font-size:12px;font-weight:900;margin-bottom:8px; }
+    .opening-par-destination-head { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;
+                                    align-items:center;color:#fbbf24;font-size:12px;font-weight:900;
+                                    margin-bottom:8px; }
+    .opening-par-confirm-all { grid-column:1 / -1;width:100%;padding:10px 8px;border-radius:7px;
+                               border:1px solid #d97706;background:#78350f;color:#fef3c7;
+                               font-size:12px;font-weight:900;cursor:pointer; }
+    .opening-par-confirm-all:disabled { opacity:0.65;cursor:default; }
+    .opening-par-confirm-all.done { background:#064e3b;color:#a7f3d0;border-color:#10b981; }
     .opening-par-item { display:grid; grid-template-columns:minmax(0,1fr) minmax(86px,0.45fr) minmax(104px,0.55fr);
                         gap:8px; align-items:center; padding:10px; margin-top:7px; background:#111827;
                         border:1px solid #334155; border-radius:8px; }
@@ -5477,7 +5483,15 @@ function renderOpeningParChecklist() {
   list.innerHTML = checklist.groups.map(group =>
       '<section class="opening-par-destination">' +
         '<div class="opening-par-destination-head"><span>' + esc(group.destination.name || '?') + '</span>' +
-          '<span>' + group.confirmedCount + ' / ' + group.totalCount + ' Confirmed</span></div>' +
+          '<span>' + group.confirmedCount + ' / ' + group.totalCount + ' Confirmed</span>' +
+          '<button type="button" class="opening-par-confirm-all' +
+            (group.confirmedCount >= group.totalCount ? ' done' : '') + '"' +
+            ' data-destination="' + esc(group.destination.id) + '"' +
+            (group.confirmedCount >= group.totalCount || completed ? ' disabled' : '') + '>' +
+            (group.confirmedCount >= group.totalCount
+              ? '✓ Bar Confirmed'
+              : 'Confirm All for This Bar (' + (group.totalCount - group.confirmedCount) + ')') +
+          '</button></div>' +
         group.rows.map(row => {
           const meta = [itemSizeLabel(row.item), row.item.unit]
             .filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' · ');
@@ -5520,6 +5534,111 @@ function renderOpeningParChecklist() {
       itemRow.classList.add(variance.status);
       varianceEl.classList.add(variance.status);
       varianceEl.textContent = variance.label;
+    });
+  });
+
+  Array.from(list.querySelectorAll('.opening-par-confirm-all:not(.done)')).forEach(button => {
+    button.addEventListener('click', async () => {
+      if (state.openingParBusyKey) return;
+
+      const section = button.closest('.opening-par-destination');
+      const destinationId = button.getAttribute('data-destination');
+      if (!section || !destinationId) return;
+
+      const pending = Array.from(section.querySelectorAll('.opening-par-confirm:not(.done)')).map(confirmButton => {
+        const itemRow = confirmButton.closest('.opening-par-item');
+        const input = itemRow && itemRow.querySelector('.opening-par-qty');
+        return {
+          itemRow,
+          input,
+          key: itemRow && itemRow.getAttribute('data-key'),
+          destinationId: itemRow && itemRow.getAttribute('data-destination'),
+          itemId: itemRow && itemRow.getAttribute('data-item'),
+          receivedQuantity: OpeningParV1.parseReceivedQuantity(input && input.value),
+        };
+      });
+
+      if (!pending.length) return;
+
+      const invalid = pending.find(row =>
+        !row.key ||
+        !row.itemId ||
+        row.destinationId !== destinationId ||
+        row.receivedQuantity == null
+      );
+
+      if (invalid) {
+        statusOn(
+          'opening-par-status',
+          'Every Received quantity in this bar must be a whole number greater than or equal to zero.',
+          'err',
+        );
+        if (invalid.input) invalid.input.focus();
+        return;
+      }
+
+      state.openingParBusyKey = 'bulk:' + destinationId;
+      clearStatus('opening-par-status');
+
+      Array.from(section.querySelectorAll('input, button')).forEach(control => {
+        control.disabled = true;
+      });
+
+      let lastResult = null;
+
+      try {
+        for (let index = 0; index < pending.length; index += 1) {
+          const row = pending[index];
+          button.textContent = 'Saving ' + (index + 1) + ' / ' + pending.length + '…';
+
+          const result = await openingParChecklistInvoke('confirm', {
+            destination_id: row.destinationId,
+            item_id: row.itemId,
+            received_quantity: row.receivedQuantity,
+          });
+
+          if (
+            !result.receipt ||
+            result.receipt.staff_id !== state.staffId ||
+            result.receipt.destination_id !== row.destinationId ||
+            result.receipt.item_id !== row.itemId
+          ) {
+            throw new Error('Confirmation identity could not be verified.');
+          }
+
+          state.openingParReceipts[row.key] = result.receipt;
+          lastResult = result;
+        }
+
+        if (lastResult) {
+          state.openingParStatus = lastResult;
+          state.openingParClassicUnlocked = lastResult.completed === true;
+        }
+
+        statusOn(
+          'opening-par-status',
+          lastResult && lastResult.completed === true
+            ? 'Opening PAR Complete.'
+            : 'All remaining items for this bar were confirmed.',
+          'ok',
+        );
+      } catch (error) {
+        statusOn('opening-par-status', error.message || String(error), 'err');
+
+        try {
+          const refreshed = await openingParChecklistInvoke('status');
+          if (refreshed.required === true) {
+            cacheOpeningParReceipts(refreshed.receipts || []);
+            state.openingParStatus = refreshed;
+            state.openingParClassicUnlocked = refreshed.completed === true;
+          }
+        } catch (_) {
+          /* remain fail-closed on the checklist screen */
+        }
+      } finally {
+        state.openingParBusyKey = null;
+        renderOpeningParChecklist();
+      }
     });
   });
 

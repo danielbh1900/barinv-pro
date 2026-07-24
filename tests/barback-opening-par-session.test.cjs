@@ -449,3 +449,32 @@ test('46. Manager and Barback compile gates remain ON', () => {
   assert.match(managerHtml, /const OPENING_PAR_MANAGER_V1_ENABLED = true;/);
   assert.match(barbackHtml, /const OPENING_PAR_V1_ENABLED = true;/);
 });
+
+test('per-bar Confirm All preserves individual confirmation and scopes requests to one destination', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
+
+  assert.match(source, /opening-par-confirm-all/);
+  assert.match(source, /Confirm All for This Bar/);
+  assert.match(source, /section\.querySelectorAll\('\.opening-par-confirm:not\(\.done\)'\)/);
+  assert.match(source, /row\.destinationId !== destinationId/);
+  assert.match(source, /received_quantity:\s*row\.receivedQuantity/);
+  assert.match(source, /for \(let index = 0; index < pending\.length; index \+= 1\)/);
+  assert.match(source, /throw new Error\('Confirmation identity could not be verified\.'\)/);
+
+  // Individual item confirmation must remain available.
+  assert.match(source, /querySelectorAll\('\.opening-par-confirm:not\(\.done\)'\)/);
+  assert.match(source, /received_quantity:\s*receivedQuantity/);
+});
+
+test('per-bar Confirm All never overwrites previously confirmed rows', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
+
+  assert.match(
+    source,
+    /section\.querySelectorAll\('\.opening-par-confirm:not\(\.done\)'\)/
+  );
+  assert.match(
+    source,
+    /group\.totalCount - group\.confirmedCount/
+  );
+});
