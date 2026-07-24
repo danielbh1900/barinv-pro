@@ -5433,7 +5433,8 @@ function openingParCurrentChecklist() {
 
 async function openingParChecklistInvoke(action, payload) {
   if (!state.jwt) throw new Error('Sign in again before using Opening PAR.');
-  const response = await fetch(FN_BASE + '/barback-opening-par-checklist', {
+  const base = functionsBase();
+  const response = await fetch(base + '/barback-opening-par-checklist', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + state.jwt },
     body: JSON.stringify(Object.assign({ action }, payload || {})),
