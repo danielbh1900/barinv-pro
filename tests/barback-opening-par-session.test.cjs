@@ -472,3 +472,15 @@ test('per-bar Confirm All skips confirmed rows and keeps manual Received values'
   assert.match(source, /group\.totalCount - group\.confirmedCount/);
   assert.match(source, /OpeningParV1\.parseReceivedQuantity\(input && input\.value\)/);
 });
+
+test('completed Opening PAR appears as read-only summary on main TAKEN RETURN screen', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
+
+  assert.match(source, /opening-par-main-summary/);
+  assert.match(source, /function renderOpeningParMainSummary\(\)/);
+  assert.match(source, /✓ Opening PAR Completed/);
+  assert.match(source, /View confirmed PAR levels/);
+  assert.match(source, /not as TAKEN inventory movement/);
+  assert.match(source, /if \(result\.completed === true\) cacheOpeningParReceipts\(result\.receipts \|\| \[\]\)/);
+  assert.match(source, /renderOpeningParMainSummary\(\)/);
+});

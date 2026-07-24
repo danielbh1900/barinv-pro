@@ -537,6 +537,8 @@
 
   <div class="wrap">
 
+    <div id="opening-par-main-summary" class="row" style="display:none;"></div>
+
     <!-- SCALE_BLE — visible, direction-neutral main Scale panel. Shown whenever
          navigator.bluetooth exists (NOT gated on getAvailability). iPhone/iOS shows
          the manual note. "Use latest stable weight" fills the context-appropriate
@@ -2150,6 +2152,7 @@ function enterMain() {
   renderRecentMini();
   try { refreshDraftCount(); } catch (_) {}   // init main-screen draft indicator (persisted drafts)
   renderRecentItemChips();   // Phase 5
+  try { renderOpeningParMainSummary(); } catch (_) {}
   refreshBleCard();
   // Phase 5: start telemetry heartbeat when running Phase 3 (signed JWT)
   if (state.jwt && !STAGING_MODE) startTelemetryHeartbeat();
@@ -5468,6 +5471,66 @@ function openingParIdentityLine() {
   return [state.staffName || 'staff', (venue && venue.name) || p.venue_name || 'venue', nightLabel].join(' · ');
 }
 
+function renderOpeningParMainSummary() {
+  const el = $('opening-par-main-summary');
+  if (!el) return;
+
+  const status = state.openingParStatus || {};
+  if (!OPENING_PAR_V1_ENABLED || status.completed !== true || !state.openingParClassicUnlocked) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  const checklist = openingParCurrentChecklist();
+  const requiredCount = Number(status.required_count || checklist.rowCount || 0);
+  const confirmedCount = Number(status.confirmed_count || checklist.confirmedCount || 0);
+  const remainingCount = Number(
+    status.remaining_count != null
+      ? status.remaining_count
+      : Math.max(requiredCount - confirmedCount, 0)
+  );
+
+  const groupSummary = checklist.groups.map(group =>
+    '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid rgba(148,163,184,.18);">' +
+      '<span>' + esc(group.destination.name || '?') + '</span>' +
+      '<b style="color:#fbbf24;">' + group.confirmedCount + ' / ' + group.totalCount + '</b>' +
+    '</div>'
+  ).join('');
+
+  const detailRows = checklist.groups.map(group =>
+    '<div style="margin-top:8px;">' +
+      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(group.destination.name || '?') + '</div>' +
+      group.rows.map(row => {
+        const receipt = row.receipt;
+        const receivedQty = receipt ? receipt.received_quantity : row.expectedQty;
+        const variance = OpeningParV1.variance(row.expectedQty, receivedQty);
+        return '<div style="display:grid;grid-template-columns:minmax(0,1fr) 54px 62px;gap:6px;padding:5px 0;border-top:1px solid rgba(148,163,184,.12);align-items:center;">' +
+          '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">' + esc(row.item.name || '?') + '</span>' +
+          '<span style="text-align:right;color:#9ca3af;">PAR ' + esc(String(row.expectedQty)) + '</span>' +
+          '<b style="text-align:right;color:#7dd3fc;">' + esc(String(receivedQty)) + '</b>' +
+          '<span style="grid-column:1 / -1;color:#86efac;font-size:11px;letter-spacing:.08em;">' + esc(variance.label) + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>'
+  ).join('');
+
+  el.innerHTML =
+    '<div style="padding:12px;border:1px solid #10b981;border-radius:10px;background:#052e24;color:#d1fae5;">' +
+      '<div style="font-size:16px;font-weight:900;color:#86efac;">✓ Opening PAR Completed</div>' +
+      '<div style="margin-top:4px;font-size:13px;color:#cbd5e1;">' +
+        confirmedCount + ' confirmed · ' + remainingCount + ' remaining' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:13px;">' + groupSummary + '</div>' +
+      '<details style="margin-top:8px;">' +
+        '<summary style="cursor:pointer;color:#7dd3fc;font-weight:800;">View confirmed PAR levels</summary>' +
+        '<div style="margin-top:6px;font-size:12px;color:#e5e7eb;">' + detailRows + '</div>' +
+      '</details>' +
+      '<div style="margin-top:8px;font-size:11px;color:#9ca3af;">Opening PAR is saved as a checklist audit record, not as TAKEN inventory movement.</div>' +
+    '</div>';
+  el.style.display = '';
+}
+
 function renderOpeningParChecklist() {
   const list = $('opening-par-list');
   if (!list) return;
@@ -5725,6 +5788,7 @@ async function routeAfterAuthenticatedLogin() {
     const result = await openingParChecklistInvoke('status');
     if (result.runtime_enabled !== true || result.required !== true || result.completed === true) {
       state.openingParStatus = result;
+      if (result.completed === true) cacheOpeningParReceipts(result.receipts || []);
       state.openingParClassicUnlocked = true;
       return enterMain();
     }
