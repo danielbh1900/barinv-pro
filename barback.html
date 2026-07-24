@@ -5471,6 +5471,62 @@ function openingParIdentityLine() {
   return [state.staffName || 'staff', (venue && venue.name) || p.venue_name || 'venue', nightLabel].join(' · ');
 }
 
+function openingParAuditLogHTML(options) {
+  options = options || {};
+  const status = state.openingParStatus || {};
+  if (!OPENING_PAR_V1_ENABLED || status.completed !== true || !state.openingParClassicUnlocked) return '';
+
+  const checklist = openingParCurrentChecklist();
+  if (!checklist || !checklist.rowCount) return '';
+
+  const requiredCount = Number(status.required_count || checklist.rowCount || 0);
+  const confirmedCount = Number(status.confirmed_count || checklist.confirmedCount || 0);
+  const remainingCount = Number(
+    status.remaining_count != null
+      ? status.remaining_count
+      : Math.max(requiredCount - confirmedCount, 0)
+  );
+
+  const groups = checklist.groups.map(group =>
+    '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid rgba(148,163,184,.16);">' +
+      '<span>' + esc(group.destination.name || '?') + '</span>' +
+      '<b style="color:#fbbf24;">' + group.confirmedCount + ' / ' + group.totalCount + '</b>' +
+    '</div>'
+  ).join('');
+
+  const detailRows = checklist.groups.map(group =>
+    '<div style="margin-top:8px;">' +
+      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(group.destination.name || '?') + '</div>' +
+      group.rows.map(row => {
+        const receipt = row.receipt;
+        const receivedQty = receipt ? receipt.received_quantity : row.expectedQty;
+        const variance = OpeningParV1.variance(row.expectedQty, receivedQty);
+        return '<div style="display:grid;grid-template-columns:minmax(0,1fr) 54px 62px;gap:6px;padding:4px 0;border-top:1px solid rgba(148,163,184,.12);align-items:center;">' +
+          '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">' + esc(row.item.name || '?') + '</span>' +
+          '<span style="text-align:right;color:#9ca3af;">PAR ' + esc(String(row.expectedQty)) + '</span>' +
+          '<b style="text-align:right;color:#7dd3fc;">' + esc(String(receivedQty)) + '</b>' +
+          '<span style="grid-column:1 / -1;color:#86efac;font-size:10px;letter-spacing:.08em;">' + esc(variance.label) + '</span>' +
+        '</div>';
+      }).join('') +
+    '</div>'
+  ).join('');
+
+  return '<div class="bar-group opening-par-audit-log" style="margin-bottom:12px;border-left:3px solid #10b981;padding-left:8px;">' +
+    '<div class="bar-group-header" style="font-weight:900;font-size:12px;letter-spacing:0.08em;color:#86efac;margin:0 0 6px 0;">' +
+      'OPENING PAR AUDIT' +
+      ' <span style="color:#cbd5e1;font-weight:500;letter-spacing:0;">· ' + confirmedCount + ' confirmed · ' + remainingCount + ' remaining</span>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#d1fae5;background:#052e24;border:1px solid #065f46;border-radius:8px;padding:8px;">' +
+      groups +
+      '<details style="margin-top:6px;">' +
+        '<summary style="cursor:pointer;color:#7dd3fc;font-weight:800;">View confirmed PAR levels</summary>' +
+        '<div style="margin-top:6px;">' + detailRows + '</div>' +
+      '</details>' +
+      '<div style="margin-top:6px;font-size:10px;color:#9ca3af;">Audit only — not a TAKEN or RETURN inventory movement.</div>' +
+    '</div>' +
+  '</div>';
+}
+
 function renderOpeningParMainSummary() {
   const el = $('opening-par-main-summary');
   if (!el) return;
@@ -5989,8 +6045,13 @@ $('ok-overlay').addEventListener('click', () => $('ok-overlay').classList.remove
 function renderRecentMini() {
   const arr = Recent.load().slice(0, 8);
   const el = $('recent');
-  if (!arr.length) { el.innerHTML = '<div class="muted small">No submitted saves yet. (Unsent items are in Review — see above.)</div>'; return; }
-  el.innerHTML = arr.map(r => {
+  const openingParAudit = openingParAuditLogHTML({ compact: true });
+  if (!arr.length) {
+    el.innerHTML = openingParAudit ||
+      '<div class="muted small">No submitted saves yet. (Unsent items are in Review — see above.)</div>';
+    return;
+  }
+  el.innerHTML = openingParAudit + arr.map(r => {
     const badge = r.undone ? 'undone'
                 : (r.status === 'SYNCED' ? 'synced'
                 : (r.status === 'ERROR' ? 'error' : 'queued'));
@@ -6676,11 +6737,12 @@ function renderReview() {
   }
 
   // SYNCED / recent — bar-grouped, read-only.
+  const openingParAudit = openingParAuditLogHTML({ review: true });
   if (recent.length === 0) {
-    $('review-synced').innerHTML = '<div class="muted small">no recent saves</div>';
+    $('review-synced').innerHTML = openingParAudit || '<div class="muted small">no recent saves</div>';
   } else {
     const groups = groupRowsByBar(recent, r => r.bar_id);
-    $('review-synced').innerHTML = groups.map(g => {
+    $('review-synced').innerHTML = openingParAudit + groups.map(g => {
       const syncedCount = g.rows.filter(r => !r.undone && r.status === 'SYNCED').length;
       const errCount    = g.rows.filter(r => !r.undone && r.status === 'ERROR').length;
       const undoneCount = g.rows.filter(r => r.undone).length;

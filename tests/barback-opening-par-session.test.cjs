@@ -484,3 +484,15 @@ test('completed Opening PAR appears as read-only summary on main TAKEN RETURN sc
   assert.match(source, /if \(result\.completed === true\) cacheOpeningParReceipts\(result\.receipts \|\| \[\]\)/);
   assert.match(source, /renderOpeningParMainSummary\(\)/);
 });
+
+test('completed Opening PAR appears in logs as audit only, not inventory movement', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
+
+  assert.match(source, /function openingParAuditLogHTML\(options\)/);
+  assert.match(source, /OPENING PAR AUDIT/);
+  assert.match(source, /Audit only — not a TAKEN or RETURN inventory movement/);
+  assert.match(source, /openingParAuditLogHTML\(\{ compact: true \}\)/);
+  assert.match(source, /openingParAuditLogHTML\(\{ review: true \}\)/);
+  assert.match(source, /openingParAudit \+ arr\.map/);
+  assert.match(source, /openingParAudit \+ groups\.map/);
+});
