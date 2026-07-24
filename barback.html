@@ -5493,7 +5493,7 @@ function renderOpeningParChecklist() {
             '<div class="opening-par-expected"><span class="opening-par-meta">EXPECTED PAR</span>' + esc(String(row.expectedQty)) + '</div>' +
             '<div class="opening-par-qty-wrap">' +
               '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="Received"' +
-                (receipt ? (' value="' + esc(String(receipt.received_quantity)) + '"') : '') +
+                (' value="' + esc(String(receipt ? receipt.received_quantity : row.expectedQty)) + '"') +
                 (receipt || busy || completed ? ' disabled' : '') + '>' +
               '<button type="button" class="opening-par-confirm' + (receipt ? ' done' : '') + '"' +
                 (receipt || busy || completed ? ' disabled' : '') + '>' +
