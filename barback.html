@@ -5614,11 +5614,16 @@ function renderOpeningParChecklist() {
           state.openingParClassicUnlocked = lastResult.completed === true;
         }
 
+        if (lastResult && lastResult.completed === true) {
+          state.openingParClassicUnlocked = true;
+          state.openingParBusyKey = null;
+          statusOn('opening-par-status', 'Opening PAR Complete.', 'ok');
+          return enterMain();
+        }
+
         statusOn(
           'opening-par-status',
-          lastResult && lastResult.completed === true
-            ? 'Opening PAR Complete.'
-            : 'All remaining items for this bar were confirmed.',
+          'All remaining items for this bar were confirmed.',
           'ok',
         );
       } catch (error) {
@@ -5670,7 +5675,12 @@ function renderOpeningParChecklist() {
         state.openingParReceipts[key] = result.receipt;
         state.openingParStatus = result;
         state.openingParClassicUnlocked = result.completed === true;
-        statusOn('opening-par-status', result.completed ? 'Opening PAR Complete.' : 'Received quantity confirmed.', 'ok');
+        if (result.completed === true) {
+          state.openingParBusyKey = null;
+          statusOn('opening-par-status', 'Opening PAR Complete.', 'ok');
+          return enterMain();
+        }
+        statusOn('opening-par-status', 'Received quantity confirmed.', 'ok');
       } catch (error) {
         statusOn('opening-par-status', error.message || String(error), 'err');
         try {
