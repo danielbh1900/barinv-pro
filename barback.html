@@ -2085,7 +2085,7 @@ function enterMain() {
       ? cachedBars.find(b => b.id === state.selectedBarId)
       : null;
     const barLabel =
-      (selBar && selBar.name) ||
+      (selBar && barDisplayLabel(selBar)) ||
       p.bar_name ||
       (state.selectedBarId
         ? ('bar ' + String(state.selectedBarId).slice(0, 8))
@@ -2107,7 +2107,7 @@ function enterMain() {
   if (sessionBars.length > 1) {
     const sel = $('bar-pick');
     sel.innerHTML = sessionBars.map(b =>
-      '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>').join('');
+      '<option value="' + esc(b.id) + '">' + esc(barDisplayLabel(b)) + '</option>').join('');
     sel.value = state.selectedBarId || sessionBars[0].id;
     if (state.selectedBarId !== sel.value) state.selectedBarId = sel.value;
     sel.onchange = () => {
@@ -5492,14 +5492,14 @@ function openingParAuditLogHTML(options) {
 
   const groups = checklist.groups.map(group =>
     '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid rgba(148,163,184,.16);">' +
-      '<span>' + esc(group.destination.name || '?') + '</span>' +
+      '<span>' + esc(barDisplayLabel(group.destination)) + '</span>' +
       '<b style="color:#fbbf24;">' + group.confirmedCount + ' / ' + group.totalCount + '</b>' +
     '</div>'
   ).join('');
 
   const detailRows = checklist.groups.map(group =>
     '<div style="margin-top:8px;">' +
-      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(group.destination.name || '?') + '</div>' +
+      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(barDisplayLabel(group.destination)) + '</div>' +
       group.rows.map(row => {
         const receipt = row.receipt;
         const receivedQty = receipt ? receipt.received_quantity : row.expectedQty;
@@ -5553,14 +5553,14 @@ function renderOpeningParMainSummary() {
 
   const groupSummary = checklist.groups.map(group =>
     '<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid rgba(148,163,184,.18);">' +
-      '<span>' + esc(group.destination.name || '?') + '</span>' +
+      '<span>' + esc(barDisplayLabel(group.destination)) + '</span>' +
       '<b style="color:#fbbf24;">' + group.confirmedCount + ' / ' + group.totalCount + '</b>' +
     '</div>'
   ).join('');
 
   const detailRows = checklist.groups.map(group =>
     '<div style="margin-top:8px;">' +
-      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(group.destination.name || '?') + '</div>' +
+      '<div style="color:#fbbf24;font-weight:900;margin-bottom:4px;">' + esc(barDisplayLabel(group.destination)) + '</div>' +
       group.rows.map(row => {
         const receipt = row.receipt;
         const receivedQty = receipt ? receipt.received_quantity : row.expectedQty;
@@ -5605,7 +5605,7 @@ function renderOpeningParChecklist() {
 
   list.innerHTML = checklist.groups.map(group =>
       '<section class="opening-par-destination">' +
-        '<div class="opening-par-destination-head"><span>' + esc(group.destination.name || '?') + '</span>' +
+        '<div class="opening-par-destination-head"><span>' + esc(barDisplayLabel(group.destination)) + '</span>' +
           '<span>' + group.confirmedCount + ' / ' + group.totalCount + ' Confirmed</span>' +
           '<button type="button" class="opening-par-confirm-all' +
             (group.confirmedCount >= group.totalCount ? ' done' : '') + '"' +
@@ -6522,13 +6522,36 @@ function showReview() {
 //     session originally captured the row is preserved.
 //   • No DB calls. No SQL. No network. Pure localStorage mutations.
 
+// BARBACK_BARTENDER_BAR_LABELS_UI_START
+function barDisplayLabel(bar) {
+  if (!bar) return '?';
+  const base = String(bar.name || '?').trim() || '?';
+  const rawNames = Array.isArray(bar.bartender_names)
+    ? bar.bartender_names
+    : (bar.bartender_name ? [bar.bartender_name] : []);
+  const seen = new Set();
+  const names = rawNames
+    .map(name => String(name || '').trim())
+    .filter(name => {
+      if (!name || seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
+  return names.length ? (base + ' — ' + names.join(', ')) : base;
+}
+
+function barDisplayLabelById(bid) {
+  if (!bid) return '(any bar)';
+  const found = (cache.bars || []).find(b => b.id === bid);
+  return found ? barDisplayLabel(found) : ('unknown (' + String(bid).slice(0, 8) + ')');
+}
+// BARBACK_BARTENDER_BAR_LABELS_UI_END
+
 // Resolve a bar_id to a display label. cache.bars carries the full
 // venue bar list (populated at PIN-login via the bundle). Falls back
 // to a short id if the row's bar isn't in cache.
 function reviewBarLabel(bid) {
-  if (!bid) return '(any bar)';
-  const found = (cache.bars || []).find(b => b.id === bid);
-  return (found && found.name) ? found.name : ('unknown (' + String(bid).slice(0, 8) + ')');
+  return barDisplayLabelById(bid);
 }
 
 // Detect a queued row whose session_id / night_id differ from the
@@ -7422,7 +7445,7 @@ function showBuilder() {
   $('b-night').innerHTML = sortedNights.map(n =>
     '<option value="' + esc(n.id) + '">' + esc((n.date || '') + (n.name ? ' · ' + n.name : '')) + '</option>').join('');
   $('b-bar').innerHTML = '<option value="">(any bar in venue)</option>' +
-    (cache.bars || []).map(b => '<option value="' + esc(b.id) + '">' + esc(b.name || '?') + '</option>').join('');
+    (cache.bars || []).map(b => '<option value="' + esc(b.id) + '">' + esc(barDisplayLabel(b)) + '</option>').join('');
   $('b-staff').innerHTML = (cache.staff || []).map(s =>
     '<option value="' + esc(s.id) + '">' + esc(s.name || '?') + '</option>').join('');
   setExpiresQuick('end');

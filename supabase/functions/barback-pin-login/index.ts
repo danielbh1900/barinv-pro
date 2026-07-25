@@ -390,7 +390,7 @@ Deno.serve(async (req: Request) => {
   // Items + bars + staff list. We do this server-side because the
   // barback role is forbidden from reading these tables directly.
   const venueId = session.venue_id;
-  const [itemsRes, barsRes, staffRes] = await Promise.all([
+  const [itemsRes, barsRes, staffRes, bartenderAssignmentsRes] = await Promise.all([
     svc.from("items")
        // PLAN-2026-06-04 — schema audit (read-only introspection) confirmed
        // public.items has columns: id, name, sku, category, unit, active,
@@ -434,7 +434,59 @@ Deno.serve(async (req: Request) => {
        .select("id, name")
        .eq("venue_id", venueId)
        .order("name"),
+    svc.from("night_staff_assignments")
+       .select("staff_id, role, allowed_bar_ids, revoked")
+       .eq("night_id", session.night_id),
   ]);
+
+  // BARBACK_BARTENDER_BAR_LABELS_START
+  // UI-only decoration: show the bartender assigned to each scoped bar.
+  // Auth/scope still comes from scopedAllowedBars and JWT claims above.
+  const staffNameById = new Map(
+    (staffRes.data ?? []).map((staff) => [staff.id, staff.name || ""]),
+  );
+  const scopedBarIdSet = new Set(scopedAllowedBars);
+  const bartenderNamesByBarId = new Map<string, string[]>();
+
+  const hasRoleToken = (role: unknown, token: string) =>
+    String(role || "")
+      .toLowerCase()
+      .split(/[,;|/]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .includes(token);
+
+  if (bartenderAssignmentsRes.error) {
+    console.warn("[barback-login] bartender bar label lookup failed", {
+      code: bartenderAssignmentsRes.error.code,
+      message: bartenderAssignmentsRes.error.message,
+    });
+  } else {
+    for (const row of bartenderAssignmentsRes.data ?? []) {
+      if (row.revoked === true || !hasRoleToken(row.role, "bartender")) continue;
+      const staffName = staffNameById.get(row.staff_id);
+      if (!staffName) continue;
+
+      for (const barId of Array.isArray(row.allowed_bar_ids) ? row.allowed_bar_ids : []) {
+        if (!scopedBarIdSet.has(barId)) continue;
+        const names = bartenderNamesByBarId.get(barId) ?? [];
+        if (!names.includes(staffName)) names.push(staffName);
+        bartenderNamesByBarId.set(barId, names);
+      }
+    }
+  }
+
+  const barsWithBartenderLabels = (barsRes.data ?? []).map((bar) => {
+    const bartenderNames = bartenderNamesByBarId.get(bar.id) ?? [];
+    return bartenderNames.length
+      ? {
+        ...bar,
+        bartender_name: bartenderNames.join(", "),
+        bartender_names: bartenderNames,
+      }
+      : bar;
+  });
+  // BARBACK_BARTENDER_BAR_LABELS_END
 
   const openingParResult = normalizeSessionOpeningPar(
     session.opening_par_config,
@@ -480,7 +532,7 @@ Deno.serve(async (req: Request) => {
     opening_par: openingParResult.value,
     bundle: {
       items: itemsRes.data ?? [],
-      bars:  barsRes.data  ?? [],
+      bars:  barsWithBartenderLabels,
       staff: staffRes.data ?? [],
     },
   });
