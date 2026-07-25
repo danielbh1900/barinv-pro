@@ -490,6 +490,7 @@ test('completed Opening PAR appears in logs as audit only, not inventory movemen
 
   assert.match(source, /function openingParAuditLogHTML\(options\)/);
   assert.match(source, /OPENING PAR AUDIT/);
+  assert.match(source, /SUBMITTED/);
   assert.match(source, /Audit only — not a TAKEN or RETURN inventory movement/);
   assert.match(source, /openingParAuditLogHTML\(\{ compact: true \}\)/);
   assert.match(source, /openingParAuditLogHTML\(\{ review: true \}\)/);
