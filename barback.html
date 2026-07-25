@@ -2148,6 +2148,9 @@ function enterMain() {
 
   $('test-warn').style.display = p.test_mode === false ? 'none' : '';
   startExpirationTimer();
+  try { maybeAddOpeningParToReview(); } catch (error) {
+    console.warn('Opening PAR Review draft creation failed', error);
+  }
   refreshQueueCount();
   renderRecentMini();
   try { refreshDraftCount(); } catch (_) {}   // init main-screen draft indicator (persisted drafts)
@@ -5523,7 +5526,7 @@ function openingParAuditLogHTML(options) {
         '<summary style="cursor:pointer;color:#7dd3fc;font-weight:800;">View confirmed PAR levels</summary>' +
         '<div style="margin-top:6px;">' + detailRows + '</div>' +
       '</details>' +
-      '<div style="margin-top:6px;font-size:10px;color:#9ca3af;">Audit only — not a TAKEN or RETURN inventory movement.</div>' +
+      '<div style="margin-top:6px;font-size:10px;color:#9ca3af;">Submitted audit — added to Review as TAKEN draft rows for final Submit All.</div>' +
     '</div>' +
   '</div>';
 }
@@ -5583,7 +5586,7 @@ function renderOpeningParMainSummary() {
         '<summary style="cursor:pointer;color:#7dd3fc;font-weight:800;">View confirmed PAR levels</summary>' +
         '<div style="margin-top:6px;font-size:12px;color:#e5e7eb;">' + detailRows + '</div>' +
       '</details>' +
-      '<div style="margin-top:8px;font-size:11px;color:#9ca3af;">Opening PAR is saved as a checklist audit record, not as TAKEN inventory movement.</div>' +
+      '<div style="margin-top:8px;font-size:11px;color:#9ca3af;">Opening PAR is saved as a checklist audit record and added to Review as TAKEN draft rows for final Submit All.</div>' +
     '</div>';
   el.style.display = '';
 }
@@ -5886,6 +5889,85 @@ $('opening-par-continue').addEventListener('click', () => {
 $('opening-par-logout').addEventListener('click', logout);
 
 // OPENING_PAR_V1_UI_END
+
+// OPENING_PAR_REVIEW_DRAFTS_START
+// Once Opening PAR is completed, copy each confirmed received quantity into
+// the normal Review-first flow as TAKEN drafts. This intentionally uses the
+// existing addToReview path so the operator still controls final SUBMIT ALL.
+function maybeAddOpeningParToReview() {
+  if (!OPENING_PAR_V1_ENABLED || !state.openingParClassicUnlocked) return;
+  if (!state.openingParStatus || state.openingParStatus.completed !== true) return;
+
+  const sessionId = openingParSessionId();
+  if (!sessionId || !state.staffId) return;
+
+  const key = 'barinv_opening_par_review_drafts:' + sessionId + ':' + state.staffId;
+  if (localStorage.getItem(key) === '1') return;
+
+  const checklist = openingParCurrentChecklist();
+  if (!checklist || !checklist.rowCount || checklist.confirmedCount !== checklist.rowCount) return;
+
+  let added = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  checklist.groups.forEach(group => {
+    group.rows.forEach(row => {
+      const receipt = row.receipt;
+      if (!receipt) {
+        failed += 1;
+        return;
+      }
+
+      const qty = Number(receipt.received_quantity);
+      if (!Number.isInteger(qty) || qty < 1) {
+        skipped += 1;
+        return;
+      }
+
+      const variance = OpeningParV1.variance(row.expectedQty, qty);
+      const result = addToReview({
+        item_id: row.itemId,
+        item_name: row.item && row.item.name ? row.item.name : '',
+        qty,
+        action: 'TAKEN',
+        bar_id: row.destinationId,
+        notes: [
+          'Opening PAR submitted',
+          'Expected PAR ' + row.expectedQty,
+          'Received ' + qty,
+          variance.label,
+        ].join(' · '),
+      });
+
+      if (result && result.ok) added += 1;
+      else failed += 1;
+    });
+  });
+
+  if (added > 0 || skipped > 0) {
+    localStorage.setItem(key, '1');
+  }
+
+  try { refreshDraftCount(); } catch (_) {}
+  try { renderReview(); } catch (_) {}
+
+  if (failed > 0) {
+    statusOn('save-status', 'Opening PAR completed, but ' + failed + ' item(s) could not be added to Review.', 'err');
+    return;
+  }
+
+  if (added > 0) {
+    statusOn(
+      'save-status',
+      'Opening PAR added to Review: ' + added + ' TAKEN draft' + (added !== 1 ? 's' : '') +
+        (skipped > 0 ? ' · skipped ' + skipped + ' zero quantity item(s)' : '') +
+        '. Tap VIEW ALL, then SUBMIT ALL TO BARINV.',
+      'ok',
+    );
+  }
+}
+// OPENING_PAR_REVIEW_DRAFTS_END
 
 //  Shared Add-to-Review CORE (PLAN-2026-06-13) — used by BOTH the manual
 //  SAVE button and the camera/HID scanner so they can never drift.

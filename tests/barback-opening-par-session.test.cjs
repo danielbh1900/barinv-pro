@@ -480,20 +480,34 @@ test('completed Opening PAR appears as read-only summary on main TAKEN RETURN sc
   assert.match(source, /function renderOpeningParMainSummary\(\)/);
   assert.match(source, /✓ Opening PAR Completed/);
   assert.match(source, /View confirmed PAR levels/);
-  assert.match(source, /not as TAKEN inventory movement/);
+  assert.match(source, /added to Review as TAKEN draft rows for final Submit All/);
   assert.match(source, /if \(result\.completed === true\) cacheOpeningParReceipts\(result\.receipts \|\| \[\]\)/);
   assert.match(source, /renderOpeningParMainSummary\(\)/);
 });
 
-test('completed Opening PAR appears in logs as audit only, not inventory movement', () => {
+test('completed Opening PAR appears in logs and Review as submitted TAKEN drafts', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
 
   assert.match(source, /function openingParAuditLogHTML\(options\)/);
   assert.match(source, /OPENING PAR AUDIT/);
   assert.match(source, /SUBMITTED/);
-  assert.match(source, /Audit only — not a TAKEN or RETURN inventory movement/);
+  assert.match(source, /Submitted audit — added to Review as TAKEN draft rows for final Submit All/);
   assert.match(source, /openingParAuditLogHTML\(\{ compact: true \}\)/);
   assert.match(source, /openingParAuditLogHTML\(\{ review: true \}\)/);
   assert.match(source, /openingParAudit \+ arr\.map/);
   assert.match(source, /openingParAudit \+ groups\.map/);
+});
+
+test('completed Opening PAR creates TAKEN Review drafts once for final Submit All', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8');
+
+  assert.match(source, /function maybeAddOpeningParToReview\(\)/);
+  assert.match(source, /OPENING_PAR_REVIEW_DRAFTS_START/);
+  assert.match(source, /addToReview\(\{/);
+  assert.match(source, /action:\s*'TAKEN'/);
+  assert.match(source, /Opening PAR submitted/);
+  assert.match(source, /barinv_opening_par_review_drafts/);
+  assert.match(source, /localStorage\.getItem\(key\)/);
+  assert.match(source, /localStorage\.setItem\(key,\s*'1'\)/);
+  assert.match(source, /SUBMIT ALL TO BARINV/);
 });
