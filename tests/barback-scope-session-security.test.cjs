@@ -240,7 +240,7 @@ test('32. revoke audit failure triggers an exact guarded rollback', () => {
 
 test('33. verified baseline and one authored checklist migration are present', () => {
   const migrations = fs.readdirSync(path.join(root, 'supabase/migrations')).filter(name => name.endsWith('.sql'));
-  assert.equal(migrations.length, 88);
+  assert.equal(migrations.length, 89);
   assert.ok(migrations.includes('20260720171358_add_barback_sessions_opening_par_config.sql'));
   assert.ok(migrations.includes('20260722063733_barback_opening_par_checklist_persistence.sql'));
 });
