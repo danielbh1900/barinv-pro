@@ -212,8 +212,9 @@ test('27. confirmation is retry-safe and cannot change target quantity', () => {
   assert.doesNotMatch(checklistEdge, /update\(\{[^}]*qty/);
 });
 
-test('28. no Confirm All or bulk confirmation path exists', () => {
-  assert.doesNotMatch(barback + checklistEdge, /Confirm All|confirm_all|confirmAll/);
+test('28. Confirm All remains client-side and no bulk server confirmation path exists', () => {
+  assert.match(barback, /Confirm All/);
+  assert.doesNotMatch(checklistEdge, /Confirm All|confirm_all|confirmAll/);
 });
 
 test('29. rollout compile gates remain Manager true and Barback true', () => {
@@ -239,7 +240,7 @@ test('32. revoke audit failure triggers an exact guarded rollback', () => {
 
 test('33. verified baseline and one authored checklist migration are present', () => {
   const migrations = fs.readdirSync(path.join(root, 'supabase/migrations')).filter(name => name.endsWith('.sql'));
-  assert.equal(migrations.length, 87);
+  assert.equal(migrations.length, 88);
   assert.ok(migrations.includes('20260720171358_add_barback_sessions_opening_par_config.sql'));
   assert.ok(migrations.includes('20260722063733_barback_opening_par_checklist_persistence.sql'));
 });

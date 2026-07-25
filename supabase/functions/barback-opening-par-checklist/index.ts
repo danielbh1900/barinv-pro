@@ -174,6 +174,15 @@ Deno.serve(async (req: Request) => {
   const venueId = typeof claims.venue_id === "string" ? claims.venue_id : "";
   const nightId = typeof claims.night_id === "string" ? claims.night_id : "";
   const staffId = typeof claims.staff_id === "string" ? claims.staff_id : "";
+  // BARBACK_OPENING_PAR_CLAIM_DESTINATIONS_START
+  // The login function signs a staff-scoped allowed_bars claim. Opening PAR
+  // must respect that claim and must not expand back to the full session scope.
+  const claimAllowedBarIds = typeof claims.allowed_bars === "string"
+    ? claims.allowed_bars.split(",").map((id) => id.trim()).filter((id) =>
+      UUID_RE.test(id)
+    )
+    : [];
+  // BARBACK_OPENING_PAR_CLAIM_DESTINATIONS_END
   if (
     claims.iss !== "barinv-barback" || claims.role !== "barback_user" ||
     claims.barback_role !== "barback" || claims.sub !== sessionId ||
@@ -292,21 +301,36 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  const allowedDestinationIds = new Set<string>();
-  if (typeof session.bar_id === "string" && UUID_RE.test(session.bar_id)) {
-    allowedDestinationIds.add(session.bar_id);
-  }
+  // BARBACK_OPENING_PAR_STAFF_SCOPED_DESTINATIONS_START
+  const sessionDestinationIds: string[] = [];
+  const sessionDestinationSeen = new Set<string>();
+  const addSessionDestination = (id: unknown) => {
+    if (
+      typeof id !== "string" || !UUID_RE.test(id) ||
+      sessionDestinationSeen.has(id)
+    ) return;
+    sessionDestinationSeen.add(id);
+    sessionDestinationIds.push(id);
+  };
+  addSessionDestination(session.bar_id);
   for (
     const id of Array.isArray(session.allowed_bars) ? session.allowed_bars : []
   ) {
-    if (typeof id === "string" && UUID_RE.test(id)) {
-      allowedDestinationIds.add(id);
-    }
+    addSessionDestination(id);
   }
+
+  const claimDestinationSet = new Set(claimAllowedBarIds);
+  const allowedDestinationIds = new Set<string>(
+    sessionDestinationIds.filter((id) => claimDestinationSet.has(id)),
+  );
   const destinationIds = Array.from(allowedDestinationIds);
-  if (!destinationIds.length) {
-    return errorResponse("Opening PAR has no authorized destinations", 500);
+  if (!claimAllowedBarIds.length || !destinationIds.length) {
+    return errorResponse(
+      "Opening PAR has no authorized destinations for this staff member",
+      403,
+    );
   }
+  // BARBACK_OPENING_PAR_STAFF_SCOPED_DESTINATIONS_END
 
   const itemIds = config.items.map((item) => item.item_id);
   const [

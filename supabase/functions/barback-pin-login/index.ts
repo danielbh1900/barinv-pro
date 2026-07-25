@@ -313,6 +313,60 @@ Deno.serve(async (req: Request) => {
   const { data: staffRow } = await svc
     .from("staff").select("id, name, role").eq("id", body.staff_id).maybeSingle();
 
+  // BARBACK_STAFF_SCOPED_DESTINATIONS_START
+  // A multi-staff link may include many destinations, but the signed Barback
+  // JWT and returned bundle must be narrowed to the specific staff member who
+  // entered their PIN. Otherwise Doshan can see Serjio's bars and vice versa.
+  const sessionDestinationIds: string[] = [];
+  const sessionDestinationSeen = new Set<string>();
+  const addSessionDestination = (id: unknown) => {
+    if (typeof id !== "string" || !id.trim() || sessionDestinationSeen.has(id)) return;
+    sessionDestinationSeen.add(id);
+    sessionDestinationIds.push(id);
+  };
+  addSessionDestination(session.bar_id);
+  for (const id of Array.isArray(session.allowed_bars) ? session.allowed_bars : []) {
+    addSessionDestination(id);
+  }
+
+  const { data: assignmentRow, error: assignmentError } = await svc
+    .from("night_staff_assignments")
+    .select("staff_id, role, allowed_bar_ids, revoked")
+    .eq("night_id", session.night_id)
+    .eq("staff_id", body.staff_id)
+    .maybeSingle();
+
+  if (assignmentError) {
+    return errorResponse("staff assignment scope lookup failed: " + assignmentError.message, 500);
+  }
+  if (!assignmentRow || assignmentRow.revoked === true) {
+    await svc.from("barback_audit_log").insert({
+      session_id: session.id, staff_id: body.staff_id,
+      action: "login_staff_assignment_missing", ip, user_agent: ua, detail: {},
+    });
+    return errorResponse("staff is not assigned for this night", 403);
+  }
+
+  const staffDestinationSet = new Set(
+    (Array.isArray(assignmentRow.allowed_bar_ids) ? assignmentRow.allowed_bar_ids : [])
+      .filter((id: unknown): id is string => typeof id === "string" && !!id.trim()),
+  );
+  const scopedAllowedBars = sessionDestinationIds.filter((id) => staffDestinationSet.has(id));
+
+  if (!scopedAllowedBars.length) {
+    await svc.from("barback_audit_log").insert({
+      session_id: session.id, staff_id: body.staff_id,
+      action: "login_staff_no_session_destinations", ip, user_agent: ua,
+      detail: { session_destination_count: sessionDestinationIds.length },
+    });
+    return errorResponse("staff has no assigned destination in this session", 403);
+  }
+
+  const scopedPrimaryBarId = scopedAllowedBars.includes(session.bar_id)
+    ? session.bar_id
+    : scopedAllowedBars[0];
+  // BARBACK_STAFF_SCOPED_DESTINATIONS_END
+
   const claims: BarbackJwtClaims = {
     aud: "authenticated",
     iss: "barinv-barback",
@@ -324,8 +378,8 @@ Deno.serve(async (req: Request) => {
     session_id:   session.id,
     venue_id:     session.venue_id,
     night_id:     session.night_id,
-    bar_id:       session.bar_id ?? "",
-    allowed_bars: (Array.isArray(session.allowed_bars) ? session.allowed_bars : []).join(","),
+    bar_id:       scopedPrimaryBarId,
+    allowed_bars: scopedAllowedBars.join(","),
     staff_id:     body.staff_id,
     staff_name:   staffRow?.name ?? undefined,
     nickname:     session.nickname ?? undefined,
@@ -374,6 +428,7 @@ Deno.serve(async (req: Request) => {
        // correct item scope, independent of the staff member's role labels.
        .select("id, name, bar_type")
        .eq("venue_id", venueId)
+       .in("id", scopedAllowedBars)
        .order("name"),
     svc.from("staff")
        .select("id, name")
@@ -410,8 +465,8 @@ Deno.serve(async (req: Request) => {
       session_id:    session.id,
       venue_id:      session.venue_id,
       night_id:      session.night_id,
-      bar_id:        session.bar_id,
-      allowed_bars:  session.allowed_bars,
+      bar_id:        scopedPrimaryBarId,
+      allowed_bars:  scopedAllowedBars,
       nickname:      session.nickname,
       issued_by:     session.issued_by,
       issued_at:     session.issued_at,
