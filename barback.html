@@ -5919,7 +5919,15 @@ function maybeAddOpeningParToReview() {
         return;
       }
 
+      const itemId = row.item && row.item.id;
+      const destinationId = group.destination && group.destination.id;
       const qty = Number(receipt.received_quantity);
+
+      if (!itemId || !destinationId) {
+        failed += 1;
+        return;
+      }
+
       if (!Number.isInteger(qty) || qty < 1) {
         skipped += 1;
         return;
@@ -5927,11 +5935,11 @@ function maybeAddOpeningParToReview() {
 
       const variance = OpeningParV1.variance(row.expectedQty, qty);
       const result = addToReview({
-        item_id: row.itemId,
+        item_id: itemId,
         item_name: row.item && row.item.name ? row.item.name : '',
         qty,
         action: 'TAKEN',
-        bar_id: row.destinationId,
+        bar_id: destinationId,
         notes: [
           'Opening PAR submitted',
           'Expected PAR ' + row.expectedQty,
@@ -5945,16 +5953,16 @@ function maybeAddOpeningParToReview() {
     });
   });
 
-  if (added > 0 || skipped > 0) {
-    localStorage.setItem(key, '1');
-  }
-
   try { refreshDraftCount(); } catch (_) {}
   try { renderReview(); } catch (_) {}
 
   if (failed > 0) {
     statusOn('save-status', 'Opening PAR completed, but ' + failed + ' item(s) could not be added to Review.', 'err');
     return;
+  }
+
+  if (added > 0 || skipped > 0) {
+    localStorage.setItem(key, '1');
   }
 
   if (added > 0) {
