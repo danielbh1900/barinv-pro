@@ -22,3 +22,17 @@ test('Barback UI renders item thumbnails safely', () => {
   assert.match(barback, /itemThumbHTML\(row\.item, 'opening-par-thumb'\)/);
   assert.match(barback, /function hydrateItemThumbs\(root\)/);
 });
+
+test('Thumbnail hotfix keeps Browse names visible and avoids duplicate Browse thumbnails', () => {
+  assert.match(barback, /BARBACK_ITEM_THUMBNAILS_HOTFIX_START/);
+  assert.match(barback, /data-thumb-hydrated="1"/);
+  assert.match(barback, /\.bm-card \.bm-name/);
+  assert.match(barback, /white-space:normal/);
+  assert.match(barback, /overflow:visible/);
+});
+
+test('Quantity modal shows scanned item thumbnail beside title', () => {
+  assert.match(barback, /\.qm-item-with-thumb/);
+  assert.match(barback, /itemThumbHTML\(it, 'qm-thumb'\)/);
+  assert.match(barback, /\$\('qm-item'\)\) \$\('qm-item'\)\.innerHTML\s*=/);
+});

@@ -178,6 +178,63 @@
     .item-label-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .opening-par-name.with-thumb { display:flex; align-items:center; gap:8px; }
     .opening-par-name-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    /* BARBACK_ITEM_THUMBNAILS_HOTFIX_START */
+    .bm-grid { align-content:start; }
+    .bm-card {
+      min-height:126px;
+      justify-content:flex-start;
+      align-items:center;
+      gap:5px;
+      padding:8px 6px;
+      overflow:visible;
+    }
+    .bm-card .item-thumb.bm-thumb {
+      width:40px;
+      height:40px;
+      margin:0 0 4px 0;
+    }
+    .bm-card .bm-name {
+      display:block;
+      width:100%;
+      padding-right:0;
+      text-align:center;
+      font-size:11.5px;
+      line-height:1.15;
+      white-space:normal;
+      overflow:visible;
+      text-overflow:clip;
+      max-height:none;
+      color:#f9fafb;
+      font-weight:900;
+    }
+    .bm-card .bm-size,
+    .bm-card .bm-sku {
+      width:100%;
+      text-align:center;
+      line-height:1.1;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .qm-item-with-thumb {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+    .item-thumb.qm-thumb {
+      width:44px;
+      height:44px;
+      border-radius:8px;
+      background:#111827;
+      flex:0 0 auto;
+    }
+    .qm-item-title {
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      line-height:1.15;
+    }
+    /* BARBACK_ITEM_THUMBNAILS_HOTFIX_END */
     /* BARBACK_ITEM_THUMBNAILS_CSS_END */
     .selected-item {
       margin-top:8px; padding:12px;
@@ -2609,7 +2666,7 @@ if ($('search-results')) $('search-results').addEventListener('mousedown', (e) =
 // scanner/scale logic untouched. The typed-search box still uses the
 // inline dropdown (showBrowseList) when focused, so nothing else changes.
 function _bmCardHtml(it, isRecent) {
-  return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '">' +
+  return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '" data-thumb-hydrated="1">' +
     (isRecent ? '<span class="bm-star" aria-hidden="true">★</span>' : '') +
     itemThumbHTML(it, 'bm-thumb') +
     '<span class="bm-name">' + esc(it.name || '?') + '</span>' +
@@ -3309,7 +3366,11 @@ function openQtyModal(it) {
   if (!it) return;
   state.qtyModalItem = it;
   const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
-  if ($('qm-item')) $('qm-item').textContent = '✓ ' + (it.name || '?') + (sz ? ' · ' + sz : '');
+  if ($('qm-item')) $('qm-item').innerHTML =
+    '<span class="qm-item-with-thumb">' +
+      itemThumbHTML(it, 'qm-thumb') +
+      '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
+    '</span>';
   const act = state.selectedAction || '(pick action)';
   let barCtx;
   if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
