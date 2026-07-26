@@ -165,6 +165,20 @@
     .item-row:last-child { border-bottom:none; }
     .item-row:active { background:#1a1a1a; }
     .item-row .sku { color:#666; font-size:11px; float:right; }
+    /* BARBACK_ITEM_THUMBNAILS_CSS_START */
+    .item-thumb {
+      width:34px; height:34px; object-fit:contain; flex:0 0 auto;
+      border:1px solid #333; border-radius:6px; background:#111827;
+    }
+    .item-thumb.small { width:28px; height:28px; }
+    .item-thumb.bm-thumb { width:42px; height:42px; align-self:center; margin-bottom:3px; }
+    .item-thumb.opening-par-thumb { width:34px; height:34px; }
+    .item-row.with-thumb { display:flex; align-items:center; gap:10px; }
+    .item-label-with-thumb { display:flex; align-items:center; gap:8px; min-width:0; }
+    .item-label-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .opening-par-name.with-thumb { display:flex; align-items:center; gap:8px; }
+    .opening-par-name-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    /* BARBACK_ITEM_THUMBNAILS_CSS_END */
     .selected-item {
       margin-top:8px; padding:12px;
       background:rgba(251,146,60,0.10); border:1px solid #fb923c; border-radius:6px;
@@ -2261,9 +2275,14 @@ function setPickedItem(it) {
   // qty (caused drafts to save qty=1). Qty is reset to 1 ONLY in the
   // post-add handler, after the draft row is created with the entered qty.
   $('picked-item').style.display = 'block';
-  $('picked-item').innerHTML = '✓ <b>' + esc(it.name || '?') + '</b>' +
-    (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
-    (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
+  $('picked-item').innerHTML =
+    '<span class="item-label-with-thumb">' +
+      itemThumbHTML(it, 'small') +
+      '<span class="item-label-text">✓ <b>' + esc(it.name || '?') + '</b>' +
+        (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
+        (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '') +
+      '</span>' +
+    '</span>';
   $('search-results').style.display = 'none';
   $('search-input').value = '';
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
@@ -2592,6 +2611,7 @@ if ($('search-results')) $('search-results').addEventListener('mousedown', (e) =
 function _bmCardHtml(it, isRecent) {
   return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '">' +
     (isRecent ? '<span class="bm-star" aria-hidden="true">★</span>' : '') +
+    itemThumbHTML(it, 'bm-thumb') +
     '<span class="bm-name">' + esc(it.name || '?') + '</span>' +
     (itemSizeLabel(it) ? '<span class="bm-size">' + esc(itemSizeLabel(it)) + '</span>' : '') +
     (it.sku  ? '<span class="bm-sku">'  + esc(it.sku)  + '</span>' : '') +
@@ -5625,8 +5645,11 @@ function renderOpeningParChecklist() {
           return '<div class="opening-par-item' + (variance ? (' ' + variance.status) : '') + '" data-key="' + esc(row.key) +
             '" data-destination="' + esc(group.destination.id) + '" data-item="' + esc(row.item.id) +
             '" data-expected="' + esc(String(row.expectedQty)) + '">' +
-            '<div class="opening-par-name">' + esc(row.item.name || '?') +
-              '<span class="opening-par-meta">' + esc(meta) + (timestamp ? ' · ' + esc(timestamp) : '') + '</span></div>' +
+            '<div class="opening-par-name with-thumb">' +
+              itemThumbHTML(row.item, 'opening-par-thumb') +
+              '<span class="opening-par-name-text">' + esc(row.item.name || '?') +
+                '<span class="opening-par-meta">' + esc(meta) + (timestamp ? ' · ' + esc(timestamp) : '') + '</span>' +
+              '</span></div>' +
             '<div class="opening-par-expected"><span class="opening-par-meta">EXPECTED PAR</span>' + esc(String(row.expectedQty)) + '</div>' +
             '<div class="opening-par-qty-wrap">' +
               '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="Received"' +
@@ -6521,6 +6544,90 @@ function showReview() {
 //     client_event_id are NEVER rewritten — audit trail of which
 //     session originally captured the row is preserved.
 //   • No DB calls. No SQL. No network. Pure localStorage mutations.
+
+// BARBACK_ITEM_THUMBNAILS_UI_START
+function itemImageUrl(item) {
+  if (!item) return '';
+  const raw = item.image_url || item.imageUrl || item.photo_url || item.photoUrl || item.image || item.photo || item.picture || '';
+  const url = String(raw || '').trim();
+  if (!url || /^javascript:/i.test(url)) return '';
+  return url;
+}
+
+function itemThumbHTML(item, extraClass) {
+  const url = itemImageUrl(item);
+  if (!url) return '';
+  return '<img class="item-thumb ' + esc(extraClass || '') + '" src="' + esc(url) +
+    '" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">';
+}
+
+function itemById(id) {
+  if (!id) return null;
+  return (cache.items || []).find(item => item && item.id === id) || null;
+}
+
+function hydrateItemThumbs(root) {
+  const scope = root || document;
+  if (!scope || !scope.querySelectorAll) return;
+
+  scope.querySelectorAll('.item-row[data-id]').forEach(row => {
+    if (row.getAttribute('data-thumb-hydrated') === '1') return;
+    const item = itemById(row.getAttribute('data-id'));
+    const url = itemImageUrl(item);
+    if (!url) return;
+    const img = document.createElement('img');
+    img.className = 'item-thumb small';
+    img.src = url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.onerror = function(){ this.style.display = 'none'; };
+    row.classList.add('with-thumb');
+    row.insertBefore(img, row.firstChild);
+    row.setAttribute('data-thumb-hydrated', '1');
+  });
+
+  scope.querySelectorAll('.bm-card[data-id]').forEach(card => {
+    if (card.getAttribute('data-thumb-hydrated') === '1') return;
+    const item = itemById(card.getAttribute('data-id'));
+    const url = itemImageUrl(item);
+    if (!url) return;
+    const img = document.createElement('img');
+    img.className = 'item-thumb bm-thumb';
+    img.src = url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.onerror = function(){ this.style.display = 'none'; };
+    const star = card.querySelector('.bm-star');
+    if (star && star.nextSibling) card.insertBefore(img, star.nextSibling);
+    else card.insertBefore(img, card.firstChild);
+    card.setAttribute('data-thumb-hydrated', '1');
+  });
+}
+
+function startItemThumbHydrator() {
+  try {
+    hydrateItemThumbs(document);
+    if (!('MutationObserver' in window)) return;
+    const ids = ['search-results', 'bm-grid'];
+    ids.forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      const obs = new MutationObserver(() => {
+        try { hydrateItemThumbs(el); } catch (_) {}
+      });
+      obs.observe(el, { childList:true, subtree:true });
+    });
+  } catch (_) {}
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startItemThumbHydrator);
+} else {
+  startItemThumbHydrator();
+}
+// BARBACK_ITEM_THUMBNAILS_UI_END
 
 // BARBACK_BARTENDER_BAR_LABELS_UI_START
 function barDisplayLabel(bar) {
