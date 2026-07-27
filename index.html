@@ -1887,9 +1887,20 @@ th.sortable span { font-size:10px; }
           <option>REQUEST</option><option>DELIVERED</option><option>RETURNED</option><option>ADJUSTMENT</option>
         </select>
       </div>
+      <div class="fbar" id="event-review-toolbar" style="align-items:center;">
+        <button class="btn btn-ghost btn-sm" onclick="eventReviewSelectPage()">Select Page</button>
+        <button class="btn btn-ghost btn-sm" onclick="eventReviewSelectAllMatching()">Select All Matching</button>
+        <button class="btn btn-ghost btn-sm" onclick="eventReviewClearSelection()">Clear</button>
+        <span id="event-review-selection" style="font-size:12px;color:var(--muted);">No Events selected</span>
+        <button class="btn btn-a2 btn-sm" id="event-review-approve" onclick="eventReviewSubmit('APPROVED')" disabled>✓ Approve</button>
+        <button class="btn btn-danger btn-sm" id="event-review-reject" onclick="eventReviewSubmit('REJECTED')" disabled>✗ Reject</button>
+        <button class="btn btn-ghost btn-sm" id="event-review-resume" onclick="eventReviewResumeJob()">Resume Job</button>
+        <button class="btn btn-ghost btn-sm" id="event-review-retry" onclick="eventReviewRetryJob()">Retry Failures</button>
+      </div>
+      <div id="event-review-job" style="display:none;margin:0 0 12px 0;padding:10px;border:1px solid var(--border);background:var(--s1);font-size:12px;color:var(--muted);"></div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Time</th><th>By</th><th>Action</th><th>Item</th><th>Bar / Station</th><th>Qty</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="width:34px;"></th><th>Time</th><th>By</th><th>Action</th><th>Item</th><th>Bar / Station</th><th>Qty</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="events-tbody"></tbody>
         </table>
       </div>
@@ -2861,6 +2872,18 @@ let SESSION = {
   scannerInterval: null,
   modalCb: null,
   cache: { bars:[], stations:[], items:[], staff:[], nights:[], placements:[] }
+};
+
+const EVENT_REVIEW_DIRECT_THRESHOLD = 1000;
+const EVENT_REVIEW_JOB_BATCH_SIZE = 500;
+let EVENT_REVIEW = {
+  rows: [],
+  filterKey: '',
+  selectedIds: new Set(),
+  allMatching: false,
+  allMatchingTotal: 0,
+  filters: null,
+  activeJobId: null,
 };
 
 let OFFLINE_QUEUE = []; // fallback in-memory queue
@@ -5190,10 +5213,29 @@ async function loadEvents() {
   if (av) q = q.eq('action', av);
 
   const { data: events, error } = await q;
+  const filters = eventReviewCurrentFilters();
+  const filterKey = eventReviewFilterKey(filters);
+  if (EVENT_REVIEW.filterKey && EVENT_REVIEW.filterKey !== filterKey) {
+    eventReviewClearSelection(true);
+  }
+  EVENT_REVIEW.rows = events || [];
+  EVENT_REVIEW.filters = filters;
+  EVENT_REVIEW.filterKey = filterKey;
+  if (!EVENT_REVIEW.allMatching) {
+    const pendingPageIds = new Set(
+      EVENT_REVIEW.rows
+        .filter(e => e.status === 'PENDING')
+        .map(e => e.id)
+    );
+    EVENT_REVIEW.selectedIds = new Set(
+      [...EVENT_REVIEW.selectedIds].filter(id => pendingPageIds.has(id))
+    );
+  }
 
   const tbody = document.getElementById('events-tbody');
   if (!events?.length) {
-    tbody.innerHTML = '<tr><td colspan="8"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events</div></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events</div></div></td></tr>';
+    eventReviewUpdateToolbar();
     return;
   }
 
@@ -5203,7 +5245,10 @@ async function loadEvents() {
     const isCase = e.items?.unit === 'case';
     const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
     const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
+    const canSelect = e.status === 'PENDING' && !EVENT_REVIEW.allMatching;
+    const checked = EVENT_REVIEW.selectedIds.has(e.id) ? ' checked' : '';
     return `<tr>
+      <td>${canSelect ? `<input type="checkbox" class="event-review-cb" value="${esc(e.id)}" onchange="eventReviewTogglePageItem(this)"${checked}>` : ''}</td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}<br><span style="color:var(--muted)">${date}</span></td>
       <td>${esc(e.submitted_by)}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
@@ -5213,19 +5258,508 @@ async function loadEvents() {
       <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
-          ${e.status !== 'APPROVED' ? `<button class="btn btn-a2 btn-xs" onclick="setStatus('${e.id}','APPROVED')">✓</button>` : ''}
-          ${e.status !== 'REJECTED' ? `<button class="btn btn-danger btn-xs" onclick="setStatus('${e.id}','REJECTED')">✗</button>` : ''}
+          ${e.status === 'PENDING' ? `<button class="btn btn-a2 btn-xs" onclick="setStatus('${e.id}','APPROVED')">✓</button>` : ''}
+          ${e.status === 'PENDING' ? `<button class="btn btn-danger btn-xs" onclick="setStatus('${e.id}','REJECTED')">✗</button>` : ''}
         </div>
       </td>
     </tr>`;
   }).join('');
+  eventReviewUpdateToolbar();
 }
 
 async function setStatus(id, status) {
-  const { error } = await SB.from('events').update({ status }).eq('id', id);
-  if (error) { toast(error.message, 't-err'); return; }
-  toast('Updated to ' + status, 't-ok');
-  loadEvents();
+  let reason = null;
+
+  if (status === 'REJECTED') {
+    reason = prompt('Rejection reason:', '');
+
+    if (reason == null) return;
+
+    reason = reason.trim();
+
+    if (!reason) {
+      toast('A rejection reason is required.', 't-err');
+      return;
+    }
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_review_events',
+    {
+      p_venue_id: SESSION.venueId,
+      p_target_status: status,
+      p_event_ids: [id],
+      p_night_id: null,
+      p_bar_id: null,
+      p_action: null,
+      p_staff_id: null,
+      p_reason: reason,
+    }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Review action failed'), 't-err');
+    return;
+  }
+
+  const updated = Number(data?.updated || 0);
+
+  if (!updated) {
+    toast(
+      'Event was already processed or is outside your Venue.',
+      't-err'
+    );
+    await loadEvents();
+    return;
+  }
+
+  toast(
+    status === 'APPROVED'
+      ? 'Event accepted'
+      : 'Event rejected',
+    't-ok'
+  );
+
+  await loadEvents();
+}
+
+function eventReviewCurrentFilters() {
+  return {
+    venueId: SESSION.venueId || null,
+    nightId: document.getElementById('ef-night')?.value || null,
+    barId: document.getElementById('ef-bar')?.value || null,
+    status: document.getElementById('ef-status')?.value || '',
+    action: document.getElementById('ef-action')?.value || null,
+  };
+}
+
+function eventReviewFilterKey(filters = eventReviewCurrentFilters()) {
+  return JSON.stringify(filters);
+}
+
+function eventReviewJobStorageKey() {
+  return 'barinv_event_review_job_v1:' + (SESSION.venueId || 'none');
+}
+
+function eventReviewSafeError(error, fallback) {
+  let msg = String(error?.message || error?.details || fallback || 'Action failed');
+  msg = msg.split('\n')[0].trim();
+  if (/password|secret|token|api[-_ ]?key|authorization|bearer|jwt/i.test(msg)) {
+    return fallback || 'Action failed';
+  }
+  return msg.length > 180 ? msg.slice(0, 177) + '...' : msg;
+}
+
+function eventReviewDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function eventReviewLoadStoredJobId() {
+  try {
+    const raw = localStorage.getItem(eventReviewJobStorageKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.venue_id === SESSION.venueId && parsed.job_id) {
+      return parsed.job_id;
+    }
+  } catch {}
+  return null;
+}
+
+function eventReviewSaveJobId(jobId) {
+  EVENT_REVIEW.activeJobId = jobId || null;
+  if (!jobId) return;
+  try {
+    localStorage.setItem(
+      eventReviewJobStorageKey(),
+      JSON.stringify({
+        job_id: jobId,
+        venue_id: SESSION.venueId,
+        saved_at: new Date().toISOString(),
+      })
+    );
+  } catch {}
+}
+
+function eventReviewSelectionCount() {
+  return EVENT_REVIEW.allMatching
+    ? EVENT_REVIEW.allMatchingTotal
+    : EVENT_REVIEW.selectedIds.size;
+}
+
+function eventReviewSyncCheckboxes() {
+  document.querySelectorAll('.event-review-cb').forEach(cb => {
+    cb.checked = EVENT_REVIEW.selectedIds.has(cb.value);
+  });
+}
+
+function eventReviewUpdateToolbar() {
+  const label = document.getElementById('event-review-selection');
+  const approve = document.getElementById('event-review-approve');
+  const reject = document.getElementById('event-review-reject');
+  const resume = document.getElementById('event-review-resume');
+  const retry = document.getElementById('event-review-retry');
+  const count = eventReviewSelectionCount();
+  const storedJobId = EVENT_REVIEW.activeJobId || eventReviewLoadStoredJobId();
+
+  if (label) {
+    if (EVENT_REVIEW.allMatching) {
+      label.textContent = `${count} matching PENDING Event${count === 1 ? '' : 's'} selected`;
+    } else if (count) {
+      label.textContent = `${count} page Event${count === 1 ? '' : 's'} selected`;
+    } else {
+      label.textContent = 'No Events selected';
+    }
+  }
+
+  if (approve) approve.disabled = count <= 0;
+  if (reject) reject.disabled = count <= 0;
+  if (resume) resume.disabled = !storedJobId;
+  if (retry) retry.disabled = !storedJobId;
+}
+
+function eventReviewClearSelection(silent = false) {
+  EVENT_REVIEW.selectedIds.clear();
+  EVENT_REVIEW.allMatching = false;
+  EVENT_REVIEW.allMatchingTotal = 0;
+  EVENT_REVIEW.filters = eventReviewCurrentFilters();
+  EVENT_REVIEW.filterKey = eventReviewFilterKey(EVENT_REVIEW.filters);
+  eventReviewSyncCheckboxes();
+  eventReviewUpdateToolbar();
+  if (!silent) toast('Selection cleared', 't-info');
+}
+
+function eventReviewTogglePageItem(cb) {
+  const id = cb?.value;
+  if (!id) return;
+  EVENT_REVIEW.allMatching = false;
+  EVENT_REVIEW.allMatchingTotal = 0;
+  EVENT_REVIEW.filters = eventReviewCurrentFilters();
+  EVENT_REVIEW.filterKey = eventReviewFilterKey(EVENT_REVIEW.filters);
+  if (cb.checked) EVENT_REVIEW.selectedIds.add(id);
+  else EVENT_REVIEW.selectedIds.delete(id);
+  eventReviewUpdateToolbar();
+}
+
+function eventReviewSelectPage() {
+  const pendingIds = EVENT_REVIEW.rows
+    .filter(e => e.status === 'PENDING')
+    .map(e => e.id);
+
+  if (!pendingIds.length) {
+    toast('No PENDING Events on this page', 't-info');
+    return;
+  }
+
+  EVENT_REVIEW.allMatching = false;
+  EVENT_REVIEW.allMatchingTotal = 0;
+  EVENT_REVIEW.filters = eventReviewCurrentFilters();
+  EVENT_REVIEW.filterKey = eventReviewFilterKey(EVENT_REVIEW.filters);
+  EVENT_REVIEW.selectedIds = new Set(pendingIds);
+  eventReviewSyncCheckboxes();
+  eventReviewUpdateToolbar();
+}
+
+async function eventReviewSelectAllMatching() {
+  const filters = eventReviewCurrentFilters();
+  if (!filters.venueId) {
+    toast('Choose a Venue before reviewing Events', 't-err');
+    return;
+  }
+  if (!filters.nightId) {
+    toast('Choose a Night before Select All Matching', 't-err');
+    return;
+  }
+  if (filters.status && filters.status !== 'PENDING') {
+    toast('Select All Matching only reviews PENDING Events', 't-err');
+    return;
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_preview_event_review',
+    {
+      p_venue_id: filters.venueId,
+      p_event_ids: null,
+      p_night_id: filters.nightId,
+      p_bar_id: filters.barId,
+      p_action: filters.action,
+      p_staff_id: null,
+    }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Preview failed'), 't-err');
+    return;
+  }
+
+  const total = Number(data?.total || 0);
+  if (total <= 0) {
+    toast('No matching PENDING Events', 't-info');
+    return;
+  }
+
+  EVENT_REVIEW.selectedIds.clear();
+  EVENT_REVIEW.allMatching = true;
+  EVENT_REVIEW.allMatchingTotal = total;
+  EVENT_REVIEW.filters = filters;
+  EVENT_REVIEW.filterKey = eventReviewFilterKey(filters);
+  eventReviewSyncCheckboxes();
+  eventReviewUpdateToolbar();
+}
+
+function eventReviewBuildSelection() {
+  const currentFilters = eventReviewCurrentFilters();
+  const currentKey = eventReviewFilterKey(currentFilters);
+  if (EVENT_REVIEW.filterKey && EVENT_REVIEW.filterKey !== currentKey) {
+    eventReviewClearSelection(true);
+    toast('Filters changed; select Events again', 't-err');
+    return null;
+  }
+
+  const filters = EVENT_REVIEW.filters || currentFilters;
+  if (EVENT_REVIEW.allMatching) {
+    if (!filters.nightId) {
+      toast('Choose a Night before reviewing all matching Events', 't-err');
+      return null;
+    }
+    return {
+      allMatching: true,
+      filters,
+      eventIds: null,
+      count: EVENT_REVIEW.allMatchingTotal,
+    };
+  }
+
+  const eventIds = [...EVENT_REVIEW.selectedIds];
+  if (!eventIds.length) {
+    toast('Select PENDING Events first', 't-info');
+    return null;
+  }
+  if (eventIds.length > 1 && !filters.nightId) {
+    toast('Choose a Night before reviewing multiple Events', 't-err');
+    return null;
+  }
+
+  return {
+    allMatching: false,
+    filters,
+    eventIds,
+    count: eventIds.length,
+  };
+}
+
+async function eventReviewSubmit(status) {
+  if (status !== 'APPROVED' && status !== 'REJECTED') return;
+
+  const selection = eventReviewBuildSelection();
+  if (!selection) return;
+
+  let reason = null;
+  if (status === 'REJECTED') {
+    reason = prompt('Common rejection reason:', '');
+    if (reason == null) return;
+    reason = reason.trim();
+    if (!reason) {
+      toast('A rejection reason is required.', 't-err');
+      return;
+    }
+  }
+
+  if (selection.count > EVENT_REVIEW_DIRECT_THRESHOLD) {
+    await eventReviewCreateJob(selection, status, reason);
+    return;
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_review_events',
+    {
+      p_venue_id: selection.filters.venueId,
+      p_target_status: status,
+      p_event_ids: selection.eventIds,
+      p_night_id: selection.filters.nightId,
+      p_bar_id: selection.filters.barId,
+      p_action: selection.filters.action,
+      p_staff_id: null,
+      p_reason: reason,
+    }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Review action failed'), 't-err');
+    return;
+  }
+
+  const updated = Number(data?.updated || 0);
+  eventReviewClearSelection(true);
+  toast(
+    `${updated} Event${updated === 1 ? '' : 's'} ${status === 'APPROVED' ? 'approved' : 'rejected'}`,
+    updated ? 't-ok' : 't-info'
+  );
+  await loadEvents();
+}
+
+async function eventReviewCreateJob(selection, status, reason) {
+  const { data, error } = await SB.rpc(
+    'barinv_create_event_review_job',
+    {
+      p_venue_id: selection.filters.venueId,
+      p_target_status: status,
+      p_event_ids: selection.eventIds,
+      p_night_id: selection.filters.nightId,
+      p_bar_id: selection.filters.barId,
+      p_action: selection.filters.action,
+      p_staff_id: null,
+      p_reason: reason,
+    }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Could not create review job'), 't-err');
+    return;
+  }
+
+  const jobId = data?.job_id;
+  if (!jobId) {
+    toast('Review job did not return an ID', 't-err');
+    return;
+  }
+
+  eventReviewSaveJobId(jobId);
+  eventReviewClearSelection(true);
+  eventReviewRenderJob(data);
+  toast('Review job queued', 't-ok');
+  await eventReviewProcessJob(jobId);
+}
+
+function eventReviewRenderJob(job) {
+  const el = document.getElementById('event-review-job');
+  if (!el || !job) return;
+
+  const total = Number(job.total || 0);
+  const processed = Number(job.processed || 0);
+  const updated = Number(job.updated || 0);
+  const skipped = Number(job.skipped || 0);
+  const failed = Number(job.failed || 0);
+  const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+  const status = String(job.status || 'queued');
+  const jobId = String(job.job_id || EVENT_REVIEW.activeJobId || '');
+  const shortId = jobId ? jobId.slice(0, 8) : 'pending';
+
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <b style="color:var(--text);">Review Job ${esc(shortId)}</b>
+      <span class="badge b-${status === 'completed' ? 'approved' : failed ? 'rejected' : 'pending'}">${esc(status)}</span>
+      <span>${processed}/${total} processed · ${updated} updated · ${skipped} skipped · ${failed} failed</span>
+      <span style="font-family:'Fira Mono',monospace;">${pct}%</span>
+    </div>
+  `;
+}
+
+async function eventReviewRefreshJob(jobId) {
+  const id = jobId || EVENT_REVIEW.activeJobId || eventReviewLoadStoredJobId();
+  if (!id) {
+    toast('No review job to resume', 't-info');
+    return null;
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_get_event_review_job',
+    { p_job_id: id }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Could not read review job'), 't-err');
+    return null;
+  }
+
+  eventReviewSaveJobId(id);
+  eventReviewRenderJob(data);
+  eventReviewUpdateToolbar();
+  return data;
+}
+
+async function eventReviewProcessJob(jobId) {
+  const id = jobId || EVENT_REVIEW.activeJobId || eventReviewLoadStoredJobId();
+  if (!id) {
+    toast('No review job to process', 't-info');
+    return;
+  }
+
+  eventReviewSaveJobId(id);
+
+  for (let i = 0; i < 1000; i++) {
+    const { data, error } = await SB.rpc(
+      'barinv_process_event_review_job',
+      {
+        p_job_id: id,
+        p_batch_size: EVENT_REVIEW_JOB_BATCH_SIZE,
+      }
+    );
+
+    if (error) {
+      toast(eventReviewSafeError(error, 'Review job paused'), 't-err');
+      await eventReviewRefreshJob(id);
+      return;
+    }
+
+    eventReviewRenderJob(data);
+
+    if (['completed', 'completed_with_errors', 'cancelled', 'failed'].includes(data?.status)) {
+      if (data.status === 'completed') {
+        toast('Review job completed', 't-ok');
+      } else if (data.status === 'completed_with_errors') {
+        toast('Review job has failed items', 't-warn');
+      }
+      await loadEvents();
+      return;
+    }
+
+    await eventReviewDelay(75);
+  }
+
+  toast('Review job is still running; resume again to continue', 't-warn');
+}
+
+async function eventReviewResumeJob() {
+  const job = await eventReviewRefreshJob();
+  if (!job) return;
+  if (job.status === 'completed') {
+    toast('Review job already completed', 't-info');
+    return;
+  }
+  if (job.status === 'completed_with_errors') {
+    toast('Review job has failed items; use Retry Failures', 't-warn');
+    return;
+  }
+  await eventReviewProcessJob(job.job_id);
+}
+
+async function eventReviewRetryJob() {
+  const id = EVENT_REVIEW.activeJobId || eventReviewLoadStoredJobId();
+  if (!id) {
+    toast('No review job to retry', 't-info');
+    return;
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_retry_event_review_job_failures',
+    { p_job_id: id }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'Retry failed'), 't-err');
+    return;
+  }
+
+  eventReviewRenderJob(data);
+  if (Number(data?.requeued || 0) <= 0) {
+    toast('No failed Events to retry', 't-info');
+    return;
+  }
+
+  toast(`${data.requeued} failed Event${data.requeued === 1 ? '' : 's'} requeued`, 't-ok');
+  await eventReviewProcessJob(id);
 }
 
 // ══════════════════════════════════════════════════════

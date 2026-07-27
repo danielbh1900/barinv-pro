@@ -98,7 +98,7 @@ Deno.serve(async (req: Request) => {
   );
   let query = svc.from("barback_sessions")
     .select(
-      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, revoked_at, pilot_mode, rehearsal_mode, opening_par_config",
+      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, revoked_at, pilot_mode, rehearsal_mode, opening_par_config, auto_approve_events",
     )
     .eq("venue_id", body.venue_id)
     .order("issued_at", { ascending: false })
@@ -227,6 +227,7 @@ Deno.serve(async (req: Request) => {
       },
       pilot_mode: row.pilot_mode === true,
       rehearsal_mode: row.rehearsal_mode === true,
+      auto_approve_events: row.auto_approve_events === true,
     };
   });
 
