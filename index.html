@@ -1897,7 +1897,17 @@ th.sortable span { font-size:10px; }
         <button class="btn btn-ghost btn-sm" id="event-review-resume" onclick="eventReviewResumeJob()">Resume Job</button>
         <button class="btn btn-ghost btn-sm" id="event-review-retry" onclick="eventReviewRetryJob()">Retry Failures</button>
       </div>
+      <div class="fbar" id="event-csv-toolbar" style="align-items:center;">
+        <button class="btn btn-ghost btn-sm" onclick="eventCsvExportSelected()">Export Selected</button>
+        <button class="btn btn-ghost btn-sm" onclick="eventCsvExportCurrentPage()">Export Current Page</button>
+        <button class="btn btn-ghost btn-sm" onclick="eventCsvExportAllMatching()">Export All Matching</button>
+        <button class="btn btn-ghost btn-sm" onclick="eventCsvDownloadTemplate()">Download CSV Template</button>
+        <button class="btn btn-a btn-sm" onclick="document.getElementById('event-csv-import-file').click()">Import CSV</button>
+        <input type="file" id="event-csv-import-file" accept=".csv,text/csv" style="display:none" onchange="eventCsvImportFileSelected()">
+        <span id="event-csv-status" style="font-size:12px;color:var(--muted);">Choose a Night before CSV import or all-matching export</span>
+      </div>
       <div id="event-review-job" style="display:none;margin:0 0 12px 0;padding:10px;border:1px solid var(--border);background:var(--s1);font-size:12px;color:var(--muted);"></div>
+      <div id="event-csv-import-panel" style="display:none;margin:0 0 12px 0;padding:10px;border:1px solid var(--border);background:var(--s1);font-size:12px;color:var(--muted);"></div>
       <div class="tbl-wrap">
         <table>
           <thead><tr><th style="width:34px;"></th><th>Time</th><th>By</th><th>Action</th><th>Item</th><th>Bar / Station</th><th>Qty</th><th>Status</th><th>Actions</th></tr></thead>
@@ -2884,6 +2894,34 @@ let EVENT_REVIEW = {
   allMatchingTotal: 0,
   filters: null,
   activeJobId: null,
+};
+
+const EVENT_CSV_MAX_IMPORT_ROWS = 5000;
+const EVENT_CSV_BATCH_SIZE = 500;
+const EVENT_CSV_EXPORT_PAGE_SIZE = 500;
+const EVENT_CSV_IMPORT_HEADERS = [
+  'client_event_id',
+  'bar_id',
+  'bar_name',
+  'station_id',
+  'station_name',
+  'item_id',
+  'item_name',
+  'action',
+  'qty',
+  'qty_basis',
+  'reason_code',
+  'notes',
+  'submitted_by',
+  'staff_id',
+  'staff_name',
+  'session_id'
+];
+let EVENT_CSV_IMPORT = {
+  activeBatchId: null,
+  preview: null,
+  fileRows: [],
+  filterKey: '',
 };
 
 let OFFLINE_QUEUE = []; // fallback in-memory queue
@@ -5218,6 +5256,13 @@ async function loadEvents() {
   if (EVENT_REVIEW.filterKey && EVENT_REVIEW.filterKey !== filterKey) {
     eventReviewClearSelection(true);
   }
+  if (EVENT_CSV_IMPORT.filterKey && EVENT_CSV_IMPORT.filterKey !== filterKey) {
+    EVENT_CSV_IMPORT.preview = null;
+    EVENT_CSV_IMPORT.fileRows = [];
+    EVENT_CSV_IMPORT.filterKey = '';
+    eventCsvDismissImportPanel();
+    eventCsvSetStatus('Filters changed; CSV preview cleared');
+  }
   EVENT_REVIEW.rows = events || [];
   EVENT_REVIEW.filters = filters;
   EVENT_REVIEW.filterKey = filterKey;
@@ -5236,6 +5281,7 @@ async function loadEvents() {
   if (!events?.length) {
     tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events</div></div></td></tr>';
     eventReviewUpdateToolbar();
+    eventCsvRenderStoredImportHint();
     return;
   }
 
@@ -5265,6 +5311,7 @@ async function loadEvents() {
     </tr>`;
   }).join('');
   eventReviewUpdateToolbar();
+  eventCsvRenderStoredImportHint();
 }
 
 async function setStatus(id, status) {
@@ -5760,6 +5807,683 @@ async function eventReviewRetryJob() {
 
   toast(`${data.requeued} failed Event${data.requeued === 1 ? '' : 's'} requeued`, 't-ok');
   await eventReviewProcessJob(id);
+}
+
+// ══════════════════════════════════════════════════════
+// EVENTS CSV IMPORT / EXPORT
+// ══════════════════════════════════════════════════════
+function eventCsvSetStatus(msg, type = 'info') {
+  const el = document.getElementById('event-csv-status');
+  if (el) {
+    el.textContent = msg;
+    el.style.color = type === 'error'
+      ? '#ff8f8f'
+      : type === 'ok'
+        ? 'var(--a2)'
+        : 'var(--muted)';
+  }
+}
+
+function eventCsvRequireNight() {
+  const filters = eventReviewCurrentFilters();
+  if (!filters.venueId) {
+    toast('Choose a Venue before using Events CSV', 't-err');
+    eventCsvSetStatus('Choose a Venue before using Events CSV', 'error');
+    return null;
+  }
+  if (!filters.nightId) {
+    toast('Choose a Night before using Events CSV', 't-err');
+    eventCsvSetStatus('Choose a Night before CSV import or all-matching export', 'error');
+    return null;
+  }
+  return filters;
+}
+
+function eventCsvImportStorageKey() {
+  return 'barinv_event_csv_import_v1:' + (SESSION.venueId || 'none');
+}
+
+function eventCsvSaveBatchId(batchId, filters = eventReviewCurrentFilters()) {
+  EVENT_CSV_IMPORT.activeBatchId = batchId || null;
+  if (!batchId) return;
+  try {
+    localStorage.setItem(
+      eventCsvImportStorageKey(),
+      JSON.stringify({
+        batch_id: batchId,
+        venue_id: filters.venueId,
+        night_id: filters.nightId,
+        saved_at: new Date().toISOString(),
+      })
+    );
+  } catch {}
+}
+
+function eventCsvClearStoredBatchId() {
+  EVENT_CSV_IMPORT.activeBatchId = null;
+  try {
+    localStorage.removeItem(eventCsvImportStorageKey());
+  } catch {}
+}
+
+function eventCsvLoadStoredBatchId() {
+  try {
+    const raw = localStorage.getItem(eventCsvImportStorageKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.venue_id === SESSION.venueId && parsed.batch_id) {
+      return parsed.batch_id;
+    }
+  } catch {}
+  return null;
+}
+
+function eventCsvRenderStoredImportHint() {
+  const batchId = EVENT_CSV_IMPORT.activeBatchId || eventCsvLoadStoredBatchId();
+  const panel = document.getElementById('event-csv-import-panel');
+  if (!panel || !batchId || EVENT_CSV_IMPORT.preview) return;
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <b style="color:var(--text);">CSV Import ${esc(batchId.slice(0, 8))}</b>
+      <span>Saved import progress is available.</span>
+      <button class="btn btn-ghost btn-xs" onclick="eventCsvResumeImport()">Resume</button>
+      <button class="btn btn-ghost btn-xs" onclick="eventCsvDismissImportPanel()">Dismiss</button>
+    </div>
+  `;
+}
+
+function eventCsvDismissImportPanel() {
+  EVENT_CSV_IMPORT.preview = null;
+  const panel = document.getElementById('event-csv-import-panel');
+  if (panel) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+  }
+}
+
+function eventCsvSafeCell(value) {
+  let s = value == null ? '' : String(value);
+  if (/^\s*[=+\-@]/.test(s)) s = "'" + s;
+  return s;
+}
+
+function eventCsvQuote(value) {
+  return '"' + eventCsvSafeCell(value).replace(/"/g, '""') + '"';
+}
+
+function eventCsvDownload(filename, rows) {
+  const csv = '\uFEFF' + rows.map(row => row.map(eventCsvQuote).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename.endsWith('.csv') ? filename : filename + '.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function eventCsvTimestampSlug() {
+  return new Date().toISOString().replace(/[:.]/g, '').slice(0, 15) + 'Z';
+}
+
+function eventCsvFileScopeSlug(scope, filters) {
+  const night = (SESSION.cache.nights || []).find(n => n.id === filters.nightId);
+  const nightPart = String(night?.name || filters.nightId || 'night')
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+    .toLowerCase() || 'night';
+  return `${nightPart}-${scope}-${eventCsvTimestampSlug()}`;
+}
+
+function eventCsvHeaders() {
+  return [
+    'event_id',
+    'created_at',
+    'venue_id',
+    'venue_name',
+    'night_id',
+    'night_name',
+    'bar_id',
+    'bar_name',
+    'station_id',
+    'station_name',
+    'item_id',
+    'item_name',
+    'action',
+    'qty',
+    'status',
+    'reason_code',
+    'qty_basis',
+    'notes',
+    'submitted_by',
+    'staff_id',
+    'staff_name',
+    'session_id',
+    'source',
+    'client_event_id'
+  ];
+}
+
+function eventCsvFormatExportValue(row, column) {
+  if (column === 'created_at' && row[column]) {
+    const d = new Date(row[column]);
+    return Number.isNaN(d.getTime()) ? String(row[column]) : d.toISOString();
+  }
+  return row[column] == null ? '' : String(row[column]);
+}
+
+function eventCsvBuildRows(events) {
+  const headers = eventCsvHeaders();
+  return [
+    headers,
+    ...events.map(row => headers.map(column => eventCsvFormatExportValue(row, column)))
+  ];
+}
+
+async function eventCsvFetchExportPage(filters, eventIds, offset) {
+  const { data, error } = await SB.rpc(
+    'barinv_export_events_csv_page',
+    {
+      p_venue_id: filters.venueId,
+      p_night_id: filters.nightId,
+      p_bar_id: filters.barId || null,
+      p_status: filters.status || null,
+      p_action: filters.action || null,
+      p_event_ids: eventIds || null,
+      p_limit: EVENT_CSV_EXPORT_PAGE_SIZE,
+      p_offset: offset,
+    }
+  );
+
+  if (error) throw error;
+  return data || { total_rows: 0, rows: [] };
+}
+
+async function eventCsvExportServerRows(scope, filters, eventIds = null) {
+  try {
+    eventCsvSetStatus('Counting matching Events...');
+    const rows = [];
+    let total = null;
+    let offset = 0;
+
+    for (let i = 0; i < 20000; i++) {
+      const page = await eventCsvFetchExportPage(filters, eventIds, offset);
+      const pageRows = Array.isArray(page.rows) ? page.rows : [];
+      if (total == null) {
+        total = Number(page.total_rows || 0);
+        eventCsvSetStatus(`${total} matching row${total === 1 ? '' : 's'}`);
+        if (total <= 0) {
+          toast('0 matching rows', 't-info');
+          return;
+        }
+      }
+
+      rows.push(...pageRows);
+      if (rows.length >= total) break;
+      if (!pageRows.length) {
+        throw new Error('CSV export stopped before all matching rows were returned');
+      }
+      offset += pageRows.length;
+    }
+
+    if (rows.length !== total) {
+      throw new Error('CSV export row count changed while exporting; refresh and try again');
+    }
+
+    const filename = `barinv-events-${eventCsvFileScopeSlug(scope, filters)}.csv`;
+    eventCsvDownload(filename, eventCsvBuildRows(rows));
+    eventCsvSetStatus(`${rows.length} row${rows.length === 1 ? '' : 's'} exported`, 'ok');
+    toast(`${rows.length} Event${rows.length === 1 ? '' : 's'} exported`, 't-ok');
+  } catch (error) {
+    toast(eventReviewSafeError(error, 'CSV export failed'), 't-err');
+    eventCsvSetStatus(eventReviewSafeError(error, 'CSV export failed'), 'error');
+  }
+}
+
+async function eventCsvExportSelected() {
+  const filters = eventCsvRequireNight();
+  if (!filters) return;
+  if (EVENT_REVIEW.allMatching) {
+    toast('Use Export All Matching for all-matching selections', 't-info');
+    return;
+  }
+  const ids = [...EVENT_REVIEW.selectedIds];
+  if (!ids.length) {
+    eventCsvSetStatus('0 matching rows');
+    toast('0 matching rows', 't-info');
+    return;
+  }
+  await eventCsvExportServerRows('selected', filters, ids);
+}
+
+async function eventCsvExportCurrentPage() {
+  const filters = eventCsvRequireNight();
+  if (!filters) return;
+  const ids = (EVENT_REVIEW.rows || [])
+    .filter(e => e.venue_id === filters.venueId && e.night_id === filters.nightId)
+    .map(e => e.id);
+  if (!ids.length) {
+    eventCsvSetStatus('0 matching rows');
+    toast('0 matching rows', 't-info');
+    return;
+  }
+  await eventCsvExportServerRows('current-page', filters, ids);
+}
+
+async function eventCsvExportAllMatching() {
+  const filters = eventCsvRequireNight();
+  if (!filters) return;
+  await eventCsvExportServerRows('all-matching', filters, null);
+}
+
+function eventCsvDownloadTemplate() {
+  const filters = eventReviewCurrentFilters();
+  const bars = SESSION.cache.bars || [];
+  const stations = SESSION.cache.stations || [];
+  const items = SESSION.cache.items || [];
+  const staff = SESSION.cache.staff || [];
+  const bar = bars.find(b => b.active !== false) || bars[0] || {};
+  const station = stations.find(s => s.bar_id === bar.id && s.active !== false) || stations[0] || {};
+  const item = items.find(i => i.active !== false) || items[0] || {};
+  const staffRow = staff.find(s => s.active !== false) || staff[0] || {};
+  const rows = [
+    EVENT_CSV_IMPORT_HEADERS,
+    [
+      '',
+      bar.id || '',
+      bar.name || '',
+      station.id || '',
+      station.name || '',
+      item.id || '',
+      item.name || '',
+      'REQUEST',
+      '1',
+      '',
+      '',
+      '',
+      SESSION.user?.email || '',
+      staffRow.id || '',
+      staffRow.name || '',
+      ''
+    ]
+  ];
+  const night = filters.nightId ? 'selected-night' : 'template';
+  eventCsvDownload(`barinv-events-import-${night}.csv`, rows);
+  toast('Events CSV template downloaded', 't-ok');
+}
+
+function eventCsvNormalizeHeader(header) {
+  return String(header || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function eventCsvParseRows(text) {
+  const src = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+
+  if (inQuotes) {
+    throw new Error('CSV has an unterminated quoted field');
+  }
+  if (cell.length || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function eventCsvParseText(text) {
+  if (!String(text || '').trim()) {
+    return {
+      empty: true,
+      rows: [],
+      headers: [],
+      message: 'CSV file is empty or whitespace only',
+    };
+  }
+
+  const parsed = eventCsvParseRows(text);
+  const headerIndex = parsed.findIndex(row => row.some(cell => String(cell || '').trim()));
+  if (headerIndex < 0) {
+    return {
+      empty: true,
+      rows: [],
+      headers: [],
+      message: 'CSV file is empty or whitespace only',
+    };
+  }
+
+  const headers = parsed[headerIndex].map(eventCsvNormalizeHeader);
+  const headerSet = new Set();
+  for (const header of headers) {
+    if (!header) continue;
+    if (headerSet.has(header)) {
+      throw new Error(`Duplicate CSV header: ${header}`);
+    }
+    headerSet.add(header);
+  }
+
+  const rows = [];
+  parsed.slice(headerIndex + 1).forEach((raw, idx) => {
+    if (!raw.some(cell => String(cell || '').trim())) return;
+    const row = { _csv_row_number: headerIndex + idx + 2 };
+    headers.forEach((header, cellIdx) => {
+      if (header) row[header] = String(raw[cellIdx] ?? '').trim();
+    });
+    rows.push(row);
+  });
+
+  return { empty: false, rows, headers };
+}
+
+async function eventCsvImportFileSelected() {
+  const input = document.getElementById('event-csv-import-file');
+  const file = input?.files?.[0];
+  if (input) input.value = '';
+  const filters = eventCsvRequireNight();
+  if (!filters) return;
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const parsed = eventCsvParseText(text);
+    if (parsed.empty) {
+      eventCsvSetStatus(parsed.message, 'error');
+      toast(parsed.message, 't-err');
+      return;
+    }
+
+    if (parsed.rows.length > EVENT_CSV_MAX_IMPORT_ROWS) {
+      throw new Error(`CSV imports support at most ${EVENT_CSV_MAX_IMPORT_ROWS} data rows`);
+    }
+
+    EVENT_CSV_IMPORT.fileRows = parsed.rows;
+    EVENT_CSV_IMPORT.filterKey = eventReviewFilterKey(filters);
+
+    if (parsed.rows.length === 0) {
+      EVENT_CSV_IMPORT.preview = {
+        batch_id: null,
+        venue_id: filters.venueId,
+        night_id: filters.nightId,
+        status: 'empty',
+        total_rows: 0,
+        valid_rows: 0,
+        invalid_rows: 0,
+        duplicate_rows: 0,
+        skipped_rows: 0,
+        processed_rows: 0,
+        inserted_rows: 0,
+        failed_rows: 0,
+        queued_rows: 0,
+        processing_rows: 0,
+        process_total: 0,
+        can_confirm: false,
+        action_counts: {},
+        bar_counts: [],
+        station_counts: [],
+        error_rows: [],
+        message: 'No data rows found',
+      };
+      eventCsvRenderImport(EVENT_CSV_IMPORT.preview);
+      eventCsvSetStatus('No data rows found');
+      return;
+    }
+
+    eventCsvSetStatus(`Previewing ${parsed.rows.length} data row${parsed.rows.length === 1 ? '' : 's'}...`);
+    const { data, error } = await SB.rpc(
+      'barinv_create_event_csv_import_batch',
+      {
+        p_venue_id: filters.venueId,
+        p_night_id: filters.nightId,
+        p_rows: parsed.rows,
+        p_original_filename: file.name || null,
+      }
+    );
+
+    if (error) throw error;
+    EVENT_CSV_IMPORT.preview = data;
+    if (data?.batch_id) eventCsvSaveBatchId(data.batch_id, filters);
+    eventCsvRenderImport(data);
+    eventCsvSetStatus(`${Number(data?.valid_rows || 0)} valid row${Number(data?.valid_rows || 0) === 1 ? '' : 's'} ready`);
+  } catch (error) {
+    toast(eventReviewSafeError(error, 'CSV import preview failed'), 't-err');
+    eventCsvSetStatus(eventReviewSafeError(error, 'CSV import preview failed'), 'error');
+  }
+}
+
+function eventCsvCountList(value) {
+  if (!value) return '';
+  if (!Array.isArray(value)) {
+    return Object.entries(value)
+      .map(([key, count]) => `${esc(key)}: ${esc(count)}`)
+      .join(' · ');
+  }
+  return value
+    .map(row => {
+      const label = row.bar_name || row.station_name || row.bar_id || row.station_id || 'Unknown';
+      return `${esc(label)}: ${esc(row.rows)}`;
+    })
+    .join(' · ');
+}
+
+function eventCsvRenderImport(preview) {
+  const panel = document.getElementById('event-csv-import-panel');
+  if (!panel || !preview) return;
+  const total = Number(preview.total_rows || 0);
+  const valid = Number(preview.valid_rows || 0);
+  const invalid = Number(preview.invalid_rows || 0);
+  const dupes = Number(preview.duplicate_rows || 0);
+  const skipped = Number(preview.skipped_rows || 0);
+  const processed = Number(preview.processed_rows || 0);
+  const inserted = Number(preview.inserted_rows || 0);
+  const failed = Number(preview.failed_rows || 0);
+  const processTotal = Number(preview.process_total || valid || 0);
+  const pct = processTotal > 0 ? Math.min(100, Math.round((processed / processTotal) * 100)) : 0;
+  const canConfirm = !!preview.batch_id && !!preview.can_confirm && valid > 0;
+  const errors = Array.isArray(preview.error_rows) ? preview.error_rows : [];
+  const status = String(preview.status || 'previewed');
+  const selectedNight = (SESSION.cache.nights || []).find(n => n.id === preview.night_id);
+  const selectedVenue = SESSION.venueName || preview.venue_id || '';
+
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div style="display:grid;gap:8px;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <b style="color:var(--text);">CSV Import Preview</b>
+        <span class="badge b-${status === 'completed' ? 'approved' : failed ? 'rejected' : 'pending'}">${esc(status)}</span>
+        <span>${processed}/${processTotal} processed · ${inserted} inserted · ${skipped} skipped · ${failed} failed · ${pct}%</span>
+      </div>
+      <div>${total} total · ${valid} valid · ${invalid} invalid · ${dupes} duplicate</div>
+      <div>Venue: ${esc(selectedVenue)} · Night: ${esc(selectedNight?.name || preview.night_id || '')}</div>
+      ${preview.message ? `<div style="color:var(--muted);">${esc(preview.message)}</div>` : ''}
+      ${eventCsvCountList(preview.action_counts) ? `<div>Actions: ${eventCsvCountList(preview.action_counts)}</div>` : ''}
+      ${eventCsvCountList(preview.bar_counts) ? `<div>Bars: ${eventCsvCountList(preview.bar_counts)}</div>` : ''}
+      ${eventCsvCountList(preview.station_counts) ? `<div>Stations: ${eventCsvCountList(preview.station_counts)}</div>` : ''}
+      ${errors.length ? `<div style="max-height:130px;overflow:auto;border:1px solid var(--border);background:var(--s2);padding:8px;font-family:'Fira Mono',monospace;font-size:11px;">${errors.slice(0, 12).map(err => `Row ${esc(err.row?._csv_row_number || err.row_number)} · ${esc(err.validation_code || '')}: ${esc(err.validation_message || '')}`).join('<br>')}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-a btn-xs" onclick="eventCsvConfirmImport()" ${canConfirm ? '' : 'disabled'}>Confirm Import</button>
+        <button class="btn btn-ghost btn-xs" onclick="eventCsvResumeImport()" ${preview.batch_id ? '' : 'disabled'}>Resume</button>
+        <button class="btn btn-ghost btn-xs" onclick="eventCsvRetryImport()" ${preview.batch_id ? '' : 'disabled'}>Retry Failed Rows</button>
+        <button class="btn btn-ghost btn-xs" onclick="eventCsvDownloadErrorCsv()" ${errors.length ? '' : 'disabled'}>Download Error CSV</button>
+        <button class="btn btn-ghost btn-xs" onclick="eventCsvDismissImportPanel()">Close</button>
+      </div>
+    </div>
+  `;
+}
+
+async function eventCsvConfirmImport() {
+  const preview = EVENT_CSV_IMPORT.preview;
+  if (!preview?.batch_id || Number(preview.valid_rows || 0) <= 0) {
+    toast('No valid CSV rows to import', 't-info');
+    return;
+  }
+  if (EVENT_CSV_IMPORT.filterKey && EVENT_CSV_IMPORT.filterKey !== eventReviewFilterKey(eventReviewCurrentFilters())) {
+    toast('Filters changed; preview the CSV again before importing', 't-err');
+    return;
+  }
+  await eventCsvProcessImport(preview.batch_id);
+}
+
+async function eventCsvRefreshImport(batchId) {
+  const id = batchId || EVENT_CSV_IMPORT.activeBatchId || eventCsvLoadStoredBatchId();
+  if (!id) {
+    toast('No CSV import to resume', 't-info');
+    return null;
+  }
+  const { data, error } = await SB.rpc(
+    'barinv_get_event_csv_import_batch',
+    { p_batch_id: id }
+  );
+  if (error) {
+    toast(eventReviewSafeError(error, 'Could not read CSV import'), 't-err');
+    return null;
+  }
+  EVENT_CSV_IMPORT.preview = data;
+  eventCsvSaveBatchId(id);
+  eventCsvRenderImport(data);
+  return data;
+}
+
+async function eventCsvProcessImport(batchId) {
+  const id = batchId || EVENT_CSV_IMPORT.activeBatchId || eventCsvLoadStoredBatchId();
+  if (!id) {
+    toast('No CSV import to process', 't-info');
+    return;
+  }
+
+  eventCsvSaveBatchId(id);
+  for (let i = 0; i < 1000; i++) {
+    const { data, error } = await SB.rpc(
+      'barinv_process_event_csv_import_batch',
+      {
+        p_batch_id: id,
+        p_batch_size: EVENT_CSV_BATCH_SIZE,
+      }
+    );
+
+    if (error) {
+      toast(eventReviewSafeError(error, 'CSV import paused'), 't-err');
+      await eventCsvRefreshImport(id);
+      return;
+    }
+
+    EVENT_CSV_IMPORT.preview = data;
+    eventCsvRenderImport(data);
+
+    if (['completed', 'completed_with_errors', 'cancelled', 'failed'].includes(data?.status)) {
+      if (data.status === 'completed') {
+        toast(`${Number(data.inserted_rows || 0)} Event${Number(data.inserted_rows || 0) === 1 ? '' : 's'} imported as PENDING`, 't-ok');
+        eventCsvClearStoredBatchId();
+      } else if (data.status === 'completed_with_errors') {
+        toast('CSV import completed with rows to review', 't-warn');
+      }
+      eventCsvSetStatus(`${Number(data.inserted_rows || 0)} inserted · ${Number(data.failed_rows || 0)} failed`, data.status === 'completed' ? 'ok' : 'error');
+      await loadEvents();
+      return;
+    }
+
+    await eventReviewDelay(75);
+  }
+
+  toast('CSV import is still running; resume again to continue', 't-warn');
+}
+
+async function eventCsvResumeImport() {
+  const job = await eventCsvRefreshImport();
+  if (!job) return;
+  if (job.status === 'completed') {
+    toast('CSV import already completed', 't-info');
+    return;
+  }
+  if (job.status === 'completed_with_errors' && Number(job.failed_rows || 0) > 0) {
+    toast('CSV import has failed rows; use Retry Failed Rows', 't-warn');
+    return;
+  }
+  await eventCsvProcessImport(job.batch_id);
+}
+
+async function eventCsvRetryImport() {
+  const id = EVENT_CSV_IMPORT.activeBatchId || eventCsvLoadStoredBatchId();
+  if (!id) {
+    toast('No CSV import to retry', 't-info');
+    return;
+  }
+
+  const { data, error } = await SB.rpc(
+    'barinv_retry_event_csv_import_failures',
+    { p_batch_id: id }
+  );
+
+  if (error) {
+    toast(eventReviewSafeError(error, 'CSV retry failed'), 't-err');
+    return;
+  }
+
+  EVENT_CSV_IMPORT.preview = data;
+  eventCsvRenderImport(data);
+  if (Number(data?.requeued || 0) <= 0) {
+    toast('No failed CSV rows to retry', 't-info');
+    return;
+  }
+  toast(`${data.requeued} failed row${data.requeued === 1 ? '' : 's'} requeued`, 't-ok');
+  await eventCsvProcessImport(id);
+}
+
+function eventCsvDownloadErrorCsv() {
+  const preview = EVENT_CSV_IMPORT.preview;
+  const errors = Array.isArray(preview?.error_rows) ? preview.error_rows : [];
+  if (!errors.length) {
+    toast('No CSV row errors to export', 't-info');
+    return;
+  }
+  const rows = [
+    ['original_row_number', 'validation_code', 'validation_message', ...EVENT_CSV_IMPORT_HEADERS],
+    ...errors.map(err => {
+      const raw = err.row || {};
+      return [
+        raw._csv_row_number || err.row_number || '',
+        err.validation_code || '',
+        err.validation_message || '',
+        ...EVENT_CSV_IMPORT_HEADERS.map(header => raw[header] || '')
+      ];
+    })
+  ];
+  eventCsvDownload(`barinv-events-import-errors-${eventCsvTimestampSlug()}.csv`, rows);
+  toast('CSV error file downloaded', 't-ok');
 }
 
 // ══════════════════════════════════════════════════════
