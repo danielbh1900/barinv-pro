@@ -1,0 +1,325 @@
+{
+  "phase": "P0_PHASE0_BACKUP_AND_FREEZE",
+  "date": "2026-07-29",
+  "generated_utc": "2026-07-30T06:48:40.217133+00:00",
+  "result": "PASS",
+  "backup_directory": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806",
+  "source_of_truth": {
+    "audit_commit": "15f5ef2841ef44417a186d0dd227323f43298b4b",
+    "plan_commit": "2f26b7d39215bb79390923c1620c4ebbe2a77f93"
+  },
+  "repositories": {
+    "web": {
+      "branch": "feature/events-csv-import-export-v1",
+      "head": "2f26b7d39215bb79390923c1620c4ebbe2a77f93",
+      "head_tree": "3b77f6e8400bd3e8b9b3c08bd83c89d5f5617991",
+      "tags_at_head": [],
+      "tracked_clean": true,
+      "tracked_status_entries": [],
+      "untracked_count": 2,
+      "bundle": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/web_barback/all_refs.bundle",
+      "bundle_bytes": 68539485,
+      "archive": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/web_barback/head_tracked_tree.tar.gz",
+      "archive_bytes": 637207,
+      "bundle_verified": true
+    },
+    "ios": {
+      "branch": "feature/events-bulk-approval-v1",
+      "head": "37d4cf5788a4607cea874098aad4611ad360848d",
+      "head_tree": "c69e37d81077d11fcd875b4d3bced301f641dcb2",
+      "tags_at_head": [],
+      "tracked_clean": true,
+      "tracked_status_entries": [],
+      "untracked_count": 14,
+      "bundle": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/ios_admin/all_refs.bundle",
+      "bundle_bytes": 2928486,
+      "archive": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/ios_admin/head_tracked_tree.tar.gz",
+      "archive_bytes": 2770508,
+      "bundle_verified": true
+    },
+    "scale_lab": {
+      "branch": "master",
+      "head": "e139f53743c036bde6872f81b41ad88d6a310842",
+      "head_tree": "89dd317ff3bc23ca732d704ff18819d2a396c240",
+      "tags_at_head": [
+        "stable-scale-lab-production-architecture-v1"
+      ],
+      "tracked_clean": false,
+      "tracked_status_entries": [
+        " M README.md",
+        " M package.json",
+        " D tests/bottle-profiles.test.js",
+        " D tests/decode.test.js",
+        " D tests/parser.test.js",
+        " D tests/scale-protocol.test.js",
+        " D tests/scale-queue.test.js",
+        " D tests/scale-registry.test.js",
+        " D tests/stable-weight-engine.test.js",
+        " M www/app.js",
+        " D www/bottleProfiles.js",
+        " M www/index.html",
+        " D www/scaleProtocol.js",
+        " D www/scaleQueue.js",
+        " D www/scaleRegistry.js",
+        " D www/stableWeightEngine.js",
+        " M www/styles.css"
+      ],
+      "untracked_count": 18,
+      "bundle": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/scale_lab/all_refs.bundle",
+      "bundle_bytes": 100682,
+      "archive": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/scale_lab/head_tracked_tree.tar.gz",
+      "archive_bytes": 57163,
+      "bundle_verified": true
+    }
+  },
+  "web": {
+    "live_matches_local": true,
+    "asset_comparison": {
+      "index.html": {
+        "local_sha256": "2e1627e1a8be208677c35d031929430fecf1620e7ab4383bf8e1ec0155c6e50e",
+        "live_sha256": "2e1627e1a8be208677c35d031929430fecf1620e7ab4383bf8e1ec0155c6e50e",
+        "match": true,
+        "local_bytes": 560728,
+        "live_bytes": 560728
+      },
+      "barback.html": {
+        "local_sha256": "201c504db4b00660bacfebbb56487897133af356630ad1bc7c814fc75c71fdc8",
+        "live_sha256": "201c504db4b00660bacfebbb56487897133af356630ad1bc7c814fc75c71fdc8",
+        "match": true,
+        "local_bytes": 440105,
+        "live_bytes": 440105
+      },
+      "barback_manager.html": {
+        "local_sha256": "a89be690688ba680ac8045fc3491da6e486f03b21c89d1b6e7307656970d0787",
+        "live_sha256": "a89be690688ba680ac8045fc3491da6e486f03b21c89d1b6e7307656970d0787",
+        "match": true,
+        "local_bytes": 177578,
+        "live_bytes": 177578
+      }
+    },
+    "github_pages": {
+      "status": "built",
+      "source": {
+        "branch": "main",
+        "path": "/"
+      },
+      "url": "https://danielbh1900.github.io/barinv-pro/"
+    },
+    "open_prs": 0,
+    "remote_branches": 31,
+    "package_files_found": 0
+  },
+  "ios": {
+    "settings": {
+      "bundle_id": [
+        "com.barinv.pro"
+      ],
+      "marketing_version": [
+        "1.0"
+      ],
+      "build_number": [
+        "1"
+      ],
+      "targeted_device_family": [
+        "\"1,2\""
+      ],
+      "deployment_target": [
+        "15.0"
+      ],
+      "supported_platforms": [],
+      "code_sign_style": [
+        "Automatic"
+      ]
+    },
+    "asset_hashes": {
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/www/index.html": "7df9a6f84c676d4b641070edc09a6b1c91b83d3757350d041f61abb180ea7e93",
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/ios/App/App/public/index.html": "7df9a6f84c676d4b641070edc09a6b1c91b83d3757350d041f61abb180ea7e93",
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/www/barback.html": "c6a18cc482bc9c2576a19bbdf18ce5f09f697719a2b900b4e73aef52c1563f7e",
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/ios/App/App/public/barback.html": "c6a18cc482bc9c2576a19bbdf18ce5f09f697719a2b900b4e73aef52c1563f7e",
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/www/barback_manager.html": "e84e2d5927385cb202feefd4be0d3597b91211a0ba3e18696792e8aff29606b7",
+      "/Users/saiedbeikhosseini/BARINV-PRO-IOS-WORK-GITFIX/ios/App/App/public/barback_manager.html": "e84e2d5927385cb202feefd4be0d3597b91211a0ba3e18696792e8aff29606b7"
+    },
+    "source_generated_assets_match": true
+  },
+  "supabase": {
+    "expected_project_ref": "uzommuafouvaerdvirzf",
+    "linked_project_ref": "uzommuafouvaerdvirzf",
+    "project_ref_verified": true,
+    "migration_entries": 92,
+    "migration_drift": false,
+    "deployed_function_count": 20,
+    "db_lint": {
+      "command_exit_code": 0,
+      "known_issue": "public.backfill_night_bars: column reference \"night_id\" is ambiguous"
+    },
+    "schema_inventory_counts": {
+      "functions": 68,
+      "procedures": 0,
+      "policies": 240,
+      "rls_enable": 94,
+      "grants": 442,
+      "triggers": 0
+    },
+    "database_backup_sizes": {
+      "auth_data.sql": 80779,
+      "public_data.sql": 81092300,
+      "public_schema.sql": 397174,
+      "roles.sql": 410,
+      "storage_data.sql": 48426,
+      "supabase_migrations_data.sql": 484366
+    },
+    "before_state": {
+      "source_file": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/db/public_data.sql",
+      "source_file_sha256": "5c0b9e9e88ff4f391072cb47f598a56dd857ada1e524ba3196446e32bc98d27c",
+      "hash_algorithm": "SHA256 over canonical compact JSON; rows sorted by id/created_at; COPY null converted to JSON null",
+      "present_target_tables": [
+        "barback_scale_latest",
+        "barback_sessions",
+        "bars",
+        "event_csv_import_batches",
+        "event_csv_import_rows",
+        "event_review_audit",
+        "event_review_job_items",
+        "event_review_jobs",
+        "events",
+        "night_bars",
+        "night_staff_assignments",
+        "nights",
+        "placements",
+        "staff",
+        "venue_members"
+      ],
+      "missing_target_tables": [],
+      "table_counts": {
+        "barback_scale_latest": 2,
+        "barback_sessions": 83,
+        "bars": 131,
+        "event_csv_import_batches": 0,
+        "event_csv_import_rows": 0,
+        "event_review_audit": 223,
+        "event_review_job_items": 0,
+        "event_review_jobs": 0,
+        "events": 1059,
+        "night_bars": 220,
+        "night_staff_assignments": 108,
+        "nights": 14,
+        "placements": 1148,
+        "staff": 207,
+        "venue_members": 6
+      },
+      "event_status_counts": {
+        "APPROVED": 557,
+        "PENDING": 480,
+        "REJECTED": 22
+      },
+      "event_protected_columns": [
+        "id",
+        "venue_id",
+        "night_id",
+        "bar_id",
+        "station_id",
+        "item_id",
+        "action",
+        "qty",
+        "qty_basis",
+        "source",
+        "staff_id",
+        "session_id",
+        "client_event_id",
+        "submitted_by",
+        "created_at",
+        "status"
+      ],
+      "event_protected_field_hash": "9a16abb261ab1623d99ff056aae091da66d01501b6b54b9f61d34d76dc3f67df",
+      "event_all_column_hash": "b82eb509c4ea2616ad92cfaa70c32d1b1df8f2150a3a2f67c55cdb00f4174249",
+      "event_review_audit_count": 223,
+      "event_review_audit_hash": "40d1820c0c1ac6c9a41f10921b0737dbdca2bec306e4be6142e1205fbeeca173"
+    },
+    "no_mutation_commands_run": true
+  },
+  "website": {
+    "capture_pass": true,
+    "status": {
+      "home": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/",
+        "bytes": 74050,
+        "content_type": "text/html; charset=utf-8"
+      },
+      "features": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/features",
+        "bytes": 49988,
+        "content_type": "text/html; charset=utf-8"
+      },
+      "platform": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/platform",
+        "bytes": 106720,
+        "content_type": "text/html; charset=utf-8"
+      },
+      "privacy": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/privacy",
+        "bytes": 11157,
+        "content_type": "text/html; charset=utf-8"
+      },
+      "terms": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/terms",
+        "bytes": 9756,
+        "content_type": "text/html; charset=utf-8"
+      },
+      "robots": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/robots.txt",
+        "bytes": 1899,
+        "content_type": "text/plain; charset=utf-8"
+      },
+      "sitemap": {
+        "status": 200,
+        "effective_url": "https://barinv.ca/sitemap.xml",
+        "bytes": 721,
+        "content_type": "application/xml"
+      },
+      "privacy-policy": {
+        "status": 404,
+        "effective_url": "https://barinv.ca/privacy-policy.html",
+        "bytes": 1106,
+        "content_type": "text/html; charset=utf-8"
+      }
+    },
+    "metadata_pages": [
+      "features.html",
+      "home.html",
+      "platform.html",
+      "privacy-policy.html",
+      "privacy.html",
+      "terms.html"
+    ],
+    "privacy_policy_html_still_404": true,
+    "canonical_source_gap_remains": true
+  },
+  "scale": {
+    "scale_lab_tracked_clean": false,
+    "dirty_state_preserved": true,
+    "dirty_worktree_archive": "/Volumes/MiniSSD/BARINV_FULL_BACKUPS/BARINV_P0_PHASE0_FREEZE_20260729_230806/git/scale_lab/working_tree_excluding_secrets.tar.gz",
+    "ios_esp32_firmware_files": 8,
+    "ios_scale_test_files": 4,
+    "web_scale_test_files": 0,
+    "scale_lab_test_files": 4,
+    "hardware_connected_or_flashed": false
+  },
+  "validation": {
+    "git_bundles_verified": true,
+    "checksums_verified": true,
+    "all_required_directories_present": true,
+    "product_code_modified": false,
+    "supabase_mutated": false,
+    "push_performed": false,
+    "tag_created": false,
+    "deployment_performed": false,
+    "ios_build_or_signing_change": false
+  },
+  "next_approval": "Owner decisions D1-D8 and separate approval for the first local-only P0 remediation implementation; no fix is authorized by this freeze."
+}
