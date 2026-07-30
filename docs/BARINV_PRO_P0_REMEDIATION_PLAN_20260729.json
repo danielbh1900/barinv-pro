@@ -1,0 +1,469 @@
+{
+  "plan_date": "2026-07-29",
+  "status": "PLANNING_ONLY",
+  "source_audit_commit": "15f5ef2841ef44417a186d0dd227323f43298b4b",
+  "source_files": [
+    "docs/BARINV_PRO_RELEASE_READINESS_AUDIT_20260729.md",
+    "docs/BARINV_PRO_RELEASE_READINESS_AUDIT_20260729.json"
+  ],
+  "p0_count": 9,
+  "app_store_release_allowed": false,
+  "principles": [
+    "forward-only migrations",
+    "isolated tests before Production",
+    "minimal reversible changes",
+    "no data deletion",
+    "no broad rewrite",
+    "separate remote approval per release surface",
+    "no iOS public release until every P0 is verified closed"
+  ],
+  "owner_decisions": [
+    {
+      "id": "D1",
+      "question": "Should scale be included in App Store v1, restricted beta, or disabled/post-launch?",
+      "blocks": ["P0-04", "P0-08"]
+    },
+    {
+      "id": "D2",
+      "question": "Should ESP32 scale remain post-launch/restricted beta only?",
+      "recommended_default": "yes",
+      "blocks": ["P0-08"]
+    },
+    {
+      "id": "D3",
+      "question": "Which Admin operational workflows, if any, may insert immediately APPROVED Events?",
+      "blocks": ["P0-02"]
+    },
+    {
+      "id": "D4",
+      "question": "May staff edit submitted Events; if yes, which fields, statuses, time window, role, and audit rule?",
+      "blocks": ["P0-01"]
+    },
+    {
+      "id": "D5",
+      "question": "Should dynamic iOS backend configuration exist at all?",
+      "recommended_default": "remove from public v1",
+      "blocks": ["P0-06"]
+    },
+    {
+      "id": "D6",
+      "question": "What legal entity and exact privacy, terms, and support URLs/contact should App Store use?",
+      "blocks": ["P0-07", "P0-09"]
+    },
+    {
+      "id": "D7",
+      "question": "Which repository becomes the canonical BARINV.ca source?",
+      "blocks": ["P0-07"]
+    },
+    {
+      "id": "D8",
+      "question": "Should the iOS release merge to protected main or use a protected release branch?",
+      "blocks": ["P0-09"]
+    }
+  ],
+  "phases": [
+    {
+      "number": 0,
+      "name": "Backup and freeze",
+      "findings": ["P0-01", "P0-02", "P0-03", "P0-04", "P0-05", "P0-06", "P0-07", "P0-08", "P0-09"],
+      "exit_gate": "Verified Git/database/site/app/scale backups, checksums, restore guides, baselines, sufficient storage, and owner decisions"
+    },
+    {
+      "number": 1,
+      "name": "Supabase and Event authorization closure",
+      "findings": ["P0-03", "P0-01", "P0-02"],
+      "exit_gate": "Isolated authorization suites pass; migration dry runs contain only approved forward migrations"
+    },
+    {
+      "number": 2,
+      "name": "Barback outbox and Scale Bridge safety",
+      "findings": ["P0-05", "P0-04"],
+      "exit_gate": "No silent outbox loss and no usable untrusted scale payload"
+    },
+    {
+      "number": 3,
+      "name": "iOS backend configuration hardening",
+      "findings": ["P0-06"],
+      "exit_gate": "Arbitrary backend redirects fail in source, built, and installed app"
+    },
+    {
+      "number": 4,
+      "name": "App legal privacy and support pages",
+      "findings": ["P0-07"],
+      "exit_gate": "Owner-approved public app privacy, terms, and support URLs return HTTPS 200"
+    },
+    {
+      "number": 5,
+      "name": "Scale certification or feature gating",
+      "findings": ["P0-08"],
+      "exit_gate": "Supported physical matrix passes or scale is disabled/gated from public v1"
+    },
+    {
+      "number": 6,
+      "name": "iOS release governance",
+      "findings": ["P0-09"],
+      "exit_gate": "Approved branch strategy, unique version/build, reproducible archive evidence, and annotated RC checkpoint"
+    },
+    {
+      "number": 7,
+      "name": "Final retest and release-readiness checkpoint",
+      "findings": ["P0-01", "P0-02", "P0-03", "P0-04", "P0-05", "P0-06", "P0-07", "P0-08", "P0-09"],
+      "exit_gate": "Fresh audit reports P0=0 and every backup/test/physical/release gate passes"
+    }
+  ],
+  "items": [
+    {
+      "id": "P0-03",
+      "sequence": 1,
+      "affected_surface": ["Supabase database"],
+      "root_cause": "Internal backup and prune SECURITY DEFINER functions have broad execute grants and no caller authorization.",
+      "safest_fix": "Revoke PUBLIC, anon, and authenticated execute from every overload; grant only the exact maintenance/service role without changing data or function behavior.",
+      "likely_files": [
+        "supabase/migrations/20260729103000_lock_down_backup_maintenance_functions.sql",
+        "supabase/rollbacks/20260729103000_lock_down_backup_maintenance_functions_ROLLBACK.sql",
+        "supabase/tests/p0_backup_function_grants_local_test.sql"
+      ],
+      "supabase_objects": [
+        "public._do_create_backup(...)",
+        "public._backup_all_venues_daily()",
+        "public.prune_venue_backups(uuid)"
+      ],
+      "tests": [
+        "anon and authenticated execute rejected",
+        "manager wrapper remains Venue-scoped",
+        "maintenance service path works in isolated harness",
+        "ACL, owner, search_path, and row-count assertions"
+      ],
+      "manual_qa": ["supported manager backup wrapper", "documented scheduled maintenance owner"],
+      "backup": ["full DB", "function definitions", "ACL catalog", "backup-table counts and hash"],
+      "rollback": "Do not restore anonymous grants; issue a forward grant correction to the exact scheduler/service role.",
+      "risk_if_delayed": "Anonymous privileged maintenance and pruning remain possible.",
+      "production_risk": "critical",
+      "effort": "small",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-backup-function-grants-v1",
+      "suggested_commit": "fix(db): restrict privileged backup maintenance functions",
+      "suggested_migration": "20260729103000_lock_down_backup_maintenance_functions.sql"
+    },
+    {
+      "id": "P0-01",
+      "sequence": 2,
+      "affected_surface": ["Supabase events", "RLS", "review audit"],
+      "root_cause": "Broad staff update policy allows inventory-relevant Event field changes; current firewall guards status only.",
+      "safest_fix": "Define owner-approved mutability, add a protected-field BEFORE UPDATE guard, narrow RLS, and preserve existing status RPC/job/audit behavior.",
+      "likely_files": [
+        "supabase/migrations/20260729100000_close_event_write_contract.sql",
+        "supabase/rollbacks/20260729100000_close_event_write_contract_ROLLBACK.sql",
+        "supabase/tests/event_write_contract_local_test.sql"
+      ],
+      "supabase_objects": [
+        "public.events",
+        "existing Event update policies",
+        "public.barinv_events_guard_status_update()",
+        "public.barinv_events_guard_protected_update()",
+        "trg_events_guard_protected_update",
+        "public.event_review_audit"
+      ],
+      "tests": [
+        "staff protected-field changes rejected for every status",
+        "mixed status and field change rejected",
+        "cross-Venue/Night rejected",
+        "manager status-only review remains exact-once audited",
+        "review, CSV, and 1500-row durable suites remain green",
+        "existing Event values and hashes unchanged by migration"
+      ],
+      "manual_qa": ["per-row review", "bulk Keep Existing Action", "owner-approved edit workflow if any"],
+      "backup": ["full DB", "protected Event-column hash", "policy and function definitions"],
+      "rollback": "Prefer a forward correction; never automatically restore broad staff update authorization.",
+      "risk_if_delayed": "Approved inventory history can be rewritten without review or audit.",
+      "production_risk": "critical",
+      "effort": "large",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-events-write-contract-v1",
+      "suggested_commit": "fix(events): protect submitted event fields",
+      "suggested_migration": "20260729100000_close_event_write_contract.sql",
+      "owner_decision": "D4"
+    },
+    {
+      "id": "P0-02",
+      "sequence": 3,
+      "affected_surface": ["Supabase events", "Barback", "Admin operational inserts", "CSV"],
+      "root_cause": "Legacy insert policies scope callers but do not force client-created Events to begin PENDING.",
+      "safest_fix": "Inventory insert sources; add an ordered BEFORE INSERT contract guard; keep Barback/CSV PENDING; move approved operational inserts, if retained, behind one audited manager/server RPC.",
+      "likely_files": [
+        "supabase/migrations/20260729100000_close_event_write_contract.sql",
+        "supabase/rollbacks/20260729100000_close_event_write_contract_ROLLBACK.sql",
+        "supabase/tests/event_write_contract_local_test.sql",
+        "index.html if operational insert callers require RPC migration",
+        "iOS www/index.html if equivalent callers exist"
+      ],
+      "supabase_objects": [
+        "public.events",
+        "existing Event insert policies",
+        "public.barinv_events_guard_insert_contract()",
+        "ordered BEFORE INSERT trigger",
+        "public.barinv_events_apply_session_auto_approve()",
+        "trg_events_session_auto_approve",
+        "optional public.barinv_create_operational_event(...)"
+      ],
+      "tests": [
+        "client final-status insert rejected",
+        "forged source/session/status rejected",
+        "Barback PENDING and server auto-approval remain correct",
+        "CSV remains PENDING",
+        "approved operational RPC authorized and audited if retained",
+        "migration changes no existing Event"
+      ],
+      "manual_qa": ["Barback Submit All", "Admin operational Event inventory", "isolated CSV import"],
+      "backup": ["full DB", "Event and audit hashes", "inventory of all Event insert callers"],
+      "rollback": "Use a forward correction or temporarily disable a broken workflow; never reopen generic final-status inserts.",
+      "risk_if_delayed": "Clients can bypass PENDING review and exact-once audit.",
+      "production_risk": "critical",
+      "effort": "medium",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-events-write-contract-v1",
+      "suggested_commit": "fix(events): enforce pending insert contract",
+      "suggested_migration": "20260729100000_close_event_write_contract.sql",
+      "owner_decision": "D3"
+    },
+    {
+      "id": "P0-05",
+      "sequence": 4,
+      "affected_surface": ["Barback Link", "offline outbox"],
+      "root_cause": "Outbox persistence failure truncates the queue and does not report failure.",
+      "safest_fix": "Remove truncation, make persistence/round-trip success explicit, preserve prior queue, retain failed new record visibly, block success/navigation, and preserve client_event_id idempotency.",
+      "likely_files": [
+        "barback.html",
+        "tests/barback-outbox-durability.test.cjs",
+        "iOS bundled barback.html only in a separate reviewed sync"
+      ],
+      "supabase_objects": ["existing Events client_event_id uniqueness/idempotency"],
+      "tests": [
+        "0, 1, small, and large queue",
+        "QuotaExceededError preserves prior queue byte-for-byte",
+        "failed record not reported queued",
+        "retry creates exactly one Event",
+        "reload and Submit All resume",
+        "stale quarantine is non-destructive"
+      ],
+      "manual_qa": ["offline quota failure and recovery", "Android Chrome", "iPhone browser"],
+      "backup": ["live barback.html", "Git bundle/tree archive", "live hash", "redacted outbox schema"],
+      "rollback": "Do not return to silent truncation; forward hotfix or explicitly disable offline queueing.",
+      "risk_if_delayed": "Live Event submissions can silently disappear.",
+      "production_risk": "critical",
+      "effort": "medium",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-barback-outbox-durability-v1",
+      "suggested_commit": "fix(barback): prevent silent outbox data loss",
+      "suggested_migration": null
+    },
+    {
+      "id": "P0-04",
+      "sequence": 5,
+      "affected_surface": ["Barback Scale Bridge", "Edge Function", "scale-latest storage"],
+      "root_cause": "Public Realtime broadcast payloads directly control usable grams/stable state.",
+      "safest_fix": "Stop public realtime ingestion immediately; disable Bridge or use authenticated HTTPS/private transport with claim-derived scope, server-side validation, freshness, sequence, range, and stability controls.",
+      "likely_files": [
+        "barback.html",
+        "recovered supabase/functions/barback-scale-bridge/index.ts",
+        "focused bridge security tests",
+        "optional 20260729110000_secure_scale_bridge_transport.sql"
+      ],
+      "supabase_objects": [
+        "public.barback_scale_latest",
+        "its RLS policies and grants",
+        "barback-scale-bridge Edge Function",
+        "optional private Realtime authorization policies"
+      ],
+      "tests": [
+        "anon and wrong-scope publish/read rejected",
+        "expired/revoked session rejected",
+        "forged stable, stale, replayed, malformed, non-finite, negative, and extreme values rejected",
+        "valid station and receiver limited to one scope",
+        "stale reading never enables Use Weight"
+      ],
+      "manual_qa": ["two-device same-night", "wrong-night", "revocation", "disconnect/reconnect", "manual fallback"],
+      "backup": ["Function source/inventory", "scale-latest schema/count", "RLS/grants", "live web hash"],
+      "rollback": "Kill switch disables Bridge; never restore public untrusted broadcast ingestion.",
+      "risk_if_delayed": "Forged weights can corrupt inventory.",
+      "production_risk": "critical",
+      "effort": "large",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-scale-bridge-trust-v1",
+      "suggested_commit": "fix(scale): reject untrusted realtime bridge weights",
+      "suggested_migration": "20260729110000_secure_scale_bridge_transport.sql only if catalog changes are required",
+      "owner_decision": "D1"
+    },
+    {
+      "id": "P0-06",
+      "sequence": 6,
+      "affected_surface": ["iOS Admin app", "deep-link routing", "backend configuration"],
+      "root_cause": "Unsigned deep link carries arbitrary backend URL/key and persists it after a confirmation prompt.",
+      "safest_fix": "Remove from public v1 and pin approved backend, or replace with a signed short-lived token exchange and strict allowlist.",
+      "likely_files": [
+        "iOS www/index.html",
+        "iOS ios/App/App/public/index.html generated by Capacitor copy",
+        "deep-link route tests",
+        "optional portal-token-exchange Function if signed exchange is retained"
+      ],
+      "supabase_objects": ["none if removed", "optional pinned token-exchange Function"],
+      "tests": [
+        "raw and encoded cfg routes rejected",
+        "portal/Barback routes unaffected",
+        "wrong host/project, expiry, bad signature, replay, malformed and oversized payload fail",
+        "no config persists before authorization"
+      ],
+      "manual_qa": ["cold/authenticated launch", "QR and universal/deep links", "upgrade without clearing app data"],
+      "backup": ["iOS Git bundle/tree", "source/generated asset", "installed bundle hash", "route evidence"],
+      "rollback": "Ship a forward higher build; pinned Production configuration remains the safe fallback.",
+      "risk_if_delayed": "Crafted links can redirect credentials and operational data.",
+      "production_risk": "critical",
+      "effort": "medium",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-ios-backend-config-v1",
+      "suggested_commit": "fix(ios): restrict dynamic backend configuration",
+      "suggested_migration": null,
+      "owner_decision": "D5"
+    },
+    {
+      "id": "P0-07",
+      "sequence": 7,
+      "affected_surface": ["BARINV.ca", "App Store metadata", "in-app legal/support links"],
+      "root_cause": "Live policies cover the marketing website, not the operational app, and no stable app support URL is ready.",
+      "safest_fix": "Establish canonical website source and publish owner/legal-approved app privacy, terms, and support pages matching actual permissions/data flows.",
+      "likely_files": [
+        "canonical BARINV.ca app privacy page",
+        "canonical BARINV.ca app terms page",
+        "canonical BARINV.ca support page",
+        "navigation/footer/sitemap metadata",
+        "optional iOS about/support links"
+      ],
+      "supabase_objects": [],
+      "tests": [
+        "HTTPS 200 and canonical URLs",
+        "mobile/accessibility/broken links",
+        "sitemap and metadata",
+        "content matches Info.plist and application data flow"
+      ],
+      "manual_qa": ["owner/legal approval", "App Review unauthenticated access", "support delivery test"],
+      "backup": ["live website archive", "headers/DNS/Cloudflare inventory", "source bundle", "rollback version"],
+      "rollback": "Preserve compliant emergency legal pages even if the broader website deployment rolls back.",
+      "risk_if_delayed": "App Review rejection and inaccurate privacy disclosure.",
+      "production_risk": "high",
+      "effort": "medium",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "fix/p0-app-legal-support-v1",
+      "suggested_commit": "docs(legal): add BARINV app privacy terms and support",
+      "suggested_migration": null,
+      "owner_decisions": ["D6", "D7"]
+    },
+    {
+      "id": "P0-08",
+      "sequence": 8,
+      "affected_surface": ["iOS scale", "Barback scale", "Scale Lab", "physical devices", "marketing claims"],
+      "root_cause": "Arboleaf conversion/calibration is based on insufficient captures and conflicts with unresolved Scale Lab documentation.",
+      "safest_fix": "Run traceable physical certification across supported devices/ranges or gate scale out of public v1; default to disabled until evidence passes.",
+      "likely_files": [
+        "iOS www/index.html if gating/decoder changes are needed",
+        "barback.html if gating/decoder changes are needed",
+        "BARINV-Scale-Lab fixtures/captures/protocol report",
+        "scale and rapid-return tests",
+        "BARINV.ca scale claims"
+      ],
+      "supabase_objects": ["P0-04 transport objects only if Bridge remains supported"],
+      "tests": [
+        "captured-packet expected grams",
+        "web/iOS decoder parity",
+        "checksum/length/zero/negative/unstable/10x/stale/reconnect cases",
+        "known bottle full/empty/net/percentage matrix",
+        "three physical devices if generally supported"
+      ],
+      "manual_qa": ["traceable reference weights", "known-bottle matrix", "iPhone/iPad/Android", "independent second-person verification"],
+      "backup": ["Scale Lab dirty state", "current decoders", "raw captures", "device identifiers", "app/web builds"],
+      "rollback": "Feature flag defaults disabled; use manual entry instead of an unverified decoder.",
+      "risk_if_delayed": "Wrong weights and bottle percentages can silently corrupt inventory.",
+      "production_risk": "critical",
+      "effort": "large",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "audit/p0-arboleaf-certification-v1 and fix/p0-scale-safety-gate-v1",
+      "suggested_commit": "fix(scale): gate unverified scale decoding",
+      "suggested_migration": null,
+      "owner_decisions": ["D1", "D2"]
+    },
+    {
+      "id": "P0-09",
+      "sequence": 9,
+      "affected_surface": ["iOS Git", "Xcode version/build", "release evidence", "App Store process"],
+      "root_cause": "Release candidate is untagged on a feature branch, origin/main is stale, and version/build are 1.0/1.",
+      "safest_fix": "After all other P0s close, use an approved protected branch strategy, unique version/build, reproducible archive evidence, RC tag, TestFlight gate, then stable tag.",
+      "likely_files": [
+        "ios/App/App.xcodeproj/project.pbxproj",
+        "release checklist/report/manifest",
+        "verified www and generated public assets",
+        "privacy/metadata files approved separately"
+      ],
+      "supabase_objects": [],
+      "tests": [
+        "clean checkout reproduces asset/build hashes",
+        "JS syntax, Capacitor copy, diff check, Xcode build, app launch",
+        "supported device feature matrix",
+        "installed bundle matches documented source"
+      ],
+      "manual_qa": ["owner release strategy/version approval", "TestFlight rehearsal", "App Review package review"],
+      "backup": ["all-ref Git bundle", "tree archive", "prior build", "Xcode settings", "archive/dSYM hashes", "release manifest"],
+      "rollback": "Never move tags or rewrite history; ship a new higher build and retain the last verified stable build.",
+      "risk_if_delayed": "Submitted binary cannot be traced, reproduced, or rolled back safely.",
+      "production_risk": "high",
+      "effort": "medium",
+      "requires_production_change": true,
+      "blocks_app_store": true,
+      "suggested_branch": "release/ios-appstore-v1.0.0",
+      "suggested_commit": "chore(ios): prepare App Store release version",
+      "suggested_migration": null,
+      "suggested_tags": [
+        "barinv-ios-appstore-v1.0.0-rc1-20260729",
+        "barinv-ios-appstore-v1.0.0-stable-<YYYYMMDD>"
+      ],
+      "owner_decision": "D8"
+    }
+  ],
+  "safe_combination": [
+    "P0-01 and P0-02 share one Event write-contract design branch, migration, and isolated harness cycle.",
+    "P0-04 and P0-08 share one owner scale-scope decision and kill-switch model but deploy separately.",
+    "P0-07 legal URLs are inputs to P0-09 App Store metadata."
+  ],
+  "must_be_separate": [
+    "P0-03 maintenance ACL migration from Event authorization migration",
+    "P0-05 outbox release from Scale Bridge release",
+    "P0-04 Function/transport deployment from web UI deployment",
+    "P0-06 iOS security build from web and database releases",
+    "P0-07 website/legal deployment from product code",
+    "P0-08 physical certification from code-only validation",
+    "P0-09 release checkpoint after all other P0 closures"
+  ],
+  "definition_of_done": [
+    "fresh audit P0 count is zero",
+    "anonymous privileged maintenance execute is absent",
+    "normal staff cannot mutate protected submitted/final Event fields",
+    "clients cannot insert final-status Events",
+    "Barback PENDING and server auto-approval remain correct",
+    "review audit remains exact once",
+    "outbox persistence never silently loses or falsely reports an Event",
+    "Scale Bridge accepts no untrusted stale or cross-scope weight",
+    "Arboleaf is physically certified or disabled/gated",
+    "iOS cannot be redirected to an arbitrary backend",
+    "app privacy terms and support URLs are live and approved",
+    "iOS source/version/build/archive/tag are reproducible",
+    "all backup restore local physical and Production-safe gates pass",
+    "no unresolved P0 owner decision remains"
+  ],
+  "next_approval": "Owner review and answers to D1-D8, followed by separate approval for Phase 0 backup/freeze only. This plan authorizes no implementation or remote mutation."
+}
