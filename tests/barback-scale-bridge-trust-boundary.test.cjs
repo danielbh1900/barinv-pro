@@ -54,6 +54,9 @@ function harness() {
     state: { selectedAction: 'TAKEN' },
     $: element,
     statusOn: (...args) => statuses.push(args),
+    // P0-08 adds an operator confirmation after the P0-04 trust check. This
+    // suite isolates bridge provenance, so model an already confirmed operator.
+    _scaleConfirmEstimateUse: () => true,
     updateRemainingDisplay: () => { context.remainingUpdates += 1; },
     _qmUpdateRemaining: () => { context.modalRemainingUpdates += 1; },
     Feedback: { ok: () => { context.feedbackCount += 1; } },

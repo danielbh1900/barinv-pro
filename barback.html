@@ -630,6 +630,14 @@
     <div class="row" id="main-scale-row">
       <label>SCALE</label>
       <div id="main-ble" style="display:none;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
+        <div id="scale-certification-gate" role="alert" style="margin-bottom:10px;padding:9px;border:1px solid #f59e0b;border-radius:6px;background:#2b1f0b;color:#fcd34d;font-size:12px;line-height:1.45;">
+          <div style="font-weight:800;">Beta scale estimate — operator verification required</div>
+          <div style="margin-top:3px;">BLE/Arboleaf/custom scale readings are not certified or legal-for-trade. Use only as an internal inventory estimate until physical certification is complete. Manual grams entry remains available.</div>
+          <label for="scale-beta-enable" style="display:flex;align-items:flex-start;gap:7px;margin-top:7px;color:#fde68a;font-weight:700;letter-spacing:0;text-transform:none;cursor:pointer;">
+            <input type="checkbox" id="scale-beta-enable" style="margin-top:2px;">
+            <span>Enable uncertified scale estimates for this page only</span>
+          </label>
+        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span id="main-ble-status" style="font-size:13px;color:#9ca3af;">Scale: Not connected</span>
           <button type="button" id="main-ble-connect" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect Scale</button>
@@ -743,6 +751,7 @@
       <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
       <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support (hidden on iPhone). Fills QTY (grams); never submits. -->
       <div id="rf-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
+        <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling RETURN grams.</div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span id="rf-ble-status" style="font-size:12px;color:#9ca3af;">Scale return weight: not connected</span>
           <button type="button" id="rf-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
@@ -1043,6 +1052,7 @@
         </div>
         <!-- SCALE_BLE — capability-gated Web Bluetooth (Android/desktop Chrome). Hidden where unsupported (e.g. iPhone). Auto-fills Weight (g) only; never submits. -->
         <div id="qm-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
+          <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling partial-bottle grams.</div>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <span id="qm-ble-status" style="font-size:12px;color:#9ca3af;">Scale: Not connected</span>
             <button type="button" id="qm-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
@@ -3619,6 +3629,89 @@ function _trustedLocalScaleReading(requireStable) {
 }
 // SCALE_BRIDGE_TRUST_BOUNDARY_V1_END
 
+// P0-08: physical certification is not present in the release evidence. Direct
+// BLE/native readings therefore remain an explicitly enabled, page-scoped beta
+// estimate and require operator confirmation before they can fill inventory fields.
+// Manual grams entry is never gated.
+// SCALE_CERTIFICATION_RELEASE_GATE_V1_START
+var SCALE_PHYSICAL_CERTIFICATION_COMPLETE = false;
+var scaleCertificationGate = { betaEnabled: false };
+var SCALE_CERTIFICATION_WARNING = 'This scale reading is an uncertified internal inventory estimate, not legal-for-trade. Verify the displayed grams before use.';
+function _scaleBetaEnabled() {
+  return SCALE_PHYSICAL_CERTIFICATION_COMPLETE || scaleCertificationGate.betaEnabled === true;
+}
+function _scaleSetGateControlState(el, disabled) {
+  if (!el) return;
+  el.disabled = !!disabled;
+  el.style.opacity = disabled ? '0.55' : '1';
+  el.style.cursor = disabled ? 'not-allowed' : 'pointer';
+}
+function _scaleSyncCertificationGateUI() {
+  var enabled = _scaleBetaEnabled();
+  var checkbox = $('scale-beta-enable');
+  if (checkbox) checkbox.checked = !!scaleCertificationGate.betaEnabled;
+  for (var i = 0; i < _BLE_SURFACES.length; i++) {
+    var p = _BLE_SURFACES[i];
+    var connect = $(p + '-connect');
+    _scaleSetGateControlState(connect, !enabled && !bleScale.connected);
+    var all = $(p + '-all');
+    _scaleSetGateControlState(all, !enabled);
+    var use = $(p + '-use');
+    if (use && !enabled) {
+      _scaleSetGateControlState(use, true);
+      use.textContent = 'Enable beta scale estimates above';
+    }
+  }
+  _scaleSetGateControlState($('scale-set-known'), !enabled);
+  _scaleSetGateControlState($('scale-zero'), !enabled);
+  _scaleSetGateControlState($('scale-clear-offset'), !enabled);
+  var known = $('scale-known-input');
+  if (known) known.disabled = !enabled;
+  try { _weightUseScaleSync(); } catch (_) {}
+}
+function _scaleSetBetaEnabled(enabled) {
+  scaleCertificationGate.betaEnabled = SCALE_PHYSICAL_CERTIFICATION_COMPLETE || enabled === true;
+  _scaleSyncCertificationGateUI();
+  try {
+    statusOn(
+      'save-status',
+      _scaleBetaEnabled()
+        ? 'Beta scale estimates enabled for this page. Every reading still requires operator confirmation.'
+        : 'Beta scale estimates disabled. Enter grams manually.',
+      _scaleBetaEnabled() ? 'warn' : 'info'
+    );
+  } catch (_) {}
+  return _scaleBetaEnabled();
+}
+function _scaleRequireBetaEnabled(actionLabel) {
+  if (_scaleBetaEnabled()) return true;
+  try {
+    statusOn(
+      'save-status',
+      'Scale estimates are off. Enable the uncertified beta scale in the SCALE panel or enter grams manually.',
+      'warn'
+    );
+  } catch (_) {}
+  return false;
+}
+function _scaleConfirmEstimateUse(reading, destinationLabel) {
+  if (!_scaleRequireBetaEnabled(destinationLabel)) return false;
+  if (SCALE_PHYSICAL_CERTIFICATION_COMPLETE) return true;
+  var grams = reading && reading.grams;
+  var prompt = SCALE_CERTIFICATION_WARNING + '\n\nUse ' + grams + ' g for ' + destinationLabel + '?';
+  var accepted = false;
+  try {
+    accepted = !!(typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm(prompt)
+      : (typeof confirm === 'function' && confirm(prompt)));
+  } catch (_) { accepted = false; }
+  if (!accepted) {
+    try { statusOn('save-status', 'Scale estimate not used. Enter or verify grams manually.', 'warn'); } catch (_) {}
+  }
+  return accepted;
+}
+// SCALE_CERTIFICATION_RELEASE_GATE_V1_END
+
 // Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
 // Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
 // divisor, rangeMode, stable, naiveDiv10, checksum, expected, reason }.
@@ -3728,6 +3821,7 @@ function _bleResetButtons() {
     var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = (_BLE_SURFACES[i] === 'main-ble' ? '📶 Connect Scale' : '📶 Connect scale');
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = '';
   }
+  try { _scaleSyncCertificationGateUI(); } catch (_) {}
 }
 function _bleSetConnected(name) {
   bleScale.connected = true; bleScale.name = name || '';
@@ -3736,6 +3830,7 @@ function _bleSetConnected(name) {
     var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = 'Disconnect';
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = 'none';   // hide fallback once connected
   }
+  try { _scaleSyncCertificationGateUI(); } catch (_) {}
   try { _weightUseScaleSync(); } catch (_) {}
 }
 function _bleSetDisconnected() {
@@ -3800,7 +3895,8 @@ function _bleOnFrame(ev) {
         // STABLE_GUARD — only allow "Use latest stable weight" on a stable frame.
         if (use) {
           use.style.display = '';
-          if (r.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
+          if (r.stable && _scaleBetaEnabled()) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
+          else if (r.stable) { use.disabled = true; use.textContent = 'Enable beta scale estimates above'; use.style.opacity = '0.55'; }
           else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
         }
       }
@@ -3813,6 +3909,7 @@ function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _ble
 // allDevices=false → filter by FFF0 (only scales advertising it appear).
 // allDevices=true  → acceptAllDevices fallback for scales that don't advertise FFF0.
 async function _bleConnect(allDevices) {
+  if (!_scaleRequireBetaEnabled('scale connection')) return false;
   if (bleScale.nativeMode) { return _nativeScaleConnect(allDevices); }   // SCALE_NATIVE_BLE — iOS in-app
   if (!navigator.bluetooth) return;
   try {
@@ -3873,17 +3970,19 @@ function _bleDisconnect() {
 // Scan-sheet (TAKEN / Partial-weighed) — fill the Partial Weight (g) input + recalc.
 function _bleUseLatest() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  if (!_scaleConfirmEstimateUse(reading, 'partial bottle weight')) return;
   var w = $('qm-weight'); if (!w) return;
   w.value = String(reading.grams);
   try { _qmUpdateRemaining(); } catch (_) {}
-  try { statusOn('save-status', 'Scale weight ' + reading.grams + ' g filled — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
 }
 // Main RETURN form — RETURN quantity IS grams, so fill the QTY input.
 function _bleUseLatestReturn() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  if (!_scaleConfirmEstimateUse(reading, 'RETURN quantity')) return;
   var q = $('qty-input'); if (!q) return;
   q.value = String(reading.grams);
-  try { statusOn('save-status', 'Scale return weight ' + reading.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
 }
 // Main panel — direction-neutral. RETURN → fill QTY grams; otherwise (TAKEN,
 // incl. used/partial bottles sent TO a bar) → fill the main Weight (g) field and
@@ -3891,14 +3990,15 @@ function _bleUseLatestReturn() {
 // and taps ADD TO REVIEW. Never submits, never writes DB.
 function _bleUseLatestMain() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  if (!_scaleConfirmEstimateUse(reading, state.selectedAction === 'RETURNED' ? 'RETURN quantity' : 'TAKEN bottle weight')) return;
   var g = String(reading.grams);
   if (state.selectedAction === 'RETURNED') {
     var q = $('qty-input'); if (q) q.value = g;
-    try { statusOn('save-status', 'Scale return weight ' + reading.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
   } else {
     var w = $('weight-g-input'); if (w) w.value = g;
     try { updateRemainingDisplay(); } catch (_) {}
-    try { statusOn('save-status', 'Scale weight ' + reading.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into Weight (g) — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
   }
 }
 // PARTIAL UX — keep the in-flow "Use current scale weight" button (next to the
@@ -3907,20 +4007,24 @@ function _bleUseLatestMain() {
 function _weightUseScaleSync() {
   var btn = $('weight-use-scale'); if (!btn) return;
   var connected = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode) && bleScale.connected);
-  var hasStable = connected && !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable);
+  var enabled = _scaleBetaEnabled();
+  var hasStable = enabled && connected && !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable);
   btn.style.display = connected ? '' : 'none';
   btn.disabled = !hasStable;
   btn.style.opacity = hasStable ? '1' : '0.55';
-  btn.textContent = hasStable ? ('⚖️ Use current scale weight (' + bleScale.latest.grams + ' g)') : 'Waiting for stable scale weight…';
+  btn.textContent = hasStable
+    ? ('⚖️ Use current scale estimate (' + bleScale.latest.grams + ' g)')
+    : (!enabled ? 'Enable beta scale estimates above' : 'Waiting for stable scale weight…');
 }
 // Fill the WEIGHT (g) field with the CORRECTED stable grams + recalc remaining %.
 // Works for TAKEN/PARTIAL bottles sent to a bar; never submits, never writes DB.
 function _weightUseScaleFill() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  if (!_scaleConfirmEstimateUse(reading, 'TAKEN bottle weight')) return;
   var w = $('weight-g-input'); if (!w) return;
   w.value = String(reading.grams);   // corrected grams
   try { updateRemainingDisplay(); } catch (_) {}
-  try { statusOn('save-status', 'Filled WEIGHT with ' + reading.grams + ' g — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Filled WEIGHT with uncertified estimate ' + reading.grams + ' g — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
   try { Feedback.ok(); } catch (_) {}
 }
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
@@ -4063,6 +4167,7 @@ function _nativeScaleStartWatchdog() {
 }
 // SCALE_NATIVE_NOTIFY_FIX_END
 async function _nativeScaleConnect(allDevices) {
+  if (!_scaleRequireBetaEnabled('native scale connection')) return false;
   var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
   if (!Ble) { _bleStatus('native BLE unavailable'); return; }
   if (_nativeScale.connecting) return;
@@ -4142,6 +4247,7 @@ async function _nativeScaleDisconnect() {
     }
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
+    try { _scaleSyncCertificationGateUI(); } catch (_) {}
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
     if (bleScale.supported && navigator.bluetooth.getAvailability) {
       navigator.bluetooth.getAvailability().then(function (a) {
@@ -4605,9 +4711,17 @@ function _bridgeUse() {
 }
 // SCALE_OFFSET — wire the calibration controls (station panel). Persist to
 // localStorage; corrected grams flow automatically via _scaleCorrect / _bleOnFrame.
+(function _wireScaleCertificationGate() {
+  try {
+    var enable = $('scale-beta-enable');
+    if (enable) enable.addEventListener('change', function () { _scaleSetBetaEnabled(enable.checked); });
+    _scaleSyncCertificationGateUI();
+  } catch (_) {}
+})();
 (function _wireScaleOffset() {
   try {
     if ($('scale-set-known')) $('scale-set-known').addEventListener('click', function () {
+      if (!_scaleRequireBetaEnabled('scale calibration')) return;
       var raw = _scaleCurrentRaw();
       var known = parseFloat(($('scale-known-input') && $('scale-known-input').value) || '');
       if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
@@ -4616,12 +4730,14 @@ function _bridgeUse() {
       try { statusOn('save-status', 'Offset set to ' + _scaleFmtOff(_scaleOffset()) + ' (known ' + Math.round(known) + 'g − raw ' + Math.round(raw) + 'g)', 'ok'); } catch (_) {}
     });
     if ($('scale-zero')) $('scale-zero').addEventListener('click', function () {
+      if (!_scaleRequireBetaEnabled('scale zero')) return;
       var raw = _scaleCurrentRaw();
       if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
       _scaleSetOffset(-raw);
       try { statusOn('save-status', 'Zeroed current reading — offset ' + _scaleFmtOff(_scaleOffset()), 'ok'); } catch (_) {}
     });
     if ($('scale-clear-offset')) $('scale-clear-offset').addEventListener('click', function () {
+      if (!_scaleRequireBetaEnabled('scale offset')) return;
       _scaleSetOffset(0);
       if ($('scale-known-input')) $('scale-known-input').value = '';
       try { statusOn('save-status', 'Offset cleared — showing raw scale grams', 'ok'); } catch (_) {}
