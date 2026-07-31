@@ -655,32 +655,35 @@
       </div>
       <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
         <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale connection</div>
-        <div id="main-ble-desktop-cta" style="display:none;margin-top:6px;font-weight:700;color:#f59e0b;font-size:13px;line-height:1.4;">💻 Use Google Chrome or Microsoft Edge to connect directly, or run this device as the Scale Station. Receiver mode below still works in any browser.</div>
+        <div id="main-ble-desktop-cta" style="display:none;margin-top:6px;font-weight:700;color:#f59e0b;font-size:13px;line-height:1.4;">💻 Use Google Chrome or Microsoft Edge to connect directly. Otherwise enter grams manually.</div>
         <div style="margin-top:3px;">This browser does not expose Web Bluetooth, so it cannot connect directly to the Arboleaf/QN-KS scale.</div>
         <ul style="margin:6px 0 0;padding-left:16px;">
           <li><b>Android Chrome / Desktop Chrome</b>: use <b>Connect Scale</b> for direct Arboleaf/QN-KS Bluetooth.</li>
           <li><b>iPhone Bluefy/WebBLE</b>: direct Arboleaf/QN-KS Bluetooth works when <code>navigator.bluetooth</code> is available.</li>
-          <li><b>iPhone Safari/Chrome</b>: use <b>manual grams</b> or <b>Scale Bridge</b> with an Android/Desktop Scale Station.</li>
+          <li><b>iPhone Safari/Chrome</b>: use <b>manual grams</b>. Remote Scale Bridge weights are disabled for public release.</li>
         </ul>
         <div style="margin-top:6px;font-family:'Fira Mono',monospace;font-size:10px;color:#6b7280;line-height:1.5;">
           navigator.bluetooth: <span id="diag-ble2">missing</span> · secure context: <span id="diag-secure2">—</span> · device: <span id="diag-device2">—</span>
         </div>
       </div>
-      <!-- SCALE_BRIDGE — Realtime relay so iPhone/Safari (no Web Bluetooth) can use a Scale Station's weight. Frontend-only public broadcast; no DB write, no auto-submit; never broadcasts PIN/token/secrets. -->
+      <!-- SCALE_BRIDGE — release-gated because remote client broadcasts are not
+           authoritative inventory evidence. Direct Bluetooth/native BLE and manual
+           grams remain available. -->
       <div id="main-bridge" style="margin-top:8px;padding:10px;border:1px solid #374151;border-radius:8px;background:#0d1411;">
-        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale Bridge <span style="font-weight:400;color:#6b7280;font-size:11px;">— for iPhone Safari/Chrome or any browser without Web Bluetooth</span></div>
+        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale Bridge <span style="font-weight:400;color:#6b7280;font-size:11px;">— remote bridge</span></div>
+        <div id="bridge-trust-warning" role="alert" style="margin-top:6px;padding:8px;border:1px solid #f59e0b;border-radius:6px;background:#2b1f0b;color:#fcd34d;font-size:12px;font-weight:700;line-height:1.4;">Remote Scale Bridge is disabled for public release. Remote readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.</div>
         <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button type="button" id="bridge-listen" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Listen to Scale Station</button>
-          <span id="bridge-status" style="font-size:12px;color:#9ca3af;">Bridge: not listening</span>
+          <button type="button" id="bridge-listen" disabled style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;white-space:nowrap;opacity:0.6;">Bridge disabled</button>
+          <span id="bridge-status" style="font-size:12px;color:#f59e0b;">Bridge: disabled for public release</span>
         </div>
         <div id="bridge-recv" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">
           <div id="bridge-weight">Latest station weight: —</div>
           <div id="bridge-update" style="font-size:11px;color:#9ca3af;">Last update: —</div>
           <div id="bridge-station" style="font-size:11px;color:#9ca3af;">Station: —</div>
-          <button type="button" id="bridge-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
+          <button type="button" id="bridge-use" disabled style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;opacity:0.55;">Remote weight is display-only</button>
         </div>
         <div id="bridge-station-row" style="display:none;margin-top:8px;border-top:1px solid #374151;padding-top:8px;">
-          <button type="button" id="bridge-start-station" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📡 Publish to iPhones</button>
+          <button type="button" id="bridge-start-station" disabled style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;white-space:nowrap;opacity:0.6;">Bridge publishing disabled</button>
           <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;white-space:pre-line;">Station: publishing…</div>
           <div id="bridge-wake-hint" style="display:none;margin-top:4px;font-size:11px;color:#f6c200;font-weight:600;">Keep this Android phone awake. Do not lock the screen.</div>
           <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Scale connected? Tap “📡 Publish to iPhones” to share its weight with iPhone barbacks. Keep this Android phone unlocked and Chrome open.</div>
@@ -3579,6 +3582,42 @@ function qtyModalAdd() {
 var SCALE_BLE_SVC = '0000fff0-0000-1000-8000-00805f9b34fb';
 var SCALE_BLE_CHR = '0000fff1-0000-1000-8000-00805f9b34fb';
 var bleScale = { supported: false, device: null, server: null, char: null, connected: false, latest: null, name: '', gotFrame: false };
+// P0-04: the bridge has no verifiable device-to-server trust chain in this release.
+// Keep every remote reading display-only and require direct local BLE/native BLE
+// provenance before a scale value can fill inventory inputs.
+// SCALE_BRIDGE_TRUST_BOUNDARY_V1_START
+var SCALE_BRIDGE_RELEASE_ENABLED = false;
+var SCALE_TRUSTED_LOCAL_SOURCES = {
+  local_web_bluetooth: true,
+  local_native_ble: true
+};
+function _localScaleSource() {
+  return bleScale && bleScale.nativeMode ? 'local_native_ble' : 'local_web_bluetooth';
+}
+function _isTrustedLocalScaleReading(reading) {
+  return !!(reading &&
+    reading.trusted === true &&
+    SCALE_TRUSTED_LOCAL_SOURCES[reading.source] === true &&
+    typeof reading.grams === 'number' &&
+    isFinite(reading.grams));
+}
+function _trustedLocalScaleReading(requireStable) {
+  var reading = bleScale && bleScale.latest;
+  if (!_isTrustedLocalScaleReading(reading) || (requireStable && !reading.stable)) {
+    if (reading && !_isTrustedLocalScaleReading(reading)) {
+      try {
+        statusOn(
+          'save-status',
+          'Remote Scale Bridge readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.',
+          'warn'
+        );
+      } catch (_) {}
+    }
+    return null;
+  }
+  return reading;
+}
+// SCALE_BRIDGE_TRUST_BOUNDARY_V1_END
 
 // Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
 // Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
@@ -3733,7 +3772,14 @@ function _bleOnFrame(ev) {
       // SCALE_OFFSET — raw stays for stability/diagnostics; corrected drives display/fill/publish.
       var rawG = r.grams, off = _scaleOffset(), corrG = rawG + off;
       bleScale.raw = rawG;
-      bleScale.latest = { grams: corrG, raw: rawG, stable: r.stable, ts: nowMs };
+      bleScale.latest = {
+        grams: corrG,
+        raw: rawG,
+        stable: r.stable,
+        ts: nowMs,
+        trusted: true,
+        source: _localScaleSource()
+      };
       try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — publishes corrected grams (applies offset internally)
       var stableTxt = r.stable ? ('stable · ' + (r.hwStable ? 'scale' : 'software')) : 'unstable';
       liveTxt = 'Live weight: ' + corrG + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '')
@@ -3826,33 +3872,33 @@ function _bleDisconnect() {
 }
 // Scan-sheet (TAKEN / Partial-weighed) — fill the Partial Weight (g) input + recalc.
 function _bleUseLatest() {
-  if (!bleScale.latest) return;
+  var reading = _trustedLocalScaleReading(true); if (!reading) return;
   var w = $('qm-weight'); if (!w) return;
-  w.value = String(bleScale.latest.grams);
+  w.value = String(reading.grams);
   try { _qmUpdateRemaining(); } catch (_) {}
-  try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Scale weight ' + reading.grams + ' g filled — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
 }
 // Main RETURN form — RETURN quantity IS grams, so fill the QTY input.
 function _bleUseLatestReturn() {
-  if (!bleScale.latest) return;
+  var reading = _trustedLocalScaleReading(true); if (!reading) return;
   var q = $('qty-input'); if (!q) return;
-  q.value = String(bleScale.latest.grams);
-  try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  q.value = String(reading.grams);
+  try { statusOn('save-status', 'Scale return weight ' + reading.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
 }
 // Main panel — direction-neutral. RETURN → fill QTY grams; otherwise (TAKEN,
 // incl. used/partial bottles sent TO a bar) → fill the main Weight (g) field and
 // recalc remaining % from the DB/local profile. Operator still sets bottle state
 // and taps ADD TO REVIEW. Never submits, never writes DB.
 function _bleUseLatestMain() {
-  if (!bleScale.latest) return;
-  var g = String(bleScale.latest.grams);
+  var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  var g = String(reading.grams);
   if (state.selectedAction === 'RETURNED') {
     var q = $('qty-input'); if (q) q.value = g;
-    try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'Scale return weight ' + reading.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
   } else {
     var w = $('weight-g-input'); if (w) w.value = g;
     try { updateRemainingDisplay(); } catch (_) {}
-    try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'Scale weight ' + reading.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
   }
 }
 // PARTIAL UX — keep the in-flow "Use current scale weight" button (next to the
@@ -3861,7 +3907,7 @@ function _bleUseLatestMain() {
 function _weightUseScaleSync() {
   var btn = $('weight-use-scale'); if (!btn) return;
   var connected = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode) && bleScale.connected);
-  var hasStable = connected && !!(bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number');
+  var hasStable = connected && !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable);
   btn.style.display = connected ? '' : 'none';
   btn.disabled = !hasStable;
   btn.style.opacity = hasStable ? '1' : '0.55';
@@ -3870,11 +3916,11 @@ function _weightUseScaleSync() {
 // Fill the WEIGHT (g) field with the CORRECTED stable grams + recalc remaining %.
 // Works for TAKEN/PARTIAL bottles sent to a bar; never submits, never writes DB.
 function _weightUseScaleFill() {
-  if (!(typeof bleScale !== 'undefined' && bleScale && bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number')) return;
+  var reading = _trustedLocalScaleReading(true); if (!reading) return;
   var w = $('weight-g-input'); if (!w) return;
-  w.value = String(bleScale.latest.grams);   // corrected grams
+  w.value = String(reading.grams);   // corrected grams
   try { updateRemainingDisplay(); } catch (_) {}
-  try { statusOn('save-status', 'Filled WEIGHT with ' + bleScale.latest.grams + ' g — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Filled WEIGHT with ' + reading.grams + ' g — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
   try { Feedback.ok(); } catch (_) {}
 }
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
@@ -4080,10 +4126,13 @@ async function _nativeScaleDisconnect() {
     var _scaleUi = bleScale.supported || bleScale.nativeMode;
     var mp = $('main-ble'); if (mp) mp.style.display = _scaleUi ? '' : 'none';
     var mh = $('main-ble-hint'); if (mh) mh.style.display = _scaleUi ? 'none' : '';
-    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = _scaleUi ? '' : 'none';   // station = a device with local BLE (Web BT or iOS native)
+    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = (SCALE_BRIDGE_RELEASE_ENABLED && _scaleUi) ? '' : 'none';
+    var bl = $('bridge-listen');
+    if (bl && !SCALE_BRIDGE_RELEASE_ENABLED) { bl.disabled = true; bl.textContent = 'Bridge disabled'; }
+    var bs = $('bridge-start-station');
+    if (bs && !SCALE_BRIDGE_RELEASE_ENABLED) { bs.disabled = true; bs.textContent = 'Bridge publishing disabled'; }
     // Desktop with no Web Bluetooth (Safari/Firefox/Arc/Atlas, or Chrome with BLE
-    // disabled) → a station CANNOT run here. Show a clear "use Chrome/Edge" CTA.
-    // Receiver mode (Listen to Scale Station) is unaffected and stays available.
+    // disabled) cannot connect directly. Show a clear Chrome/Edge/manual-entry CTA.
     var cta = $('main-ble-desktop-cta');
     if (cta) cta.style.display = (!_scaleUi && _bleDeviceType() === 'Desktop') ? '' : 'none';
     if (bleScale.nativeMode) {
@@ -4102,12 +4151,10 @@ async function _nativeScaleDisconnect() {
   } catch (_) { bleScale.supported = false; }
 })();
 // ════════════════════════════════════════════════════════════════════
-//  SCALE_BRIDGE — Realtime relay so iPhone/Safari barbacks (no Web Bluetooth)
-//  can use scale weight. One laptop/Android "Scale Station" connects to the BLE
-//  scale and BROADCASTS the latest high-confidence weight on a venue/night-scoped
-//  Supabase Realtime channel; other clients LISTEN and set bleScale.latest so the
-//  existing field-fill works. Frontend-only: public broadcast channel + anon key.
-//  No table, RLS, Edge, or DB write. Never broadcasts PIN/token/access_code.
+//  SCALE_BRIDGE — release-gated remote relay. The current public Realtime/HTTP
+//  transport cannot establish device authenticity, so remote readings are
+//  untrusted/display-only and can never enter bleScale.latest or inventory inputs.
+//  Direct local Web Bluetooth/native BLE and manual grams remain available.
 //  supabase-js is loaded lazily, captured, then its window.supabase global is
 //  removed (only if WE loaded it) so the page's event-insert path (SB =
 //  buildSupabaseClient → needs window.supabase) is provably unaffected.
@@ -4118,6 +4165,20 @@ var bridge = { sb: null, client: null, channel: null, listening: false, publishi
   wakeLock: null, lastPubMs: 0, startedMs: 0, watchTimer: null, lastPayload: '',
   heartbeatTimer: null, lastHeartbeatTs: '', lastHeartbeatErr: null, lastPubHex: '', lastPubConf: 'high', lastPubRange: '' };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
+var SCALE_BRIDGE_DISABLED_MESSAGE = 'Bridge disabled for public release — remote readings are untrusted. Use direct Bluetooth or enter grams manually.';
+function _bridgeReleaseBlocked() {
+  if (SCALE_BRIDGE_RELEASE_ENABLED) return false;
+  _bridgeStatus(SCALE_BRIDGE_DISABLED_MESSAGE);
+  var warning = $('bridge-trust-warning'); if (warning) warning.style.display = '';
+  var listen = $('bridge-listen'); if (listen) { listen.disabled = true; listen.textContent = 'Bridge disabled'; }
+  var station = $('bridge-start-station'); if (station) { station.disabled = true; station.textContent = 'Bridge publishing disabled'; }
+  var use = $('bridge-use'); if (use) {
+    use.disabled = true;
+    use.style.opacity = '0.55';
+    use.textContent = 'Remote weight is display-only';
+  }
+  return true;
+}
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
   var venue = tp.venue_id || ss.venue_id || '';
@@ -4183,6 +4244,7 @@ function _bridgeStationId() {
   return bridge.stationId;
 }
 async function _bridgeLoadLib() {
+  if (_bridgeReleaseBlocked()) return false;
   if (bridge.sb) return true;
   var preExisting = !!(window.supabase && window.supabase.createClient);
   if (!preExisting) { try { await loadScript(SCALE_BRIDGE_CDN); } catch (_) { return false; } }
@@ -4192,6 +4254,7 @@ async function _bridgeLoadLib() {
   return true;
 }
 function _bridgeMakeClient() {
+  if (_bridgeReleaseBlocked()) return null;
   if (bridge.client) return bridge.client;
   if (!bridge.sb || !supabaseCfg || !supabaseCfg.url || !supabaseCfg.key) return null;
   try {
@@ -4203,6 +4266,7 @@ function _bridgeMakeClient() {
   return bridge.client;
 }
 async function _bridgeEnsureChannel() {
+  if (_bridgeReleaseBlocked()) return null;
   if (bridge.channel) return bridge.channel;
   var scope = _bridgeScope();
   if (!scope) { _bridgeStatus('Bridge: no event scope — log in first'); return null; }
@@ -4223,34 +4287,37 @@ async function _bridgeEnsureChannel() {
     } catch (_) { if (!settled) { settled = true; resolve(null); } }
   });
 }
-// Receiver — feed bleScale.latest from station broadcasts; existing Use buttons work.
+// Receiver defense in depth: remote data remains visible for diagnostics only.
 function _bridgeOnMessage(p) {
-  if (!p || typeof p.grams !== 'number') return;
+  if (!p || typeof p.grams !== 'number' || !isFinite(p.grams)) return;
   if (bridge.publishing && !bridge.listening) return;   // a pure station ignores remote weights
   bridge.rxCount = (bridge.rxCount || 0) + 1; bridge.lastRxTs = _bridgeNow(); try { _bridgeRenderDiag(); } catch (_) {}
   _bridgeApplyWeight(p, 'realtime');
 }
 // Shared receiver update — used by both Realtime broadcast and HTTP polling.
-// Sets bleScale.latest so the existing context-aware Use button fills the field.
+// Never writes bleScale.latest: remote values are untrusted inventory evidence.
+// SCALE_BRIDGE_UNTRUSTED_RECEIVER_V1_START
 function _bridgeApplyWeight(p, source) {
-  if (!p || typeof p.grams !== 'number') return;
-  bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '' };
-  bleScale.latest = { grams: p.grams, stable: !!p.stable };
-  bridge.lastPayload = (p.station_id || '?') + ' · ' + p.grams + 'g · ' + (p.stable ? 'stable' : 'unstable');
-  var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable') + (source ? (' · via ' + source) : '');
-  var u = $('bridge-update'); if (u) u.textContent = 'Last update: just now' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
+  if (!p || typeof p.grams !== 'number' || !isFinite(p.grams)) return { applied: false, reason: 'invalid_weight' };
+  bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '', trusted: false, source: source || 'remote_bridge' };
+  bridge.lastPayload = (p.station_id || '?') + ' · ' + p.grams + 'g · UNTRUSTED DISPLAY ONLY';
+  var w = $('bridge-weight'); if (w) w.textContent = 'Remote station weight: ' + p.grams + ' g · UNTRUSTED / DISPLAY ONLY' + (source ? (' · via ' + source) : '');
+  var u = $('bridge-update'); if (u) u.textContent = 'Cannot fill inventory weight · use direct Bluetooth or manual grams' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
   var s = $('bridge-station'); if (s) s.textContent = 'Station: ' + (p.station_id || '?');
   var use = $('bridge-use');
   if (use) {
     use.style.display = '';
-    if (p.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
-    else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
+    use.disabled = true;
+    use.textContent = 'Remote weight is display-only';
+    use.style.opacity = '0.55';
   }
+  try { _bridgeReleaseBlocked(); } catch (_) {}
+  return { applied: false, trusted: false, reason: 'untrusted_remote_bridge' };
 }
 // Receiver — NO fresh weight this poll. Show WHY (from the Edge `reason`) so the
 // operator isn't staring at a blank dash, and make sure a stale reading can never
-// be recorded: clear bleScale.latest and disable the Use button. A fresh weight on
-// the next poll re-enables everything via _bridgeApplyWeight.
+// be recorded: clear only bridge.latest and disable the bridge Use button. Direct
+// local BLE/native BLE state is independent and must never be cleared here.
 //   expired → a station published but stopped >TTL ago (laptop closed / scale dropped);
 //             `stale` carries the last reading + age, shown greyed-out, NOT usable.
 //   no_row  → no station has published for THIS venue+night — the station never
@@ -4266,7 +4333,7 @@ function _bridgeShowNoWeight(reason, info) {
     if (reason) bridge.lastPayload = 'poll ' + reason + ' ignored; using recent realtime payload';
     return;
   }
-  bridge.latest = null; bleScale.latest = null;
+  bridge.latest = null;
   var w = $('bridge-weight'), u = $('bridge-update'), s = $('bridge-station'), use = $('bridge-use');
   if (reason === 'expired' && typeof stale.grams === 'number') {
     var _ageS = Number(stale.age_sec) || 0;
@@ -4290,9 +4357,11 @@ function _bridgeShowNoWeight(reason, info) {
   }
   if (use) { use.disabled = true; use.style.opacity = '0.55'; use.textContent = 'Waiting for fresh stable weight…'; }
 }
+// SCALE_BRIDGE_UNTRUSTED_RECEIVER_V1_END
 // HTTP bridge (polling fallback) — authenticated POST to the barback-scale-bridge
 // Edge function with the barback JWT. Edge derives venue/night from the JWT claims.
 async function _bridgeHttp(action, extra) {
+  if (_bridgeReleaseBlocked()) return null;
   if (!state.jwt || !supabaseCfg || !supabaseCfg.key) return null;
   var base; try { base = functionsBase(); } catch (_) { base = null; }
   if (!base) return null;
@@ -4306,6 +4375,7 @@ async function _bridgeHttp(action, extra) {
   } catch (_) { return null; }
 }
 async function _bridgeHttpPublish(payload) {
+  if (_bridgeReleaseBlocked()) return;
   var r = await _bridgeHttp('publish', payload);
   bridge.httpOk = !!(r && r.ok);
   bridge.httpErr = (r && r.ok) ? null : ((r && r.error) ? String(r.error).slice(0, 40) : 'no response');
@@ -4315,6 +4385,7 @@ async function _bridgeHttpPublish(payload) {
 // Receiver poll — runs every ~1s while listening; delivers weight over HTTPS even
 // when Realtime broadcast Rx stays 0 (iPhone/iPad).
 async function _bridgePollLatest() {
+  if (_bridgeReleaseBlocked()) return;
   if (!bridge.listening) return;
   var r = await _bridgeHttp('latest', {});
   bridge.lastPollTs = _bridgeNow();
@@ -4343,6 +4414,7 @@ async function _bridgePollLatest() {
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeListen() {
+  if (_bridgeReleaseBlocked()) return;
   if (bridge.listening) { _bridgeStopListen(); return; }
   _bridgeStatus('Bridge: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
   var scope = _bridgeScope();
@@ -4423,6 +4495,7 @@ function _bridgeStationHealth() {
 // bridge row stays fresh. Reuses _bridgeHttpPublish and the EXACT same payload shape —
 // no endpoint / payload / TTL / receiver change. Receiver stale rules stay strict.
 function _bridgeHeartbeatPublish() {
+  if (_bridgeReleaseBlocked()) return;
   if (!bridge.publishing) return;        // station off → no heartbeat
   if (!bleScale.connected) return;       // scale dropped → do NOT publish a fake-fresh value
   var L = bleScale.latest;
@@ -4446,6 +4519,7 @@ function _bridgeHeartbeatPublish() {
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeStartStation() {
+  if (_bridgeReleaseBlocked()) return;
   if (bridge.publishing) { _bridgeStopStation(); return; }
   if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then tap Publish to iPhones'); return; }
   if (!state.jwt) { _bridgeStatus('Log in first — station needs a session to publish'); return; }
@@ -4487,6 +4561,7 @@ function _bridgeMaybeClose() {
 }
 // Station — publish a high-confidence frame (rate-limited). Called from _bleOnFrame.
 function _bridgeMaybePublish(r, hex) {
+  if (_bridgeReleaseBlocked()) return;
   if (!bridge.publishing) return;
   if (!r || r.confidence !== 'high') return;
   var now = Date.now();
@@ -4517,7 +4592,17 @@ function _bridgeMaybePublish(r, hex) {
   try { _bridgeHttpPublish(_bridgePayload({ grams: pubG, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() })); } catch (_) {}
   try { _bridgeRenderDiag(); } catch (_) {}
 }
-function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
+function _bridgeUse() {
+  _bridgeReleaseBlocked();
+  try {
+    statusOn(
+      'save-status',
+      'Remote Scale Bridge readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.',
+      'warn'
+    );
+  } catch (_) {}
+  return false;
+}
 // SCALE_OFFSET — wire the calibration controls (station panel). Persist to
 // localStorage; corrected grams flow automatically via _scaleCorrect / _bleOnFrame.
 (function _wireScaleOffset() {
@@ -6700,7 +6785,7 @@ async function bleConnect() {
   // Legacy custom BARINV BLE bridge is disabled in the standalone Barback web link.
   // Scale weighing is owned by the QN-KS / Arboleaf adapter above:
   // Web Bluetooth where available, iOS-native only inside a Capacitor host, and
-  // bridge/station mode as the browser-safe fallback.
+  // manual grams when direct Bluetooth is unavailable. Remote bridge is release-gated.
   if (typeof _bleConnect === 'function') return _bleConnect(false);
   throw new Error('Legacy scale connector disabled. Use Connect Scale.');
 }
