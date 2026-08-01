@@ -3029,6 +3029,9 @@ function stopRoiDecodeLoop() {
 }
 
 async function openScanner() {
+  // SCANNER_FREEZE_HOTFIX (2026-07-31) — never let a failed/abandoned quantity
+  // sheet leave the continuous decode gate latched across scanner sessions.
+  closeQtyModal();
   // PLAN-2026-06-04 — safe diagnostic so iPhone Web Inspector can
   // tell whether the scanner actually opened. Logs ZERO secrets — only
   // the continuous flag, the action-gate boolean, and the cached item
@@ -3195,7 +3198,7 @@ function shouldRequireWeightBeforeAdd() {
   return false;
 }
 
-async function onBarcodeScanned(code, controls) {
+function onBarcodeScanned(code, controls) {
   const it = lookupByBarcode(code);
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
   // distinguish "ZXing decoded but no item match" from "ZXing never
@@ -3271,7 +3274,9 @@ async function onBarcodeScanned(code, controls) {
       return;   // stay open; nothing added, sheet not opened
     }
     try { showScannerToast('✓ ' + it.name + ' · set quantity…', 'ok'); } catch (_) {}
-    try { openQtyModal(it); } catch (_) {}   // gate pauses decodes; closeQtyModal resumes
+    if (!openQtyModal(it)) {
+      try { showScannerToast('⚠ Quantity sheet could not open — scan again', 'warn'); } catch (_) {}
+    }
     return;
   } else {
     // SINGLE-SCAN — guard against a second decode firing during the close window.
@@ -3510,42 +3515,59 @@ function _qmResetProfile() {
   _qmUpdateRemaining();
 }
 function openQtyModal(it) {
-  if (!it) return;
-  state.qtyModalItem = it;
-  const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
-  if ($('qm-item')) $('qm-item').innerHTML =
-    '<span class="qm-item-with-thumb">' +
-      itemThumbHTML(it, 'qm-thumb') +
-      '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
-    '</span>';
-  const act = state.selectedAction || '(pick action)';
-  let barCtx;
-  if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
-    const nb = state.multiBars.length;
-    barCtx = 'Will add to ' + nb + ' bar' + (nb !== 1 ? 's' : '');
-  } else {
-    const b = (cache.bars || []).find(x => x.id === state.selectedBarId);
-    barCtx = b ? ('Bar: ' + (b.name || '?')) : 'Bar: (any)';
+  // SCANNER_FREEZE_HOTFIX (2026-07-31) — reset any stale gate first, then make
+  // modal setup transactional. Helpers below read qtyModalItem, so assign it
+  // inside the guarded section and roll it back on every render/open failure.
+  closeQtyModal();
+  if (!it) return false;
+  try {
+    state.qtyModalItem = it;
+    const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
+    if ($('qm-item')) $('qm-item').innerHTML =
+      '<span class="qm-item-with-thumb">' +
+        itemThumbHTML(it, 'qm-thumb') +
+        '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
+      '</span>';
+    const act = state.selectedAction || '(pick action)';
+    let barCtx;
+    if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
+      const nb = state.multiBars.length;
+      barCtx = 'Will add to ' + nb + ' bar' + (nb !== 1 ? 's' : '');
+    } else {
+      const b = (cache.bars || []).find(x => x.id === state.selectedBarId);
+      barCtx = b ? ('Bar: ' + (b.name || '?')) : 'Bar: (any)';
+    }
+    if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
+    _qmSetQty(1);   // default qty 1
+    // SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — reset bottle-state/weight section.
+    state.qmBottleState = 'NOT_WEIGHED';
+    const _qmMulti = multiBarDestCount() > 1;   // disable PARTIAL only when >1 destination, not on the checkbox alone
+    const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
+    if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
+    const _qmMsg = $('qm-partial-msg');
+    if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
+    if ($('qm-weight')) $('qm-weight').value = '';
+    if ($('qm-tare')) $('qm-tare').value = '';
+    if ($('qm-full')) $('qm-full').value = '';
+    state.qmProfileEditing = false;   // SCALE_PROFILE_EDIT — start in summary/create view
+    _qmSetState('NOT_WEIGHED');
+    const ov = $('qty-modal');
+    if (!ov) throw new Error('quantity modal unavailable');
+    ov.classList.add('open');
+    ov.setAttribute('aria-hidden', 'false');
+    return true;
+  } catch (e) {
+    closeQtyModal();
+    try { console.warn('[scanner] quantity sheet failed to open — pause gate cleared', (e && e.message) || e); } catch (_) {}
+    return false;
   }
-  if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
-  _qmSetQty(1);   // default qty 1
-  // SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — reset bottle-state/weight section.
-  state.qmBottleState = 'NOT_WEIGHED';
-  const _qmMulti = multiBarDestCount() > 1;   // disable PARTIAL only when >1 destination, not on the checkbox alone
-  const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
-  if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
-  const _qmMsg = $('qm-partial-msg');
-  if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
-  if ($('qm-weight')) $('qm-weight').value = '';
-  if ($('qm-tare')) $('qm-tare').value = '';
-  if ($('qm-full')) $('qm-full').value = '';
-  state.qmProfileEditing = false;   // SCALE_PROFILE_EDIT — start in summary/create view
-  _qmSetState('NOT_WEIGHED');
-  const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
 }
 function closeQtyModal() {
   state.qtyModalItem = null;
-  const ov = $('qty-modal'); if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+  try {
+    const ov = $('qty-modal');
+    if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+  } catch (_) {}
 }
 function qtyModalAdd() {
   const it = state.qtyModalItem;
@@ -3565,20 +3587,29 @@ function qtyModalAdd() {
     }
     weightOverride = wraw;
   }
-  const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty, bottleStateOverride: bs, weightOverride: weightOverride });
-  if (!res || !res.ok) {
-    Feedback.warn();
-    showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
+  // Validation failures above intentionally keep the sheet open. Once Add
+  // processing begins, always release the scanner pause gate — success, a
+  // rejected add, or an unexpected UI/draft exception must all resume RAPID.
+  try {
+    const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty, bottleStateOverride: bs, weightOverride: weightOverride });
+    if (!res || !res.ok) {
+      Feedback.warn();
+      showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
+      return;
+    }
+    Feedback.ok();
+    const n = Drafts.count();
+    showOverlay('✓ ADDED TO REVIEW',
+      it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
+    statusOn('save-status',
+      'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
+  } catch (e) {
+    try { Feedback.warn(); } catch (_) {}
+    try { showOverlay('⚠ NOT ADDED', 'Scanner recovered — please scan again', 'err'); } catch (_) {}
+    try { console.warn('[scanner] quantity add failed — pause gate cleared', (e && e.message) || e); } catch (_) {}
+  } finally {
     closeQtyModal();
-    return;
   }
-  Feedback.ok();
-  const n = Drafts.count();
-  showOverlay('✓ ADDED TO REVIEW',
-    it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
-  statusOn('save-status',
-    'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
-  closeQtyModal();
 }
 // ════════════════════════════════════════════════════════════════════
 //  SCALE_BLE — capability-gated Web Bluetooth prototype (Android / desktop
@@ -4801,6 +4832,9 @@ function applyScannerTrackTuning() {
 }
 
 function closeScanner() {
+  // SCANNER_FREEZE_HOTFIX (2026-07-31) — closing the scanner also clears any
+  // quantity-sheet pause left by an interrupted/error path.
+  closeQtyModal();
   $('scanner-box').classList.remove('active');
   stopRoiDecodeLoop();
   if (state.scannerFallbackTimer) { try { clearTimeout(state.scannerFallbackTimer); } catch (_) {} state.scannerFallbackTimer = null; }
