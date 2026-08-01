@@ -3399,14 +3399,29 @@ function renderVenueSelector() {
   ).join('') + (SESSION.role === 'admin' ? '<option value="__add">+ New Venue</option><option value="__manage">⚙ Manage Venues</option>' : '');
 }
 
+// Drop every venue-scoped in-memory value and already-rendered result, so a
+// venue switch can never leave the previous venue's counters, activity rows or
+// dropdown options on screen while the new venue loads.
+function clearVenueScopedState() {
+  SESSION.cache = { bars:[], stations:[], items:[], staff:[], nights:[], placements:[] };
+  DSP_STATE = {};
+  DSP_STAFF_MAP = {};
+  renderDashboardStats(0, 0, 0, 0);
+  const tbody = document.getElementById('dash-tbody');
+  if (tbody) tbody.innerHTML = '';
+  const nightSel = document.getElementById('dash-night');
+  if (nightSel) { nightSel.innerHTML = '<option value="">All Nights</option>'; nightSel.value = ''; }
+  const upd = document.getElementById('last-update');
+  if (upd) upd.textContent = '';
+}
+
 window.switchVenue = async function(val) {
   if(val === '__add') { openAddVenue(); renderVenueSelector(); return; }
   if(val === '__manage') { openManageVenues(); renderVenueSelector(); return; }
   SESSION.venueId = val;
   SESSION.venueName = SESSION.venues.find(v => v.id === val)?.name || '';
   localStorage.setItem('barinv_venue_id', val);
-  DSP_STATE = {};
-  DSP_STAFF_MAP = {};
+  clearVenueScopedState();
   await preload();
   navigateTo('dashboard');
   toast(`Switched to ${SESSION.venueName}`, 't-ok');
@@ -4524,11 +4539,21 @@ async function preload() {
 // ══════════════════════════════════════════════════════
 // REALTIME
 // ══════════════════════════════════════════════════════
+// The realtime channel is subscribed once and receives INSERTs for every venue
+// the session can read, so each payload must be re-checked against the venue
+// that is active right now.
+function eventBelongsToActiveVenue(ev) {
+  const vid = SESSION.venueId;
+  if (!vid) return true;
+  return ev?.venue_id === vid;
+}
+
 function setupRealtime() {
   if (SESSION.role !== 'admin') return;
   SB.channel('events-live')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' }, payload => {
       const ev = payload.new;
+      if (!eventBelongsToActiveVenue(ev)) return;
       prependEventToTable(ev, 'dash-tbody');
       updateDashStats();
       const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -4552,41 +4577,62 @@ function prependEventToTable(ev, tbodyId) {
 // ══════════════════════════════════════════════════════
 // DASHBOARD
 // ══════════════════════════════════════════════════════
-async function loadDashboard() {
-  const nightSel = document.getElementById('dash-night');
-  if (nightSel) {
-    const cur = nightSel.value;
-    nightSel.innerHTML = '<option value="">All Nights</option>' +
-      SESSION.cache.nights.map(n => `<option value="${n.id}" ${n.id === cur ? 'selected' : ''}>${n.name}</option>`).join('');
-    nightSel.value = cur;
-  }
-
-  try {
-    let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku)').order('created_at', { ascending: false }).limit(60);
-    const nightId = document.getElementById('dash-night')?.value;
-    if (nightId) q = q.eq('night_id', nightId);
-    const { data: events } = await q;
-
-    // Stats
-    const total    = (events || []).length;
-    const pending  = (events || []).filter(e => e.status === 'PENDING').length;
-    const delivered= (events || []).filter(e => e.action === 'DELIVERED').length;
-    const returned = (events || []).filter(e => e.action === 'RETURNED').length;
-
-    document.getElementById('dash-stats').innerHTML = `
+function renderDashboardStats(total, pending, delivered, returned) {
+  const el = document.getElementById('dash-stats');
+  if (!el) return;
+  el.innerHTML = `
       <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">Total Events</div></div>
       <div class="stat-card sc-a4"><div class="stat-val">${pending}</div><div class="stat-lbl">Pending</div></div>
       <div class="stat-card sc-a2"><div class="stat-val">${delivered}</div><div class="stat-lbl">Delivered</div></div>
       <div class="stat-card sc-a3"><div class="stat-val">${returned}</div><div class="stat-lbl">Returned</div></div>
     `;
+}
+
+async function loadDashboard() {
+  // Pinned for the whole run: a slow response from the previous venue must not
+  // paint over the venue the operator has since switched to.
+  const venueId = SESSION.venueId;
+
+  try {
+    const nightSel = document.getElementById('dash-night');
+    if (nightSel) {
+      const cur = nightSel.value;
+      nightSel.innerHTML = '<option value="">All Nights</option>' +
+        SESSION.cache.nights.map(n => `<option value="${n.id}" ${n.id === cur ? 'selected' : ''}>${n.name}</option>`).join('');
+      nightSel.value = cur;
+    }
+
+    let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku)').order('created_at', { ascending: false }).limit(60);
+    const nightId = document.getElementById('dash-night')?.value;
+    if (nightId) q = q.eq('night_id', nightId);
+    const { data, error } = await q;
+    if (error) throw error;
+    if (SESSION.venueId !== venueId) return; // venue changed mid-flight
+
+    // The SB.from() wrapper already scopes this query to venue_id; re-check each
+    // row so nothing foreign can ever be counted or rendered.
+    const events = (data || []).filter(eventBelongsToActiveVenue);
+
+    // Stats
+    const total    = events.length;
+    const pending  = events.filter(e => e.status === 'PENDING').length;
+    const delivered= events.filter(e => e.action === 'DELIVERED').length;
+    const returned = events.filter(e => e.action === 'RETURNED').length;
+
+    renderDashboardStats(total, pending, delivered, returned);
 
     const tbody = document.getElementById('dash-tbody');
-    if (!events?.length) {
+    if (!events.length) {
       tbody.innerHTML = '<tr><td colspan="7"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events yet</div></div></td></tr>';
       return;
     }
     tbody.innerHTML = events.map(e => `<tr>${eventRow(e)}</tr>`).join('');
   } catch (e) {
+    // Never leave the previous venue's numbers on screen after a failed load.
+    if (SESSION.venueId !== venueId) return;
+    renderDashboardStats(0, 0, 0, 0);
+    const tbody = document.getElementById('dash-tbody');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7"><div class="empty"><div class="empty-icon">⚠️</div><div class="empty-text">Could not load events</div></div></td></tr>';
     toast('Dashboard error: ' + e.message, 't-err');
   }
 }
