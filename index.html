@@ -9005,8 +9005,9 @@ function vipCalc(row) {
   const comps = vipNum(row.comps);
   const discounts = vipNum(row.discounts);
   const netSpend = Math.max(0, actual - comps - discounts);
-  const remaining = Math.max(0, minimum - netSpend);
-  const status = row.is_closed ? 'Closed' : remaining <= 0 ? 'Reached Minimum' : (actual > 0 || deposit > 0 ? 'Below Minimum' : 'Open');
+  const minimumCoverage = deposit + netSpend;
+  const remaining = Math.max(0, minimum - minimumCoverage);
+  const status = row.is_closed ? 'Closed' : minimumCoverage >= minimum ? 'Reached Minimum' : (actual > 0 || deposit > 0 ? 'Below Minimum' : 'Open');
   return { minimum, deposit, actual, comps, discounts, netSpend, remaining, status };
 }
 function vipStatusBadgeClass(status) {
@@ -9142,7 +9143,7 @@ async function openVipTableModal(id = null) {
     <div class="field"><label>Booked By</label><input id="vip-booked-by" placeholder="Who made the reservation" value="${esc(row.booked_by || '')}"></div>
     <div class="fg fg-2">
       <div class="field"><label>Minimum Spend (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-minimum" type="number" min="0" step="0.01" value="${vipNum(row.minimum_spend)}"></div>
-      <div class="field"><label>Deposit Paid (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-deposit" type="number" min="0" step="0.01" value="${vipNum(row.deposit_paid)}"></div>
+      <div class="field"><label>Deposit Paid (${esc(BIZ_PROFILE.currency || 'CAD')}) <span style="color:var(--muted);font-size:10px;">counts toward minimum coverage, not actual order spend</span></label><input id="vip-deposit" type="number" min="0" step="0.01" value="${vipNum(row.deposit_paid)}"></div>
     </div>
     <div class="fg fg-3">
       <div class="field"><label>Actual Spend (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-actual" type="number" min="0" step="0.01" value="${vipNum(row.actual_spend)}"></div>
