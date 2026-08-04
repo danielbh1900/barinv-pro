@@ -2365,7 +2365,7 @@ th.sortable span { font-size:10px; }
       </div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Table</th><th>Guest</th><th>Booked By</th><th>Minimum</th><th>Net Spend</th><th>Remaining</th><th>Deposit</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Table / Server</th><th>Guest Name / Notes</th><th>Seller / Booked By</th><th>Initial Paid / Deposit Paid</th><th>Minimum</th><th>Net Spend</th><th>Remaining</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="vip-tbody">
             <tr><td colspan="9"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>
           </tbody>
@@ -9090,10 +9090,10 @@ async function loadVipTables() {
         <td><div style="font-weight:700;">${esc(r.table_name || '—')}</div>${r.server_name ? `<div style="font-size:11px;color:var(--muted);">Server: ${esc(r.server_name)}</div>` : ''}</td>
         <td><div>${esc(r.guest_name || '—')}</div>${r.notes ? `<div style="font-size:11px;color:var(--muted);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.notes)}</div>` : ''}</td>
         <td style="font-size:12px;">${esc(r.booked_by || '—')}</td>
+        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.deposit)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.minimum)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.netSpend)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.remaining)}</td>
-        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.deposit)}</td>
         <td><span class="badge ${vipStatusBadgeClass(c.status)}">${c.status}</span></td>
         <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-a btn-xs" onclick="vipQuickAddSpend('${r.id}')">+$ Spend</button>
@@ -9260,11 +9260,12 @@ async function exportVipTablesCSV(fmt) {
   if (!nightId) { toast('Select a night first', 't-err'); return; }
   const rows = await vipFetchRows(nightId);
   if (!rows.length) { toast('No VIP tables to export', 't-err'); return; }
-  const dataRows = [['Table','Guest','Booked By','Server','Minimum Spend','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Notes']];
+  // TODO: Itemized paid-order export needs a persisted VIP spend-line model; Phase 1 remains table-summary based.
+  const dataRows = [['Table Name','Guest Name','Seller / Booked By','Server','Minimum','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Is Closed','Notes','Created At','Updated At','Closed At']];
   rows.forEach(r => {
     const c = vipCalc(r);
     dataRows.push([
-      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', c.minimum, c.deposit, c.actual, c.comps, c.discounts, c.netSpend, c.remaining, c.status, r.notes || ''
+      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', c.minimum, c.deposit, c.actual, c.comps, c.discounts, c.netSpend, c.remaining, c.status, r.is_closed ? 'Yes' : 'No', r.notes || '', r.created_at || '', r.updated_at || '', r.closed_at || ''
     ]);
   });
   downloadRows(`vip_tables_${new Date().toISOString().slice(0,10)}.csv`, dataRows, fmt);
