@@ -2359,15 +2359,16 @@ th.sortable span { font-size:10px; }
             <div class="stat-card sc-dim"><div class="stat-val">0</div><div class="stat-lbl">Tables</div></div>
             <div class="stat-card sc-a2"><div class="stat-val">0</div><div class="stat-lbl">Reached</div></div>
             <div class="stat-card sc-a4"><div class="stat-val">0</div><div class="stat-lbl">Below Minimum</div></div>
+            <div class="stat-card sc-a2"><div class="stat-val">0</div><div class="stat-lbl">Minimum Covered</div></div>
             <div class="stat-card sc-a"><div class="stat-val">0</div><div class="stat-lbl">Remaining</div></div>
           </div>
         </div>
       </div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Table / Server</th><th>Guest Name / Notes</th><th>Seller / Booked By</th><th>Initial Paid / Deposit Paid</th><th>Minimum</th><th>Net Spend</th><th>Remaining</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Table / Server</th><th>Guest Name / Notes</th><th>Seller / Booked By</th><th>Deposit Paid</th><th>Minimum</th><th>Gross Orders</th><th>Net Orders</th><th>Minimum Covered</th><th>Remaining</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="vip-tbody">
-            <tr><td colspan="9"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>
+            <tr><td colspan="11"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -9004,11 +9005,11 @@ function vipCalc(row) {
   const actual = vipNum(row.actual_spend);
   const comps = vipNum(row.comps);
   const discounts = vipNum(row.discounts);
-  const netSpend = Math.max(0, actual - comps - discounts);
-  const minimumCoverage = deposit + netSpend;
-  const remaining = Math.max(0, minimum - minimumCoverage);
-  const status = row.is_closed ? 'Closed' : minimumCoverage >= minimum ? 'Reached Minimum' : (actual > 0 || deposit > 0 ? 'Below Minimum' : 'Open');
-  return { minimum, deposit, actual, comps, discounts, netSpend, remaining, status };
+  const netOrders = actual - comps - discounts;
+  const minimumCovered = deposit + netOrders;
+  const remaining = Math.max(0, minimum - minimumCovered);
+  const status = row.is_closed ? 'Closed' : minimumCovered >= minimum ? 'Reached Minimum' : (actual > 0 || deposit > 0 ? 'Below Minimum' : 'Open');
+  return { minimum, deposit, actual, comps, discounts, netOrders, minimumCovered, remaining, status };
 }
 function vipStatusBadgeClass(status) {
   if (status === 'Reached Minimum') return 'b-active';
@@ -9070,12 +9071,13 @@ async function loadVipTables() {
 
   if (!current) {
     const tbody = document.getElementById('vip-tbody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="11"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>';
     const kpiEl = document.getElementById('vip-kpis');
     if (kpiEl) kpiEl.innerHTML = `
       <div class="stat-card sc-dim"><div class="stat-val">0</div><div class="stat-lbl">Tables</div></div>
       <div class="stat-card sc-a2"><div class="stat-val">0</div><div class="stat-lbl">Reached</div></div>
       <div class="stat-card sc-a4"><div class="stat-val">0</div><div class="stat-lbl">Below Minimum</div></div>
+      <div class="stat-card sc-a2"><div class="stat-val">${formatCurrency(0)}</div><div class="stat-lbl">Minimum Covered</div></div>
       <div class="stat-card sc-a"><div class="stat-val">${formatCurrency(0)}</div><div class="stat-lbl">Remaining</div></div>`;
     return;
   }
@@ -9083,7 +9085,7 @@ async function loadVipTables() {
   const rows = await vipFetchRows(current);
   const tbody = document.getElementById('vip-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-text">No VIP tables yet for this night.</div></div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11"><div class="empty"><div class="empty-text">No VIP tables yet for this night.</div></div></td></tr>';
   } else {
     tbody.innerHTML = rows.map(r => {
       const c = vipCalc(r);
@@ -9093,11 +9095,13 @@ async function loadVipTables() {
         <td style="font-size:12px;">${esc(r.booked_by || '—')}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.deposit)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.minimum)}</td>
-        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.netSpend)}</td>
+        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.actual)}</td>
+        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.netOrders)}</td>
+        <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.minimumCovered)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.remaining)}</td>
         <td><span class="badge ${vipStatusBadgeClass(c.status)}">${c.status}</span></td>
         <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="btn btn-a btn-xs" onclick="vipQuickAddSpend('${r.id}')">+$ Spend</button>
+          <button class="btn btn-a btn-xs" onclick="vipQuickAddSpend('${r.id}')">+$ Order</button>
           <button class="btn btn-ghost btn-xs" onclick="openVipTableModal('${r.id}')">Edit</button>
           <button class="btn btn-a2 btn-xs" onclick="toggleVipTableClosed('${r.id}')">${r.is_closed ? 'Reopen' : 'Close'}</button>
           <button class="btn btn-danger btn-xs" onclick="deleteVipTable('${r.id}')">×</button>
@@ -9113,18 +9117,20 @@ async function loadVipTables() {
     if (c.status === 'Below Minimum') acc.below += 1;
     if (c.status === 'Closed') acc.closed += 1;
     acc.remaining += c.remaining;
-    acc.net += c.netSpend;
+    acc.netOrders += c.netOrders;
+    acc.minimumCovered += c.minimumCovered;
     acc.minimum += c.minimum;
     return acc;
-  }, { tables: 0, reached: 0, below: 0, closed: 0, remaining: 0, net: 0, minimum: 0 });
+  }, { tables: 0, reached: 0, below: 0, closed: 0, remaining: 0, netOrders: 0, minimumCovered: 0, minimum: 0 });
   const kpiEl = document.getElementById('vip-kpis');
   if (kpiEl) kpiEl.innerHTML = `
     <div class="stat-card sc-dim"><div class="stat-val">${totals.tables}</div><div class="stat-lbl">Tables</div></div>
     <div class="stat-card sc-a2"><div class="stat-val">${totals.reached}</div><div class="stat-lbl">Reached</div></div>
     <div class="stat-card sc-a4"><div class="stat-val">${totals.below}</div><div class="stat-lbl">Below Minimum</div></div>
+    <div class="stat-card sc-a2"><div class="stat-val">${formatCurrency(totals.minimumCovered)}</div><div class="stat-lbl">Minimum Covered</div></div>
     <div class="stat-card sc-a"><div class="stat-val">${formatCurrency(totals.remaining)}</div><div class="stat-lbl">Remaining</div></div>`;
   const sub = document.getElementById('vip-sub');
-  if (sub) sub.textContent = `${totals.reached} reached minimum · ${totals.below} still below · ${formatCurrency(totals.net)} net spend tracked`;
+  if (sub) sub.textContent = `${totals.reached} reached minimum · ${totals.below} still below · ${formatCurrency(totals.netOrders)} net orders tracked`;
 }
 
 async function openVipTableModal(id = null) {
@@ -9146,7 +9152,7 @@ async function openVipTableModal(id = null) {
       <div class="field"><label>Deposit Paid (${esc(BIZ_PROFILE.currency || 'CAD')}) <span style="color:var(--muted);font-size:10px;">counts toward minimum coverage, not actual order spend</span></label><input id="vip-deposit" type="number" min="0" step="0.01" value="${vipNum(row.deposit_paid)}"></div>
     </div>
     <div class="fg fg-3">
-      <div class="field"><label>Actual Spend (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-actual" type="number" min="0" step="0.01" value="${vipNum(row.actual_spend)}"></div>
+      <div class="field"><label>Gross Orders / Actual Spend (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-actual" type="number" min="0" step="0.01" value="${vipNum(row.actual_spend)}"></div>
       <div class="field"><label>Comps (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-comps" type="number" min="0" step="0.01" value="${vipNum(row.comps)}"></div>
       <div class="field"><label>Discounts (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input id="vip-discounts" type="number" min="0" step="0.01" value="${vipNum(row.discounts)}"></div>
     </div>
@@ -9196,14 +9202,15 @@ async function vipQuickAddSpend(id) {
   if (!row) { toast('Table not found', 't-err'); return; }
   const c = vipCalc(row);
 
-  openModal(`Add Spend — ${row.table_name}`,
+  openModal(`Add Orders — ${row.table_name}`,
     `<div style="margin-bottom:14px;">
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
-        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">CURRENT SPEND</span><div style="font-family:'Fira Mono',monospace;font-size:20px;font-weight:700;color:var(--a2);">${formatCurrency(c.netSpend)}</div></div>
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">NET ORDERS</span><div style="font-family:'Fira Mono',monospace;font-size:20px;font-weight:700;color:var(--a2);">${formatCurrency(c.netOrders)}</div></div>
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">MINIMUM</span><div style="font-family:'Fira Mono',monospace;font-size:20px;">${formatCurrency(c.minimum)}</div></div>
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">MINIMUM COVERED</span><div style="font-family:'Fira Mono',monospace;font-size:20px;">${formatCurrency(c.minimumCovered)}</div></div>
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">REMAINING</span><div style="font-family:'Fira Mono',monospace;font-size:20px;color:${c.remaining > 0 ? 'var(--a3)' : 'var(--a2)'};">${formatCurrency(c.remaining)}</div></div>
       </div>
-      <div class="field"><label>Add Amount (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input type="number" id="vip-add-amount" min="0" step="0.01" placeholder="156.08" autofocus></div>
+      <div class="field"><label>Add Gross Orders (${esc(BIZ_PROFILE.currency || 'CAD')})</label><input type="number" id="vip-add-amount" min="0" step="0.01" placeholder="156.08" autofocus></div>
       <div class="fg fg-2" style="margin-top:8px;">
         <div class="field"><label>Comps to Add</label><input type="number" id="vip-add-comps" min="0" step="0.01" value="0"></div>
         <div class="field"><label>Discounts to Add</label><input type="number" id="vip-add-discounts" min="0" step="0.01" value="0"></div>
@@ -9294,11 +9301,11 @@ async function exportVipTablesCSV(fmt) {
   if (!nightId) { toast('Select a night first', 't-err'); return; }
   const rows = await vipFetchRows(nightId);
   if (!rows.length) { toast('No VIP tables to export', 't-err'); return; }
-  const dataRows = [['Table Name','Guest Name','Seller / Booked By','Server','Minimum','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Is Closed','Notes','Created At','Updated At','Closed At']];
+  const dataRows = [['Table Name','Guest Name','Seller / Booked By','Server','Minimum Spend','Deposit Paid','Gross Orders / Actual Spend','Comps','Discounts','Net Orders','Minimum Covered','Remaining','Status','Is Closed','Notes','Created At','Updated At','Closed At']];
   rows.forEach(r => {
     const c = vipCalc(r);
     dataRows.push([
-      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', vipExportMoney(c.minimum), vipExportMoney(c.deposit), vipExportMoney(c.actual), vipExportMoney(c.comps), vipExportMoney(c.discounts), vipExportMoney(c.netSpend), vipExportMoney(c.remaining), c.status, r.is_closed ? 'Yes' : 'No', r.notes || '', r.created_at || '', r.updated_at || '', r.closed_at || ''
+      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', vipExportMoney(c.minimum), vipExportMoney(c.deposit), vipExportMoney(c.actual), vipExportMoney(c.comps), vipExportMoney(c.discounts), vipExportMoney(c.netOrders), vipExportMoney(c.minimumCovered), vipExportMoney(c.remaining), c.status, r.is_closed ? 'Yes' : 'No', r.notes || '', r.created_at || '', r.updated_at || '', r.closed_at || ''
     ]);
   });
 
@@ -9331,7 +9338,7 @@ async function exportVipTablesCSV(fmt) {
 
   const tableById = new Map(rows.map(r => [String(r.id), r]));
   const tableInfo = id => tableById.get(String(id)) || {};
-  const spendSheet = [['Entry ID','Table','Guest','Receipt Code','Entry Type','Source','Gross Orders','Comps','Discounts','Net Spend','Voided','Void Reason','Note','Created By','Staff ID','Created At']];
+  const spendSheet = [['Entry ID','Table','Guest','Receipt Code','Entry Type','Source','Gross Orders','Comps','Discounts','Net Orders','Voided','Void Reason','Note','Created By','Staff ID','Created At']];
   spendEntries.forEach(e => {
     const table = tableInfo(e.vip_table_id);
     const gross = vipExportMoney(e.amount), comps = vipExportMoney(e.comps), discounts = vipExportMoney(e.discounts);
