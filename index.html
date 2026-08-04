@@ -9255,21 +9255,140 @@ async function deleteVipTable(id) {
   toast('VIP table removed', 't-ok');
 }
 
+function vipExportMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+async function vipExportRead(label, queryFactory, warnings) {
+  try {
+    const { data, error } = await queryFactory();
+    if (error) {
+      warnings.push(`${label} unavailable: ${error.message || 'read failed'}`);
+      return [];
+    }
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    warnings.push(`${label} unavailable: ${(error && error.message) || 'read failed'}`);
+    return [];
+  }
+}
+
+async function vipExportEnsureXlsx() {
+  if (typeof XLSX !== 'undefined') return true;
+  try {
+    toast('Loading Excel module...', 't-info');
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  } catch (_) {}
+  return typeof XLSX !== 'undefined';
+}
+
 async function exportVipTablesCSV(fmt) {
   const nightId = document.getElementById('vip-night')?.value;
   if (!nightId) { toast('Select a night first', 't-err'); return; }
   const rows = await vipFetchRows(nightId);
   if (!rows.length) { toast('No VIP tables to export', 't-err'); return; }
-  // TODO: Itemized paid-order export needs a persisted VIP spend-line model; Phase 1 remains table-summary based.
   const dataRows = [['Table Name','Guest Name','Seller / Booked By','Server','Minimum','Deposit Paid','Actual Spend','Comps','Discounts','Net Spend','Remaining','Status','Is Closed','Notes','Created At','Updated At','Closed At']];
   rows.forEach(r => {
     const c = vipCalc(r);
     dataRows.push([
-      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', c.minimum, c.deposit, c.actual, c.comps, c.discounts, c.netSpend, c.remaining, c.status, r.is_closed ? 'Yes' : 'No', r.notes || '', r.created_at || '', r.updated_at || '', r.closed_at || ''
+      r.table_name || '', r.guest_name || '', r.booked_by || '', r.server_name || '', vipExportMoney(c.minimum), vipExportMoney(c.deposit), vipExportMoney(c.actual), vipExportMoney(c.comps), vipExportMoney(c.discounts), vipExportMoney(c.netSpend), vipExportMoney(c.remaining), c.status, r.is_closed ? 'Yes' : 'No', r.notes || '', r.created_at || '', r.updated_at || '', r.closed_at || ''
     ]);
   });
-  downloadRows(`vip_tables_${new Date().toISOString().slice(0,10)}.csv`, dataRows, fmt);
-  toast('VIP tables exported', 't-ok');
+
+  // CSV is intentionally summary-only: a CSV file cannot contain multiple worksheets.
+  if (fmt === 'csv') {
+    csvDownload(`vip_tables_${new Date().toISOString().slice(0,10)}.csv`, dataRows);
+    toast('VIP tables summary exported', 't-ok');
+    return;
+  }
+
+  const warnings = [];
+  let spendEntries = [], itemLines = [], receiptRows = [];
+  if (await vipRemoteEnabled()) {
+    spendEntries = await vipExportRead('Receipts & Spend', () => SB.from('vip_table_spend_entries').select('*').eq('night_id', nightId).order('created_at', { ascending: false }), warnings);
+    itemLines = await vipExportRead('Item Lines', () => SB.from('vip_table_spend_items').select('*').eq('night_id', nightId).order('created_at', { ascending: false }), warnings);
+    receiptRows = await vipExportRead('OCR Status', () => SB.from('v_vip_receipt_review_queue').select('*').eq('night_id', nightId).order('created_at', { ascending: false }), warnings);
+    if (!receiptRows.length && warnings.some(w => w.startsWith('OCR Status unavailable:'))) {
+      warnings.push('OCR Status used receipt-image fallback; computed processing state may be unavailable.');
+      receiptRows = await vipExportRead('OCR Status fallback', () => SB.from('vip_table_receipt_images').select('*').eq('night_id', nightId).order('created_at', { ascending: false }), warnings);
+    }
+  } else {
+    warnings.push('Detailed sheets unavailable: VIP data is currently using local browser storage.');
+  }
+
+  if (!await vipExportEnsureXlsx()) {
+    csvDownload(`vip_tables_${new Date().toISOString().slice(0,10)}.csv`, dataRows);
+    toast('Excel module unavailable — downloaded Summary CSV instead', 't-warn');
+    return;
+  }
+
+  const tableById = new Map(rows.map(r => [String(r.id), r]));
+  const tableInfo = id => tableById.get(String(id)) || {};
+  const spendSheet = [['Entry ID','Table','Guest','Receipt Code','Entry Type','Source','Gross Orders','Comps','Discounts','Net Spend','Voided','Void Reason','Note','Created By','Staff ID','Created At']];
+  spendEntries.forEach(e => {
+    const table = tableInfo(e.vip_table_id);
+    const gross = vipExportMoney(e.amount), comps = vipExportMoney(e.comps), discounts = vipExportMoney(e.discounts);
+    spendSheet.push([e.id || '', table.table_name || '', table.guest_name || '', e.receipt_code || '', e.entry_type || '', e.source || '', gross, comps, discounts, vipExportMoney(gross - comps - discounts), e.voided ? 'Yes' : 'No', e.void_reason || '', e.note || '', e.created_by || '', e.staff_id || '', e.created_at || '']);
+  });
+  const itemSheet = [['Item Line ID','Spend Entry ID','Table','Guest','Item ID','SKU','Barcode','Item Name','Quantity','Unit Price','Line Total','Note','Created At']];
+  itemLines.forEach(line => {
+    const table = tableInfo(line.vip_table_id);
+    itemSheet.push([line.id || '', line.spend_entry_id || '', table.table_name || '', table.guest_name || '', line.item_id || '', line.item_sku || '', line.barcode || '', line.item_name || '', Number(line.qty) || 0, vipExportMoney(line.unit_price), vipExportMoney(line.line_total != null ? line.line_total : (Number(line.qty || 0) * Number(line.unit_price || 0))), line.note || '', line.created_at || '']);
+  });
+  const ocrSheet = [['Receipt Image ID','Spend Entry ID','Table','Guest','Receipt Code','Processing State','OCR Status','OCR Confidence','OCR Provider','AI Status','AI Confidence','AI Provider','Review Required','Review Outcome','Review Notes','Parent Amount','Created At','OCR Completed At','AI Completed At','Reviewed At']];
+  receiptRows.forEach(receipt => {
+    const table = tableInfo(receipt.vip_table_id);
+    ocrSheet.push([receipt.id || '', receipt.spend_entry_id || '', receipt.table_name || table.table_name || '', table.guest_name || '', receipt.receipt_code || '', receipt.processing_state || '', receipt.ocr_status || '', receipt.ocr_confidence == null ? '' : Number(receipt.ocr_confidence), receipt.ocr_provider || '', receipt.ai_parse_status || '', receipt.ai_confidence == null ? '' : Number(receipt.ai_confidence), receipt.ai_provider || '', receipt.review_required == null ? '' : (receipt.review_required ? 'Yes' : 'No'), receipt.review_outcome || '', receipt.review_notes || '', vipExportMoney(receipt.parent_amount), receipt.created_at || '', receipt.ocr_completed_at || '', receipt.ai_completed_at || '', receipt.reviewed_at || '']);
+  });
+
+  // Reconcile only sources that were successfully read. These warnings are
+  // informational; export remains read-only and the Summary sheet is intact.
+  const spendAvailable = !warnings.some(w => w.startsWith('Receipts & Spend unavailable:'));
+  const itemsAvailable = !warnings.some(w => w.startsWith('Item Lines unavailable:'));
+  if (spendAvailable) {
+    const totalsByTable = new Map();
+    spendEntries.filter(e => !e.voided).forEach(e => {
+      const key = String(e.vip_table_id);
+      const total = totalsByTable.get(key) || { amount: 0, comps: 0, discounts: 0 };
+      total.amount += Number(e.amount) || 0;
+      total.comps += Number(e.comps) || 0;
+      total.discounts += Number(e.discounts) || 0;
+      totalsByTable.set(key, total);
+    });
+    rows.forEach(table => {
+      const ledger = totalsByTable.get(String(table.id)) || { amount: 0, comps: 0, discounts: 0 };
+      const summary = vipCalc(table);
+      const mismatched = ['amount', 'comps', 'discounts'].some(key => Math.abs(vipExportMoney(ledger[key]) - vipExportMoney(key === 'amount' ? summary.actual : summary[key])) > 0.01);
+      if (mismatched) warnings.push(`Unreconciled ledger totals for ${table.table_name || table.id}: Summary Gross/Comps/Discounts do not match active spend entries.`);
+    });
+  }
+  if (spendAvailable && itemsAvailable) {
+    const linesByEntry = new Map();
+    itemLines.forEach(line => {
+      const key = String(line.spend_entry_id);
+      linesByEntry.set(key, (linesByEntry.get(key) || 0) + (Number(line.line_total) || (Number(line.qty) || 0) * (Number(line.unit_price) || 0)));
+    });
+    spendEntries.filter(e => e.source === 'table_item_spend' && !e.voided).forEach(e => {
+      const subtotal = linesByEntry.get(String(e.id));
+      if (subtotal == null) warnings.push(`Incomplete item lines for spend entry ${e.id || '(unknown)'}: itemized parent has no child lines.`);
+      else if (Math.abs(vipExportMoney(e.amount) - vipExportMoney(subtotal)) > 0.01) warnings.push(`Unreconciled item subtotal for spend entry ${e.id || '(unknown)'}: parent gross differs from child-line total.`);
+    });
+  }
+  const sheets = [
+    { name: 'Summary', rows: dataRows },
+    { name: 'Receipts & Spend', rows: spendSheet },
+    { name: 'Item Lines', rows: itemSheet },
+    { name: 'OCR Status', rows: ocrSheet },
+  ];
+  if (warnings.length) sheets.push({ name: 'Warnings', rows: [['Warning'], ...warnings.map(w => [w])] });
+  xlsxDownloadMultiSheet(`vip_tables_detailed_${new Date().toISOString().slice(0,10)}.xlsx`, sheets);
+  toast(warnings.length ? 'VIP tables exported with warnings' : 'VIP tables detailed export complete', warnings.length ? 't-warn' : 't-ok');
 }
 
 
