@@ -1440,7 +1440,7 @@ const Phase3 = {
         body: JSON.stringify({ token, staff_id: staffId, pin }),
       });
       const j = await resp.json().catch(() => ({}));
-      if (!resp.ok) return { ok:false, error: j.error || ('HTTP ' + resp.status), code: j.code || null };
+      if (!resp.ok) return { ok:false, error: j.error || j.message || ('HTTP ' + resp.status), code: j.code || null };
       if (!j.jwt) return { ok:false, error:'login response missing jwt' };
       // Swap SB to a JWT-attached client so PostgREST sees the
       // barback_user role + custom claims on every insert.
