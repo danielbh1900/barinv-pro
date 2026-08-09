@@ -11100,10 +11100,65 @@ function dspRenderStaffAssign() {
   `;
 }
 
+// Persist bartender-to-bar assignments in the same selected-night source used
+// by Barback labels. A single assignment row may cover several bars, so only
+// this bar ID is added or removed; other assigned bars are preserved.
+async function dspPersistBartenderAssignment(barId, staffId) {
+  const nightId = document.getElementById('dsp-night')?.value || null;
+  if (!nightId || !barId) return;
+
+  const { data: rows, error: loadError } = await SB.from('night_staff_assignments')
+    .select('id, staff_id, allowed_bar_ids, revoked')
+    .eq('venue_id', SESSION.venueId)
+    .eq('night_id', nightId)
+    .eq('role', 'bartender');
+  if (loadError) { toast('Bartender assignment lookup failed: ' + loadError.message, 't-err'); return; }
+
+  const bartenderRows = rows || [];
+  const selectedRow = staffId
+    ? bartenderRows.find(row => row.staff_id === staffId)
+    : null;
+
+  // A bar has one selected bartender in this UI. Remove only this bar from a
+  // previous bartender, leaving every other bar in that row intact.
+  for (const row of bartenderRows) {
+    const currentIds = Array.isArray(row.allowed_bar_ids) ? row.allowed_bar_ids : [];
+    if (!currentIds.includes(barId) || row.staff_id === staffId) continue;
+    const { error } = await SB.from('night_staff_assignments')
+      .update({ allowed_bar_ids: currentIds.filter(id => id !== barId) })
+      .eq('id', row.id);
+    if (error) { toast('Bartender assignment update failed: ' + error.message, 't-err'); return; }
+  }
+
+  if (!staffId) return;
+  if (selectedRow) {
+    const currentIds = Array.isArray(selectedRow.allowed_bar_ids) ? selectedRow.allowed_bar_ids : [];
+    const { error } = await SB.from('night_staff_assignments')
+      .update({
+        allowed_bar_ids: currentIds.includes(barId) ? currentIds : currentIds.concat(barId),
+        revoked: false,
+      })
+      .eq('id', selectedRow.id);
+    if (error) { toast('Bartender assignment update failed: ' + error.message, 't-err'); }
+    return;
+  }
+
+  const { error } = await SB.from('night_staff_assignments').insert({
+    venue_id: SESSION.venueId,
+    night_id: nightId,
+    staff_id: staffId,
+    role: 'bartender',
+    allowed_bar_ids: [barId],
+    revoked: false,
+  });
+  if (error) toast('Bartender assignment save failed: ' + error.message, 't-err');
+}
+
 window.dspSetStaff = function(barId, field, staffId) {
   if (!DSP_STAFF_MAP[barId]) DSP_STAFF_MAP[barId] = {};
   DSP_STAFF_MAP[barId][field] = staffId;
   try { localStorage.setItem('barinv_staff_map', JSON.stringify(DSP_STAFF_MAP)); } catch(_){}
+  if (field === 'bartender') void dspPersistBartenderAssignment(barId, staffId);
 };
 
 window.dspDeselectBar = function(barId) {
