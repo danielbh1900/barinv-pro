@@ -424,6 +424,18 @@
             <span>Rotate PINs for the selected staff (force new PINs)</span>
           </label>
         </div>
+        <div class="row" style="padding:12px;background:#071a13;border:1px solid #166534;border-radius:6px;">
+          <label style="display:flex;gap:8px;align-items:flex-start;text-transform:none;letter-spacing:normal;color:#bbf7d0;">
+            <input type="checkbox" id="c-auto-approve" style="width:auto;margin-top:3px;">
+            <span>
+              <b>⚡ AUTO-APPROVE SUBMISSIONS</b><br>
+              <span class="small muted">
+                Events submitted through this exact session are approved immediately by the server.
+                Inventory and reporting will include them without waiting for manual review.
+              </span>
+            </span>
+          </label>
+        </div>
         <div class="row">
           <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#fbbf24;">
             <input type="checkbox" id="c-pilot" style="width:auto;">
@@ -2119,6 +2131,7 @@ $('c-create').addEventListener('click', async () => {
       nickname:       nickname,
       expires_at:     new Date(expRaw).toISOString(),
       pin_rotate_for: rotatePins ? allowedStaff : [],
+      auto_approve_events: !!($('c-auto-approve') && $('c-auto-approve').checked),
       // PLAN-QR-2026-06-03 Web-Barback: always pass the canonical
       // public HTTPS base so the server-returned res.url is openable
       // by the barback's personal phone regardless of where the
@@ -2397,10 +2410,13 @@ async function renderSessions(silent) {
         }).join('') + '</div></details>'
       : '';
 
+    const autoApprovePill = s.auto_approve_events
+      ? '<span class="pill active" style="background:#064e3b;border-color:#10b981;color:#a7f3d0;">AUTO-APPROVE</span> '
+      : '';
     const canAct = !revoked && !expired;
     return '<div class="session-row' + (revoked || expired ? ' revoked' : '') + '">' +
       '<div class="meta">' +
-        pill + ' <b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
+        pill + ' ' + autoApprovePill + '<b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
         '<span class="muted">' + esc(nightLabel) + ' · ' + esc(barInfo) + '</span><br>' +
         '<span class="muted">expires ' + fmtTime(s.expires_at) +
         (revoked ? ' · revoked ' + fmtTime(s.revoked_at) : '') + '</span><br>' +
