@@ -415,7 +415,7 @@ Deno.serve(async (req: Request) => {
        // BARBACK_OPENING_PAR_V1 — retain the existing default opening quantity
        // as a read-only bundle field. The Barback Opening editor is initialized
        // from opening_par_config below, never from this live Master PAR value.
-       .select("id, name, sku, size:unit_size, bottle_size_ml, active, service_mode, empty_bottle_weight_g, full_bottle_weight_g, par_level")
+       .select("id, name, sku, size:unit_size, bottle_size_ml, active, service_mode, empty_bottle_weight_g, full_bottle_weight_g, par_level, image_url")
        // Treat `active = TRUE` AND `active IS NULL` as eligible. Items
        // with explicit `active = FALSE` are excluded from the bundle so
        // the scanner / dropdown isn't bloated by discontinued lines.
