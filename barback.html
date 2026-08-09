@@ -7071,7 +7071,10 @@ function barDisplayLabel(bar) {
   const base = String(bar.name || '?').trim() || '?';
   const rawNames = Array.isArray(bar.bartender_names)
     ? bar.bartender_names
-    : (bar.bartender_name ? [bar.bartender_name] : []);
+    : (bar.bartender_name ? [bar.bartender_name]
+      : (Array.isArray(bar.assigned_staff_names)
+        ? bar.assigned_staff_names
+        : (bar.assigned_staff_name ? [bar.assigned_staff_name] : [])));
   const seen = new Set();
   const names = rawNames
     .map(name => String(name || '').trim())

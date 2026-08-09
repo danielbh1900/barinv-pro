@@ -447,6 +447,10 @@ Deno.serve(async (req: Request) => {
   );
   const scopedBarIdSet = new Set(scopedAllowedBars);
   const bartenderNamesByBarId = new Map<string, string[]>();
+  // A bar can be covered by a valid, non-bartender assignment (for example,
+  // a barback or lead). Keep that as display-only fallback metadata; it never
+  // affects the already-computed session scope or JWT claims.
+  const assignedStaffNamesByBarId = new Map<string, string[]>();
 
   const hasRoleToken = (role: unknown, token: string) =>
     String(role || "")
@@ -463,28 +467,38 @@ Deno.serve(async (req: Request) => {
     });
   } else {
     for (const row of bartenderAssignmentsRes.data ?? []) {
-      if (row.revoked === true || !hasRoleToken(row.role, "bartender")) continue;
+      if (row.revoked === true) continue;
       const staffName = staffNameById.get(row.staff_id);
       if (!staffName) continue;
 
       for (const barId of Array.isArray(row.allowed_bar_ids) ? row.allowed_bar_ids : []) {
         if (!scopedBarIdSet.has(barId)) continue;
-        const names = bartenderNamesByBarId.get(barId) ?? [];
-        if (!names.includes(staffName)) names.push(staffName);
-        bartenderNamesByBarId.set(barId, names);
+        const assignedNames = assignedStaffNamesByBarId.get(barId) ?? [];
+        if (!assignedNames.includes(staffName)) assignedNames.push(staffName);
+        assignedStaffNamesByBarId.set(barId, assignedNames);
+
+        if (!hasRoleToken(row.role, "bartender")) continue;
+        const bartenderNames = bartenderNamesByBarId.get(barId) ?? [];
+        if (!bartenderNames.includes(staffName)) bartenderNames.push(staffName);
+        bartenderNamesByBarId.set(barId, bartenderNames);
       }
     }
   }
 
   const barsWithBartenderLabels = (barsRes.data ?? []).map((bar) => {
     const bartenderNames = bartenderNamesByBarId.get(bar.id) ?? [];
-    return bartenderNames.length
-      ? {
-        ...bar,
+    const assignedStaffNames = assignedStaffNamesByBarId.get(bar.id) ?? [];
+    return {
+      ...bar,
+      ...(bartenderNames.length ? {
         bartender_name: bartenderNames.join(", "),
         bartender_names: bartenderNames,
-      }
-      : bar;
+      } : {}),
+      ...(!bartenderNames.length && assignedStaffNames.length ? {
+        assigned_staff_name: assignedStaffNames.join(", "),
+        assigned_staff_names: assignedStaffNames,
+      } : {}),
+    };
   });
   // BARBACK_BARTENDER_BAR_LABELS_END
 
