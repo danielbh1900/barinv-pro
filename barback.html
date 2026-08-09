@@ -165,77 +165,6 @@
     .item-row:last-child { border-bottom:none; }
     .item-row:active { background:#1a1a1a; }
     .item-row .sku { color:#666; font-size:11px; float:right; }
-    /* BARBACK_ITEM_THUMBNAILS_CSS_START */
-    .item-thumb {
-      width:34px; height:34px; object-fit:contain; flex:0 0 auto;
-      border:1px solid #333; border-radius:6px; background:#111827;
-    }
-    .item-thumb.small { width:28px; height:28px; }
-    .item-thumb.bm-thumb { width:42px; height:42px; align-self:center; margin-bottom:3px; }
-    .item-thumb.opening-par-thumb { width:34px; height:34px; }
-    .item-row.with-thumb { display:flex; align-items:center; gap:10px; }
-    .item-label-with-thumb { display:flex; align-items:center; gap:8px; min-width:0; }
-    .item-label-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-    .opening-par-name.with-thumb { display:flex; align-items:center; gap:8px; }
-    .opening-par-name-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-    /* BARBACK_ITEM_THUMBNAILS_HOTFIX_START */
-    .bm-grid { align-content:start; }
-    .bm-card {
-      min-height:126px;
-      justify-content:flex-start;
-      align-items:center;
-      gap:5px;
-      padding:8px 6px;
-      overflow:visible;
-    }
-    .bm-card .item-thumb.bm-thumb {
-      width:40px;
-      height:40px;
-      margin:0 0 4px 0;
-    }
-    .bm-card .bm-name {
-      display:block;
-      width:100%;
-      padding-right:0;
-      text-align:center;
-      font-size:11.5px;
-      line-height:1.15;
-      white-space:normal;
-      overflow:visible;
-      text-overflow:clip;
-      max-height:none;
-      color:#f9fafb;
-      font-weight:900;
-    }
-    .bm-card .bm-size,
-    .bm-card .bm-sku {
-      width:100%;
-      text-align:center;
-      line-height:1.1;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .qm-item-with-thumb {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      min-width:0;
-    }
-    .item-thumb.qm-thumb {
-      width:44px;
-      height:44px;
-      border-radius:8px;
-      background:#111827;
-      flex:0 0 auto;
-    }
-    .qm-item-title {
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      line-height:1.15;
-    }
-    /* BARBACK_ITEM_THUMBNAILS_HOTFIX_END */
-    /* BARBACK_ITEM_THUMBNAILS_CSS_END */
     .selected-item {
       margin-top:8px; padding:12px;
       background:rgba(251,146,60,0.10); border:1px solid #fb923c; border-radius:6px;
@@ -523,19 +452,6 @@
      font-size:11px;font-weight:800;letter-spacing:0.08em;border-bottom:1px solid #ef4444;">
   ⚠ OFFLINE — saves are queued locally and will sync when the network returns
 </div>
-<div id="outbox-storage-error" role="alert" aria-live="assertive"
-     style="display:none;position:sticky;top:0;z-index:102;background:#7f1d1d;color:#fff;
-     padding:10px 14px;text-align:center;font-size:12px;font-weight:800;line-height:1.45;
-     border-bottom:2px solid #fca5a5;">
-  DEVICE STORAGE FULL — BARINV could not safely save the Review/queue.
-  Do not close or reload this page. Take a screenshot, open Review and download
-  the Queue Backup, then call your manager.
-  <button type="button" id="outbox-storage-export"
-          style="display:block;margin:8px auto 0;padding:7px 12px;border:1px solid #fff;
-          border-radius:4px;background:#fff;color:#7f1d1d;font-weight:900;">
-    DOWNLOAD QUEUE BACKUP
-  </button>
-</div>
 <div class="expiration-strip" id="expiration-strip" style="display:none;">—</div>
 
 <!-- ============================ SCREEN 1: TOKEN ENTRY ============================ -->
@@ -630,14 +546,6 @@
     <div class="row" id="main-scale-row">
       <label>SCALE</label>
       <div id="main-ble" style="display:none;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
-        <div id="scale-certification-gate" role="alert" style="margin-bottom:10px;padding:9px;border:1px solid #f59e0b;border-radius:6px;background:#2b1f0b;color:#fcd34d;font-size:12px;line-height:1.45;">
-          <div style="font-weight:800;">Beta scale estimate — operator verification required</div>
-          <div style="margin-top:3px;">BLE/Arboleaf/custom scale readings are not certified or legal-for-trade. Use only as an internal inventory estimate until physical certification is complete. Manual grams entry remains available.</div>
-          <label for="scale-beta-enable" style="display:flex;align-items:flex-start;gap:7px;margin-top:7px;color:#fde68a;font-weight:700;letter-spacing:0;text-transform:none;cursor:pointer;">
-            <input type="checkbox" id="scale-beta-enable" style="margin-top:2px;">
-            <span>Enable uncertified scale estimates for this page only</span>
-          </label>
-        </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span id="main-ble-status" style="font-size:13px;color:#9ca3af;">Scale: Not connected</span>
           <button type="button" id="main-ble-connect" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect Scale</button>
@@ -663,35 +571,32 @@
       </div>
       <div id="main-ble-hint" style="display:none;font-size:12px;color:#9ca3af;line-height:1.45;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
         <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale connection</div>
-        <div id="main-ble-desktop-cta" style="display:none;margin-top:6px;font-weight:700;color:#f59e0b;font-size:13px;line-height:1.4;">💻 Use Google Chrome or Microsoft Edge to connect directly. Otherwise enter grams manually.</div>
+        <div id="main-ble-desktop-cta" style="display:none;margin-top:6px;font-weight:700;color:#f59e0b;font-size:13px;line-height:1.4;">💻 Use Google Chrome or Microsoft Edge to connect directly, or run this device as the Scale Station. Receiver mode below still works in any browser.</div>
         <div style="margin-top:3px;">This browser does not expose Web Bluetooth, so it cannot connect directly to the Arboleaf/QN-KS scale.</div>
         <ul style="margin:6px 0 0;padding-left:16px;">
           <li><b>Android Chrome / Desktop Chrome</b>: use <b>Connect Scale</b> for direct Arboleaf/QN-KS Bluetooth.</li>
           <li><b>iPhone Bluefy/WebBLE</b>: direct Arboleaf/QN-KS Bluetooth works when <code>navigator.bluetooth</code> is available.</li>
-          <li><b>iPhone Safari/Chrome</b>: use <b>manual grams</b>. Remote Scale Bridge weights are disabled for public release.</li>
+          <li><b>iPhone Safari/Chrome</b>: use <b>manual grams</b> or <b>Scale Bridge</b> with an Android/Desktop Scale Station.</li>
         </ul>
         <div style="margin-top:6px;font-family:'Fira Mono',monospace;font-size:10px;color:#6b7280;line-height:1.5;">
           navigator.bluetooth: <span id="diag-ble2">missing</span> · secure context: <span id="diag-secure2">—</span> · device: <span id="diag-device2">—</span>
         </div>
       </div>
-      <!-- SCALE_BRIDGE — release-gated because remote client broadcasts are not
-           authoritative inventory evidence. Direct Bluetooth/native BLE and manual
-           grams remain available. -->
+      <!-- SCALE_BRIDGE — Realtime relay so iPhone/Safari (no Web Bluetooth) can use a Scale Station's weight. Frontend-only public broadcast; no DB write, no auto-submit; never broadcasts PIN/token/secrets. -->
       <div id="main-bridge" style="margin-top:8px;padding:10px;border:1px solid #374151;border-radius:8px;background:#0d1411;">
-        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale Bridge <span style="font-weight:400;color:#6b7280;font-size:11px;">— remote bridge</span></div>
-        <div id="bridge-trust-warning" role="alert" style="margin-top:6px;padding:8px;border:1px solid #f59e0b;border-radius:6px;background:#2b1f0b;color:#fcd34d;font-size:12px;font-weight:700;line-height:1.4;">Remote Scale Bridge is disabled for public release. Remote readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.</div>
+        <div style="font-weight:700;color:#cbd5e1;font-size:13px;">Scale Bridge <span style="font-weight:400;color:#6b7280;font-size:11px;">— for iPhone Safari/Chrome or any browser without Web Bluetooth</span></div>
         <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-          <button type="button" id="bridge-listen" disabled style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;white-space:nowrap;opacity:0.6;">Bridge disabled</button>
-          <span id="bridge-status" style="font-size:12px;color:#f59e0b;">Bridge: disabled for public release</span>
+          <button type="button" id="bridge-listen" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">Listen to Scale Station</button>
+          <span id="bridge-status" style="font-size:12px;color:#9ca3af;">Bridge: not listening</span>
         </div>
         <div id="bridge-recv" style="display:none;margin-top:6px;font-size:13px;font-family:'Fira Mono',monospace;color:#7dd3fc;">
           <div id="bridge-weight">Latest station weight: —</div>
           <div id="bridge-update" style="font-size:11px;color:#9ca3af;">Last update: —</div>
           <div id="bridge-station" style="font-size:11px;color:#9ca3af;">Station: —</div>
-          <button type="button" id="bridge-use" disabled style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;opacity:0.55;">Remote weight is display-only</button>
+          <button type="button" id="bridge-use" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">Use latest stable weight</button>
         </div>
         <div id="bridge-station-row" style="display:none;margin-top:8px;border-top:1px solid #374151;padding-top:8px;">
-          <button type="button" id="bridge-start-station" disabled style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#6b7280;border:1px solid #374151;border-radius:6px;cursor:not-allowed;white-space:nowrap;opacity:0.6;">Bridge publishing disabled</button>
+          <button type="button" id="bridge-start-station" style="padding:8px 12px;font-size:13px;font-weight:600;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📡 Publish to iPhones</button>
           <div id="bridge-station-status" style="display:none;margin-top:4px;font-size:11px;color:#9ca3af;white-space:pre-line;">Station: publishing…</div>
           <div id="bridge-wake-hint" style="display:none;margin-top:4px;font-size:11px;color:#f6c200;font-weight:600;">Keep this Android phone awake. Do not lock the screen.</div>
           <div style="margin-top:4px;font-size:10px;color:#6b7280;line-height:1.4;">Scale connected? Tap “📡 Publish to iPhones” to share its weight with iPhone barbacks. Keep this Android phone unlocked and Chrome open.</div>
@@ -751,7 +656,6 @@
       <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
       <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support (hidden on iPhone). Fills QTY (grams); never submits. -->
       <div id="rf-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
-        <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling RETURN grams.</div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span id="rf-ble-status" style="font-size:12px;color:#9ca3af;">Scale return weight: not connected</span>
           <button type="button" id="rf-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
@@ -1052,7 +956,6 @@
         </div>
         <!-- SCALE_BLE — capability-gated Web Bluetooth (Android/desktop Chrome). Hidden where unsupported (e.g. iPhone). Auto-fills Weight (g) only; never submits. -->
         <div id="qm-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
-          <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling partial-bottle grams.</div>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <span id="qm-ble-status" style="font-size:12px;color:#9ca3af;">Scale: Not connected</span>
             <button type="button" id="qm-ble-connect" style="padding:6px 10px;font-size:12px;background:#1f2937;color:#cbd5e1;border:1px solid #374151;border-radius:6px;cursor:pointer;white-space:nowrap;">📶 Connect scale</button>
@@ -1673,130 +1576,52 @@ const Auth = {
   },
 };
 
-// OUTBOX_DURABILITY_V1_START
-const OUTBOX_STORAGE_ERROR_MESSAGE =
-  'DEVICE STORAGE FULL — BARINV could not safely save the Review/queue. ' +
-  'Do not close or reload this page. Take a screenshot, download the Queue Backup from Review, and call your manager.';
-let outboxStorageAlertShown = false;
-
-function showOutboxStorageFailure(error) {
-  const banner = $('outbox-storage-error');
-  if (banner) banner.style.display = 'block';
-  try { statusOn('save-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err'); } catch (_) {}
-  try { statusOn('review-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err'); } catch (_) {}
-  if (!outboxStorageAlertShown) {
-    outboxStorageAlertShown = true;
-    try { alert(OUTBOX_STORAGE_ERROR_MESSAGE); } catch (_) {}
-  }
-  console.error('barback queue persistence failed:', error);
-}
-
-function clearOutboxStorageFailure() {
-  const banner = $('outbox-storage-error');
-  if (banner) banner.style.display = 'none';
-  outboxStorageAlertShown = false;
-}
-
-function copyLocalRows(arr) {
-  return (Array.isArray(arr) ? arr : []).map(row => ({ ...row }));
-}
-
 // ════════════════════════════════════════════════════════════════════
-//  Outbox — verified persistence + retry backoff + dedup
+//  Outbox — corruption-safe + retry backoff + dedup
 // ════════════════════════════════════════════════════════════════════
 const Outbox = {
-  _memory: null,
-  _volatile: false,
-  _lastSaveError: null,
   load() {
-    if (this._memory !== null) return copyLocalRows(this._memory);
     try {
       const raw = localStorage.getItem(LS.outbox);
-      if (!raw) {
-        this._memory = [];
-        return [];
-      }
+      if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) throw new Error('outbox not array');
       // Filter obviously corrupt rows
-      this._memory = parsed.filter(r => r && r.client_event_id && r.action && r.item_id);
-      return copyLocalRows(this._memory);
+      return parsed.filter(r => r && r.client_event_id && r.action && r.item_id);
     } catch (e) {
-      // Keep the original storage value intact. A corrupt queue is blocked and
-      // operator-visible; it is never reset to [] automatically.
+      // Quarantine corrupt outbox so the user doesn't silently lose anything
       try {
         const raw = localStorage.getItem(LS.outbox);
         if (raw) localStorage.setItem(LS.outboxCorruptPrefix + Date.now(), raw);
       } catch (_) {}
-      showOutboxStorageFailure(e);
-      console.warn('outbox unreadable; original storage preserved:', e && e.message);
-      this._memory = [];
-      this._volatile = true;
+      try { localStorage.setItem(LS.outbox, '[]'); } catch (_) {}
+      console.warn('outbox corrupt, reset:', e && e.message);
       return [];
     }
   },
   save(arr) {
-    const candidate = copyLocalRows(arr);
-    const serialized = JSON.stringify(candidate);
-    try {
-      localStorage.setItem(LS.outbox, serialized);
-      if (localStorage.getItem(LS.outbox) !== serialized) {
-        throw new Error('outbox persistence verification failed');
+    try { localStorage.setItem(LS.outbox, JSON.stringify(arr)); }
+    catch (e) {
+      console.error('outbox save failed:', e);
+      // Try to free space by dropping oldest if storage quota hit
+      if (arr.length > 1) {
+        try { localStorage.setItem(LS.outbox, JSON.stringify(arr.slice(-Math.floor(arr.length/2)))); }
+        catch (_) {}
       }
-      this._memory = candidate;
-      this._volatile = false;
-      this._lastSaveError = null;
-      if (typeof Drafts === 'undefined' || !Drafts._volatile) clearOutboxStorageFailure();
-      return { ok:true, persisted:true, count:candidate.length };
-    } catch (e) {
-      this._lastSaveError = e;
-      showOutboxStorageFailure(e);
-      return { ok:false, persisted:false, count:this._memory ? this._memory.length : 0, error:e };
     }
   },
   push(rec) {
     const cur = this.load();
     // Dedup: never push two entries with the same client_event_id
-    if (cur.some(e => e.client_event_id === rec.client_event_id)) {
-      return {
-        ok: !this._volatile,
-        persisted: !this._volatile,
-        duplicate: true,
-        count: cur.length,
-        error: this._lastSaveError,
-      };
-    }
-    if (this._volatile) {
-      showOutboxStorageFailure(this._lastSaveError || new Error('outbox has an unsaved in-memory row'));
-      return {
-        ok:false,
-        persisted:false,
-        blocked:true,
-        count:cur.length,
-        error:this._lastSaveError || new Error('outbox has an unsaved in-memory row'),
-      };
-    }
-    const candidate = cur.concat({ ...rec, queued_at: Date.now(), attempts: 0, last_error: null });
-    const result = this.save(candidate);
-    if (!result.ok) {
-      // The first failed addition remains visible and exportable for this page
-      // lifetime. Further additions are blocked until this complete queue can
-      // be persisted or submitted.
-      this._memory = candidate;
-      this._volatile = true;
-      result.count = candidate.length;
-      result.volatile = true;
-    }
-    return { ...result, duplicate:false };
+    if (cur.some(e => e.client_event_id === rec.client_event_id)) return cur.length;
+    cur.push({ ...rec, queued_at: Date.now(), attempts: 0, last_error: null });
+    this.save(cur);
+    return cur.length;
   },
   removeById(ce) {
-    const current = this.load();
-    const candidate = current.filter(e => e.client_event_id !== ce);
-    if (candidate.length === current.length) {
-      return { ok:true, persisted:!this._volatile, removed:false, count:current.length };
-    }
-    const result = this.save(candidate);
-    return { ...result, removed:result.ok };
+    const cur = this.load().filter(e => e.client_event_id !== ce);
+    this.save(cur);
+    return cur.length;
   },
   count() { return this.load().length; },
   shouldRetry(entry, now) {
@@ -1807,7 +1632,6 @@ const Outbox = {
     return (now - (entry.last_attempt_at || entry.queued_at)) >= delay;
   },
 };
-// OUTBOX_DURABILITY_V1_END
 
 // ════════════════════════════════════════════════════════════════════
 //  Recent log — full-detail list for review screen + undo
@@ -1856,78 +1680,36 @@ const Recent = {
 // submit; after submit, Outbox→Recent state machine takes over and
 // synced rows become read-only.
 const Drafts = {
-  _memory: null,
-  _volatile: false,
-  _lastSaveError: null,
   load() {
-    if (this._memory !== null) return copyLocalRows(this._memory);
     try {
       const arr = JSON.parse(localStorage.getItem(LS.reviewDrafts) || '[]');
-      if (!Array.isArray(arr)) throw new Error('draft list not array');
-      this._memory = arr.filter(r => r && r.client_event_id && r.action && r.item_id);
-      return copyLocalRows(this._memory);
-    } catch (e) {
-      showOutboxStorageFailure(e);
-      this._memory = [];
-      this._volatile = true;
-      return [];
-    }
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(r => r && r.client_event_id && r.action && r.item_id);
+    } catch (_) { return []; }
   },
   save(arr) {
-    const candidate = copyLocalRows(arr);
-    const serialized = JSON.stringify(candidate);
-    try {
-      localStorage.setItem(LS.reviewDrafts, serialized);
-      if (localStorage.getItem(LS.reviewDrafts) !== serialized) {
-        throw new Error('draft persistence verification failed');
-      }
-      this._memory = candidate;
-      this._volatile = false;
-      this._lastSaveError = null;
-      if (!Outbox._volatile) clearOutboxStorageFailure();
-      return { ok:true, persisted:true, count:candidate.length };
-    } catch (e) {
-      this._lastSaveError = e;
-      showOutboxStorageFailure(e);
-      return { ok:false, persisted:false, count:this._memory ? this._memory.length : 0, error:e };
-    }
+    try { localStorage.setItem(LS.reviewDrafts, JSON.stringify(arr)); }
+    catch (e) { console.error('drafts save failed:', e); }
   },
   add(rec) {
     const cur = this.load();
-    if (cur.some(d => d.client_event_id === rec.client_event_id)) {
-      return { ok:!this._volatile, persisted:!this._volatile, duplicate:true, count:cur.length };
-    }
-    if (this._volatile || Outbox._volatile) {
-      const error = this._lastSaveError || Outbox._lastSaveError ||
-        new Error('Review/queue has an unsaved in-memory row');
-      showOutboxStorageFailure(error);
-      return { ok:false, persisted:false, blocked:true, count:cur.length, error };
-    }
-    const candidate = cur.concat({ ...rec, drafted_at: rec.drafted_at || Date.now() });
-    const result = this.save(candidate);
-    if (!result.ok) {
-      this._memory = candidate;
-      this._volatile = true;
-      result.count = candidate.length;
-      result.volatile = true;
-    }
-    return { ...result, duplicate:false };
+    if (cur.some(d => d.client_event_id === rec.client_event_id)) return cur.length;
+    cur.push({ ...rec, drafted_at: rec.drafted_at || Date.now() });
+    this.save(cur);
+    return cur.length;
   },
   removeById(ce) {
-    const current = this.load();
-    const candidate = current.filter(d => d.client_event_id !== ce);
-    if (candidate.length === current.length) {
-      return { ok:true, persisted:!this._volatile, removed:false, count:current.length };
-    }
-    const result = this.save(candidate);
-    return { ...result, removed:result.ok };
+    const cur = this.load().filter(d => d.client_event_id !== ce);
+    this.save(cur);
+    return cur.length;
   },
   replaceById(ce, patch) {
     const arr = this.load();
     const i = arr.findIndex(d => d.client_event_id === ce);
-    if (i < 0) return { ok:false, persisted:false, found:false, count:arr.length };
+    if (i < 0) return false;
     arr[i] = { ...arr[i], ...patch };
-    return { ...this.save(arr), found:true };
+    this.save(arr);
+    return true;
   },
   count() { return this.load().length; },
 };
@@ -2479,14 +2261,9 @@ function setPickedItem(it) {
   // qty (caused drafts to save qty=1). Qty is reset to 1 ONLY in the
   // post-add handler, after the draft row is created with the entered qty.
   $('picked-item').style.display = 'block';
-  $('picked-item').innerHTML =
-    '<span class="item-label-with-thumb">' +
-      itemThumbHTML(it, 'small') +
-      '<span class="item-label-text">✓ <b>' + esc(it.name || '?') + '</b>' +
-        (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
-        (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '') +
-      '</span>' +
-    '</span>';
+  $('picked-item').innerHTML = '✓ <b>' + esc(it.name || '?') + '</b>' +
+    (itemSizeLabel(it) ? ' · ' + esc(itemSizeLabel(it)) : '') +
+    (it.sku ? '  <span style="color:#888">' + esc(it.sku) + '</span>' : '');
   $('search-results').style.display = 'none';
   $('search-input').value = '';
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
@@ -2813,9 +2590,8 @@ if ($('search-results')) $('search-results').addEventListener('mousedown', (e) =
 // scanner/scale logic untouched. The typed-search box still uses the
 // inline dropdown (showBrowseList) when focused, so nothing else changes.
 function _bmCardHtml(it, isRecent) {
-  return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '" data-thumb-hydrated="1">' +
+  return '<div class="bm-card" role="button" tabindex="0" data-id="' + esc(it.id) + '">' +
     (isRecent ? '<span class="bm-star" aria-hidden="true">★</span>' : '') +
-    itemThumbHTML(it, 'bm-thumb') +
     '<span class="bm-name">' + esc(it.name || '?') + '</span>' +
     (itemSizeLabel(it) ? '<span class="bm-size">' + esc(itemSizeLabel(it)) + '</span>' : '') +
     (it.sku  ? '<span class="bm-sku">'  + esc(it.sku)  + '</span>' : '') +
@@ -3513,11 +3289,7 @@ function openQtyModal(it) {
   if (!it) return;
   state.qtyModalItem = it;
   const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
-  if ($('qm-item')) $('qm-item').innerHTML =
-    '<span class="qm-item-with-thumb">' +
-      itemThumbHTML(it, 'qm-thumb') +
-      '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
-    '</span>';
+  if ($('qm-item')) $('qm-item').textContent = '✓ ' + (it.name || '?') + (sz ? ' · ' + sz : '');
   const act = state.selectedAction || '(pick action)';
   let barCtx;
   if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
@@ -3592,125 +3364,6 @@ function qtyModalAdd() {
 var SCALE_BLE_SVC = '0000fff0-0000-1000-8000-00805f9b34fb';
 var SCALE_BLE_CHR = '0000fff1-0000-1000-8000-00805f9b34fb';
 var bleScale = { supported: false, device: null, server: null, char: null, connected: false, latest: null, name: '', gotFrame: false };
-// P0-04: the bridge has no verifiable device-to-server trust chain in this release.
-// Keep every remote reading display-only and require direct local BLE/native BLE
-// provenance before a scale value can fill inventory inputs.
-// SCALE_BRIDGE_TRUST_BOUNDARY_V1_START
-var SCALE_BRIDGE_RELEASE_ENABLED = false;
-var SCALE_TRUSTED_LOCAL_SOURCES = {
-  local_web_bluetooth: true,
-  local_native_ble: true
-};
-function _localScaleSource() {
-  return bleScale && bleScale.nativeMode ? 'local_native_ble' : 'local_web_bluetooth';
-}
-function _isTrustedLocalScaleReading(reading) {
-  return !!(reading &&
-    reading.trusted === true &&
-    SCALE_TRUSTED_LOCAL_SOURCES[reading.source] === true &&
-    typeof reading.grams === 'number' &&
-    isFinite(reading.grams));
-}
-function _trustedLocalScaleReading(requireStable) {
-  var reading = bleScale && bleScale.latest;
-  if (!_isTrustedLocalScaleReading(reading) || (requireStable && !reading.stable)) {
-    if (reading && !_isTrustedLocalScaleReading(reading)) {
-      try {
-        statusOn(
-          'save-status',
-          'Remote Scale Bridge readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.',
-          'warn'
-        );
-      } catch (_) {}
-    }
-    return null;
-  }
-  return reading;
-}
-// SCALE_BRIDGE_TRUST_BOUNDARY_V1_END
-
-// P0-08: physical certification is not present in the release evidence. Direct
-// BLE/native readings therefore remain an explicitly enabled, page-scoped beta
-// estimate and require operator confirmation before they can fill inventory fields.
-// Manual grams entry is never gated.
-// SCALE_CERTIFICATION_RELEASE_GATE_V1_START
-var SCALE_PHYSICAL_CERTIFICATION_COMPLETE = false;
-var scaleCertificationGate = { betaEnabled: false };
-var SCALE_CERTIFICATION_WARNING = 'This scale reading is an uncertified internal inventory estimate, not legal-for-trade. Verify the displayed grams before use.';
-function _scaleBetaEnabled() {
-  return SCALE_PHYSICAL_CERTIFICATION_COMPLETE || scaleCertificationGate.betaEnabled === true;
-}
-function _scaleSetGateControlState(el, disabled) {
-  if (!el) return;
-  el.disabled = !!disabled;
-  el.style.opacity = disabled ? '0.55' : '1';
-  el.style.cursor = disabled ? 'not-allowed' : 'pointer';
-}
-function _scaleSyncCertificationGateUI() {
-  var enabled = _scaleBetaEnabled();
-  var checkbox = $('scale-beta-enable');
-  if (checkbox) checkbox.checked = !!scaleCertificationGate.betaEnabled;
-  for (var i = 0; i < _BLE_SURFACES.length; i++) {
-    var p = _BLE_SURFACES[i];
-    var connect = $(p + '-connect');
-    _scaleSetGateControlState(connect, !enabled && !bleScale.connected);
-    var all = $(p + '-all');
-    _scaleSetGateControlState(all, !enabled);
-    var use = $(p + '-use');
-    if (use && !enabled) {
-      _scaleSetGateControlState(use, true);
-      use.textContent = 'Enable beta scale estimates above';
-    }
-  }
-  _scaleSetGateControlState($('scale-set-known'), !enabled);
-  _scaleSetGateControlState($('scale-zero'), !enabled);
-  _scaleSetGateControlState($('scale-clear-offset'), !enabled);
-  var known = $('scale-known-input');
-  if (known) known.disabled = !enabled;
-  try { _weightUseScaleSync(); } catch (_) {}
-}
-function _scaleSetBetaEnabled(enabled) {
-  scaleCertificationGate.betaEnabled = SCALE_PHYSICAL_CERTIFICATION_COMPLETE || enabled === true;
-  _scaleSyncCertificationGateUI();
-  try {
-    statusOn(
-      'save-status',
-      _scaleBetaEnabled()
-        ? 'Beta scale estimates enabled for this page. Every reading still requires operator confirmation.'
-        : 'Beta scale estimates disabled. Enter grams manually.',
-      _scaleBetaEnabled() ? 'warn' : 'info'
-    );
-  } catch (_) {}
-  return _scaleBetaEnabled();
-}
-function _scaleRequireBetaEnabled(actionLabel) {
-  if (_scaleBetaEnabled()) return true;
-  try {
-    statusOn(
-      'save-status',
-      'Scale estimates are off. Enable the uncertified beta scale in the SCALE panel or enter grams manually.',
-      'warn'
-    );
-  } catch (_) {}
-  return false;
-}
-function _scaleConfirmEstimateUse(reading, destinationLabel) {
-  if (!_scaleRequireBetaEnabled(destinationLabel)) return false;
-  if (SCALE_PHYSICAL_CERTIFICATION_COMPLETE) return true;
-  var grams = reading && reading.grams;
-  var prompt = SCALE_CERTIFICATION_WARNING + '\n\nUse ' + grams + ' g for ' + destinationLabel + '?';
-  var accepted = false;
-  try {
-    accepted = !!(typeof window !== 'undefined' && typeof window.confirm === 'function'
-      ? window.confirm(prompt)
-      : (typeof confirm === 'function' && confirm(prompt)));
-  } catch (_) { accepted = false; }
-  if (!accepted) {
-    try { statusOn('save-status', 'Scale estimate not used. Enter or verify grams manually.', 'warn'); } catch (_) {}
-  }
-  return accepted;
-}
-// SCALE_CERTIFICATION_RELEASE_GATE_V1_END
 
 // Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
 // Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
@@ -3821,7 +3474,6 @@ function _bleResetButtons() {
     var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = (_BLE_SURFACES[i] === 'main-ble' ? '📶 Connect Scale' : '📶 Connect scale');
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = '';
   }
-  try { _scaleSyncCertificationGateUI(); } catch (_) {}
 }
 function _bleSetConnected(name) {
   bleScale.connected = true; bleScale.name = name || '';
@@ -3830,7 +3482,6 @@ function _bleSetConnected(name) {
     var b = $(_BLE_SURFACES[i] + '-connect'); if (b) b.textContent = 'Disconnect';
     var a = $(_BLE_SURFACES[i] + '-all'); if (a) a.style.display = 'none';   // hide fallback once connected
   }
-  try { _scaleSyncCertificationGateUI(); } catch (_) {}
   try { _weightUseScaleSync(); } catch (_) {}
 }
 function _bleSetDisconnected() {
@@ -3867,14 +3518,7 @@ function _bleOnFrame(ev) {
       // SCALE_OFFSET — raw stays for stability/diagnostics; corrected drives display/fill/publish.
       var rawG = r.grams, off = _scaleOffset(), corrG = rawG + off;
       bleScale.raw = rawG;
-      bleScale.latest = {
-        grams: corrG,
-        raw: rawG,
-        stable: r.stable,
-        ts: nowMs,
-        trusted: true,
-        source: _localScaleSource()
-      };
+      bleScale.latest = { grams: corrG, raw: rawG, stable: r.stable, ts: nowMs };
       try { _bridgeMaybePublish(r, _bleHex(bytes)); } catch (_) {}   // SCALE_BRIDGE — publishes corrected grams (applies offset internally)
       var stableTxt = r.stable ? ('stable · ' + (r.hwStable ? 'scale' : 'software')) : 'unstable';
       liveTxt = 'Live weight: ' + corrG + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '')
@@ -3895,8 +3539,7 @@ function _bleOnFrame(ev) {
         // STABLE_GUARD — only allow "Use latest stable weight" on a stable frame.
         if (use) {
           use.style.display = '';
-          if (r.stable && _scaleBetaEnabled()) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
-          else if (r.stable) { use.disabled = true; use.textContent = 'Enable beta scale estimates above'; use.style.opacity = '0.55'; }
+          if (r.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
           else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
         }
       }
@@ -3909,7 +3552,6 @@ function _bleOnDisconnect() { bleScale.char = null; bleScale.server = null; _ble
 // allDevices=false → filter by FFF0 (only scales advertising it appear).
 // allDevices=true  → acceptAllDevices fallback for scales that don't advertise FFF0.
 async function _bleConnect(allDevices) {
-  if (!_scaleRequireBetaEnabled('scale connection')) return false;
   if (bleScale.nativeMode) { return _nativeScaleConnect(allDevices); }   // SCALE_NATIVE_BLE — iOS in-app
   if (!navigator.bluetooth) return;
   try {
@@ -3969,36 +3611,33 @@ function _bleDisconnect() {
 }
 // Scan-sheet (TAKEN / Partial-weighed) — fill the Partial Weight (g) input + recalc.
 function _bleUseLatest() {
-  var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, 'partial bottle weight')) return;
+  if (!bleScale.latest) return;
   var w = $('qm-weight'); if (!w) return;
-  w.value = String(reading.grams);
+  w.value = String(bleScale.latest.grams);
   try { _qmUpdateRemaining(); } catch (_) {}
-  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+  try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
 }
 // Main RETURN form — RETURN quantity IS grams, so fill the QTY input.
 function _bleUseLatestReturn() {
-  var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, 'RETURN quantity')) return;
+  if (!bleScale.latest) return;
   var q = $('qty-input'); if (!q) return;
-  q.value = String(reading.grams);
-  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+  q.value = String(bleScale.latest.grams);
+  try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
 }
 // Main panel — direction-neutral. RETURN → fill QTY grams; otherwise (TAKEN,
 // incl. used/partial bottles sent TO a bar) → fill the main Weight (g) field and
 // recalc remaining % from the DB/local profile. Operator still sets bottle state
 // and taps ADD TO REVIEW. Never submits, never writes DB.
 function _bleUseLatestMain() {
-  var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, state.selectedAction === 'RETURNED' ? 'RETURN quantity' : 'TAKEN bottle weight')) return;
-  var g = String(reading.grams);
+  if (!bleScale.latest) return;
+  var g = String(bleScale.latest.grams);
   if (state.selectedAction === 'RETURNED') {
     var q = $('qty-input'); if (q) q.value = g;
-    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+    try { statusOn('save-status', 'Scale return weight ' + bleScale.latest.grams + ' g filled into QTY — review and tap ADD TO REVIEW', 'ok'); } catch (_) {}
   } else {
     var w = $('weight-g-input'); if (w) w.value = g;
     try { updateRemainingDisplay(); } catch (_) {}
-    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into Weight (g) — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+    try { statusOn('save-status', 'Scale weight ' + bleScale.latest.grams + ' g filled into Weight (g) — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
   }
 }
 // PARTIAL UX — keep the in-flow "Use current scale weight" button (next to the
@@ -4007,24 +3646,20 @@ function _bleUseLatestMain() {
 function _weightUseScaleSync() {
   var btn = $('weight-use-scale'); if (!btn) return;
   var connected = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode) && bleScale.connected);
-  var enabled = _scaleBetaEnabled();
-  var hasStable = enabled && connected && !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable);
+  var hasStable = connected && !!(bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number');
   btn.style.display = connected ? '' : 'none';
   btn.disabled = !hasStable;
   btn.style.opacity = hasStable ? '1' : '0.55';
-  btn.textContent = hasStable
-    ? ('⚖️ Use current scale estimate (' + bleScale.latest.grams + ' g)')
-    : (!enabled ? 'Enable beta scale estimates above' : 'Waiting for stable scale weight…');
+  btn.textContent = hasStable ? ('⚖️ Use current scale weight (' + bleScale.latest.grams + ' g)') : 'Waiting for stable scale weight…';
 }
 // Fill the WEIGHT (g) field with the CORRECTED stable grams + recalc remaining %.
 // Works for TAKEN/PARTIAL bottles sent to a bar; never submits, never writes DB.
 function _weightUseScaleFill() {
-  var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, 'TAKEN bottle weight')) return;
+  if (!(typeof bleScale !== 'undefined' && bleScale && bleScale.latest && bleScale.latest.stable && typeof bleScale.latest.grams === 'number')) return;
   var w = $('weight-g-input'); if (!w) return;
-  w.value = String(reading.grams);   // corrected grams
+  w.value = String(bleScale.latest.grams);   // corrected grams
   try { updateRemainingDisplay(); } catch (_) {}
-  try { statusOn('save-status', 'Filled WEIGHT with uncertified estimate ' + reading.grams + ' g — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+  try { statusOn('save-status', 'Filled WEIGHT with ' + bleScale.latest.grams + ' g — set bottle state, review, tap ADD TO REVIEW', 'ok'); } catch (_) {}
   try { Feedback.ok(); } catch (_) {}
 }
 // Capability detection — runs once. iPhone/iOS browsers lack navigator.bluetooth
@@ -4167,7 +3802,6 @@ function _nativeScaleStartWatchdog() {
 }
 // SCALE_NATIVE_NOTIFY_FIX_END
 async function _nativeScaleConnect(allDevices) {
-  if (!_scaleRequireBetaEnabled('native scale connection')) return false;
   var Ble = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BluetoothLe) || null;
   if (!Ble) { _bleStatus('native BLE unavailable'); return; }
   if (_nativeScale.connecting) return;
@@ -4231,13 +3865,10 @@ async function _nativeScaleDisconnect() {
     var _scaleUi = bleScale.supported || bleScale.nativeMode;
     var mp = $('main-ble'); if (mp) mp.style.display = _scaleUi ? '' : 'none';
     var mh = $('main-ble-hint'); if (mh) mh.style.display = _scaleUi ? 'none' : '';
-    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = (SCALE_BRIDGE_RELEASE_ENABLED && _scaleUi) ? '' : 'none';
-    var bl = $('bridge-listen');
-    if (bl && !SCALE_BRIDGE_RELEASE_ENABLED) { bl.disabled = true; bl.textContent = 'Bridge disabled'; }
-    var bs = $('bridge-start-station');
-    if (bs && !SCALE_BRIDGE_RELEASE_ENABLED) { bs.disabled = true; bs.textContent = 'Bridge publishing disabled'; }
+    var bsr = $('bridge-station-row'); if (bsr) bsr.style.display = _scaleUi ? '' : 'none';   // station = a device with local BLE (Web BT or iOS native)
     // Desktop with no Web Bluetooth (Safari/Firefox/Arc/Atlas, or Chrome with BLE
-    // disabled) cannot connect directly. Show a clear Chrome/Edge/manual-entry CTA.
+    // disabled) → a station CANNOT run here. Show a clear "use Chrome/Edge" CTA.
+    // Receiver mode (Listen to Scale Station) is unaffected and stays available.
     var cta = $('main-ble-desktop-cta');
     if (cta) cta.style.display = (!_scaleUi && _bleDeviceType() === 'Desktop') ? '' : 'none';
     if (bleScale.nativeMode) {
@@ -4247,7 +3878,6 @@ async function _nativeScaleDisconnect() {
     }
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
-    try { _scaleSyncCertificationGateUI(); } catch (_) {}
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
     if (bleScale.supported && navigator.bluetooth.getAvailability) {
       navigator.bluetooth.getAvailability().then(function (a) {
@@ -4257,10 +3887,12 @@ async function _nativeScaleDisconnect() {
   } catch (_) { bleScale.supported = false; }
 })();
 // ════════════════════════════════════════════════════════════════════
-//  SCALE_BRIDGE — release-gated remote relay. The current public Realtime/HTTP
-//  transport cannot establish device authenticity, so remote readings are
-//  untrusted/display-only and can never enter bleScale.latest or inventory inputs.
-//  Direct local Web Bluetooth/native BLE and manual grams remain available.
+//  SCALE_BRIDGE — Realtime relay so iPhone/Safari barbacks (no Web Bluetooth)
+//  can use scale weight. One laptop/Android "Scale Station" connects to the BLE
+//  scale and BROADCASTS the latest high-confidence weight on a venue/night-scoped
+//  Supabase Realtime channel; other clients LISTEN and set bleScale.latest so the
+//  existing field-fill works. Frontend-only: public broadcast channel + anon key.
+//  No table, RLS, Edge, or DB write. Never broadcasts PIN/token/access_code.
 //  supabase-js is loaded lazily, captured, then its window.supabase global is
 //  removed (only if WE loaded it) so the page's event-insert path (SB =
 //  buildSupabaseClient → needs window.supabase) is provably unaffected.
@@ -4271,20 +3903,6 @@ var bridge = { sb: null, client: null, channel: null, listening: false, publishi
   wakeLock: null, lastPubMs: 0, startedMs: 0, watchTimer: null, lastPayload: '',
   heartbeatTimer: null, lastHeartbeatTs: '', lastHeartbeatErr: null, lastPubHex: '', lastPubConf: 'high', lastPubRange: '' };
 var SCALE_BRIDGE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js';
-var SCALE_BRIDGE_DISABLED_MESSAGE = 'Bridge disabled for public release — remote readings are untrusted. Use direct Bluetooth or enter grams manually.';
-function _bridgeReleaseBlocked() {
-  if (SCALE_BRIDGE_RELEASE_ENABLED) return false;
-  _bridgeStatus(SCALE_BRIDGE_DISABLED_MESSAGE);
-  var warning = $('bridge-trust-warning'); if (warning) warning.style.display = '';
-  var listen = $('bridge-listen'); if (listen) { listen.disabled = true; listen.textContent = 'Bridge disabled'; }
-  var station = $('bridge-start-station'); if (station) { station.disabled = true; station.textContent = 'Bridge publishing disabled'; }
-  var use = $('bridge-use'); if (use) {
-    use.disabled = true;
-    use.style.opacity = '0.55';
-    use.textContent = 'Remote weight is display-only';
-  }
-  return true;
-}
 function _bridgeScope() {
   var tp = state.tokenPayload || {}, ss = state.serverSession || {};
   var venue = tp.venue_id || ss.venue_id || '';
@@ -4350,7 +3968,6 @@ function _bridgeStationId() {
   return bridge.stationId;
 }
 async function _bridgeLoadLib() {
-  if (_bridgeReleaseBlocked()) return false;
   if (bridge.sb) return true;
   var preExisting = !!(window.supabase && window.supabase.createClient);
   if (!preExisting) { try { await loadScript(SCALE_BRIDGE_CDN); } catch (_) { return false; } }
@@ -4360,7 +3977,6 @@ async function _bridgeLoadLib() {
   return true;
 }
 function _bridgeMakeClient() {
-  if (_bridgeReleaseBlocked()) return null;
   if (bridge.client) return bridge.client;
   if (!bridge.sb || !supabaseCfg || !supabaseCfg.url || !supabaseCfg.key) return null;
   try {
@@ -4372,7 +3988,6 @@ function _bridgeMakeClient() {
   return bridge.client;
 }
 async function _bridgeEnsureChannel() {
-  if (_bridgeReleaseBlocked()) return null;
   if (bridge.channel) return bridge.channel;
   var scope = _bridgeScope();
   if (!scope) { _bridgeStatus('Bridge: no event scope — log in first'); return null; }
@@ -4393,37 +4008,34 @@ async function _bridgeEnsureChannel() {
     } catch (_) { if (!settled) { settled = true; resolve(null); } }
   });
 }
-// Receiver defense in depth: remote data remains visible for diagnostics only.
+// Receiver — feed bleScale.latest from station broadcasts; existing Use buttons work.
 function _bridgeOnMessage(p) {
-  if (!p || typeof p.grams !== 'number' || !isFinite(p.grams)) return;
+  if (!p || typeof p.grams !== 'number') return;
   if (bridge.publishing && !bridge.listening) return;   // a pure station ignores remote weights
   bridge.rxCount = (bridge.rxCount || 0) + 1; bridge.lastRxTs = _bridgeNow(); try { _bridgeRenderDiag(); } catch (_) {}
   _bridgeApplyWeight(p, 'realtime');
 }
 // Shared receiver update — used by both Realtime broadcast and HTTP polling.
-// Never writes bleScale.latest: remote values are untrusted inventory evidence.
-// SCALE_BRIDGE_UNTRUSTED_RECEIVER_V1_START
+// Sets bleScale.latest so the existing context-aware Use button fills the field.
 function _bridgeApplyWeight(p, source) {
-  if (!p || typeof p.grams !== 'number' || !isFinite(p.grams)) return { applied: false, reason: 'invalid_weight' };
-  bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '', trusted: false, source: source || 'remote_bridge' };
-  bridge.lastPayload = (p.station_id || '?') + ' · ' + p.grams + 'g · UNTRUSTED DISPLAY ONLY';
-  var w = $('bridge-weight'); if (w) w.textContent = 'Remote station weight: ' + p.grams + ' g · UNTRUSTED / DISPLAY ONLY' + (source ? (' · via ' + source) : '');
-  var u = $('bridge-update'); if (u) u.textContent = 'Cannot fill inventory weight · use direct Bluetooth or manual grams' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
+  if (!p || typeof p.grams !== 'number') return;
+  bridge.latest = { grams: p.grams, stable: !!p.stable, station: p.station_id || '?', ts: p.ts || '' };
+  bleScale.latest = { grams: p.grams, stable: !!p.stable };
+  bridge.lastPayload = (p.station_id || '?') + ' · ' + p.grams + 'g · ' + (p.stable ? 'stable' : 'unstable');
+  var w = $('bridge-weight'); if (w) w.textContent = 'Latest station weight: ' + p.grams + ' g · ' + (p.stable ? 'stable' : 'unstable') + (source ? (' · via ' + source) : '');
+  var u = $('bridge-update'); if (u) u.textContent = 'Last update: just now' + (p.ts ? ' · ' + String(p.ts).replace('T', ' ').slice(0, 19) : '');
   var s = $('bridge-station'); if (s) s.textContent = 'Station: ' + (p.station_id || '?');
   var use = $('bridge-use');
   if (use) {
     use.style.display = '';
-    use.disabled = true;
-    use.textContent = 'Remote weight is display-only';
-    use.style.opacity = '0.55';
+    if (p.stable) { use.disabled = false; use.textContent = 'Use latest stable weight'; use.style.opacity = '1'; }
+    else { use.disabled = true; use.textContent = 'Waiting for stable weight…'; use.style.opacity = '0.55'; }
   }
-  try { _bridgeReleaseBlocked(); } catch (_) {}
-  return { applied: false, trusted: false, reason: 'untrusted_remote_bridge' };
 }
 // Receiver — NO fresh weight this poll. Show WHY (from the Edge `reason`) so the
 // operator isn't staring at a blank dash, and make sure a stale reading can never
-// be recorded: clear only bridge.latest and disable the bridge Use button. Direct
-// local BLE/native BLE state is independent and must never be cleared here.
+// be recorded: clear bleScale.latest and disable the Use button. A fresh weight on
+// the next poll re-enables everything via _bridgeApplyWeight.
 //   expired → a station published but stopped >TTL ago (laptop closed / scale dropped);
 //             `stale` carries the last reading + age, shown greyed-out, NOT usable.
 //   no_row  → no station has published for THIS venue+night — the station never
@@ -4439,7 +4051,7 @@ function _bridgeShowNoWeight(reason, info) {
     if (reason) bridge.lastPayload = 'poll ' + reason + ' ignored; using recent realtime payload';
     return;
   }
-  bridge.latest = null;
+  bridge.latest = null; bleScale.latest = null;
   var w = $('bridge-weight'), u = $('bridge-update'), s = $('bridge-station'), use = $('bridge-use');
   if (reason === 'expired' && typeof stale.grams === 'number') {
     var _ageS = Number(stale.age_sec) || 0;
@@ -4463,11 +4075,9 @@ function _bridgeShowNoWeight(reason, info) {
   }
   if (use) { use.disabled = true; use.style.opacity = '0.55'; use.textContent = 'Waiting for fresh stable weight…'; }
 }
-// SCALE_BRIDGE_UNTRUSTED_RECEIVER_V1_END
 // HTTP bridge (polling fallback) — authenticated POST to the barback-scale-bridge
 // Edge function with the barback JWT. Edge derives venue/night from the JWT claims.
 async function _bridgeHttp(action, extra) {
-  if (_bridgeReleaseBlocked()) return null;
   if (!state.jwt || !supabaseCfg || !supabaseCfg.key) return null;
   var base; try { base = functionsBase(); } catch (_) { base = null; }
   if (!base) return null;
@@ -4481,7 +4091,6 @@ async function _bridgeHttp(action, extra) {
   } catch (_) { return null; }
 }
 async function _bridgeHttpPublish(payload) {
-  if (_bridgeReleaseBlocked()) return;
   var r = await _bridgeHttp('publish', payload);
   bridge.httpOk = !!(r && r.ok);
   bridge.httpErr = (r && r.ok) ? null : ((r && r.error) ? String(r.error).slice(0, 40) : 'no response');
@@ -4491,7 +4100,6 @@ async function _bridgeHttpPublish(payload) {
 // Receiver poll — runs every ~1s while listening; delivers weight over HTTPS even
 // when Realtime broadcast Rx stays 0 (iPhone/iPad).
 async function _bridgePollLatest() {
-  if (_bridgeReleaseBlocked()) return;
   if (!bridge.listening) return;
   var r = await _bridgeHttp('latest', {});
   bridge.lastPollTs = _bridgeNow();
@@ -4520,7 +4128,6 @@ async function _bridgePollLatest() {
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeListen() {
-  if (_bridgeReleaseBlocked()) return;
   if (bridge.listening) { _bridgeStopListen(); return; }
   _bridgeStatus('Bridge: connecting…'); try { _bridgeRenderDiag(); } catch (_) {}
   var scope = _bridgeScope();
@@ -4601,7 +4208,6 @@ function _bridgeStationHealth() {
 // bridge row stays fresh. Reuses _bridgeHttpPublish and the EXACT same payload shape —
 // no endpoint / payload / TTL / receiver change. Receiver stale rules stay strict.
 function _bridgeHeartbeatPublish() {
-  if (_bridgeReleaseBlocked()) return;
   if (!bridge.publishing) return;        // station off → no heartbeat
   if (!bleScale.connected) return;       // scale dropped → do NOT publish a fake-fresh value
   var L = bleScale.latest;
@@ -4625,7 +4231,6 @@ function _bridgeHeartbeatPublish() {
   try { _bridgeRenderDiag(); } catch (_) {}
 }
 async function _bridgeStartStation() {
-  if (_bridgeReleaseBlocked()) return;
   if (bridge.publishing) { _bridgeStopStation(); return; }
   if (!bleScale.connected) { _bridgeStatus('Connect the scale first, then tap Publish to iPhones'); return; }
   if (!state.jwt) { _bridgeStatus('Log in first — station needs a session to publish'); return; }
@@ -4667,7 +4272,6 @@ function _bridgeMaybeClose() {
 }
 // Station — publish a high-confidence frame (rate-limited). Called from _bleOnFrame.
 function _bridgeMaybePublish(r, hex) {
-  if (_bridgeReleaseBlocked()) return;
   if (!bridge.publishing) return;
   if (!r || r.confidence !== 'high') return;
   var now = Date.now();
@@ -4698,30 +4302,12 @@ function _bridgeMaybePublish(r, hex) {
   try { _bridgeHttpPublish(_bridgePayload({ grams: pubG, stable: !!r.stable, raw_hex: hex, decoder_confidence: r.confidence, range_mode: r.rangeMode, ts: new Date().toISOString() })); } catch (_) {}
   try { _bridgeRenderDiag(); } catch (_) {}
 }
-function _bridgeUse() {
-  _bridgeReleaseBlocked();
-  try {
-    statusOn(
-      'save-status',
-      'Remote Scale Bridge readings are untrusted and cannot fill inventory weight. Use direct Bluetooth or enter grams manually.',
-      'warn'
-    );
-  } catch (_) {}
-  return false;
-}
+function _bridgeUse() { try { _bleUseLatestMain(); } catch (_) {} }   // RETURN→QTY, else Weight(g)+recalc
 // SCALE_OFFSET — wire the calibration controls (station panel). Persist to
 // localStorage; corrected grams flow automatically via _scaleCorrect / _bleOnFrame.
-(function _wireScaleCertificationGate() {
-  try {
-    var enable = $('scale-beta-enable');
-    if (enable) enable.addEventListener('change', function () { _scaleSetBetaEnabled(enable.checked); });
-    _scaleSyncCertificationGateUI();
-  } catch (_) {}
-})();
 (function _wireScaleOffset() {
   try {
     if ($('scale-set-known')) $('scale-set-known').addEventListener('click', function () {
-      if (!_scaleRequireBetaEnabled('scale calibration')) return;
       var raw = _scaleCurrentRaw();
       var known = parseFloat(($('scale-known-input') && $('scale-known-input').value) || '');
       if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
@@ -4730,14 +4316,12 @@ function _bridgeUse() {
       try { statusOn('save-status', 'Offset set to ' + _scaleFmtOff(_scaleOffset()) + ' (known ' + Math.round(known) + 'g − raw ' + Math.round(raw) + 'g)', 'ok'); } catch (_) {}
     });
     if ($('scale-zero')) $('scale-zero').addEventListener('click', function () {
-      if (!_scaleRequireBetaEnabled('scale zero')) return;
       var raw = _scaleCurrentRaw();
       if (raw == null) { try { statusOn('save-status', 'Connect the scale and wait for a live reading first', 'warn'); } catch (_) {} return; }
       _scaleSetOffset(-raw);
       try { statusOn('save-status', 'Zeroed current reading — offset ' + _scaleFmtOff(_scaleOffset()), 'ok'); } catch (_) {}
     });
     if ($('scale-clear-offset')) $('scale-clear-offset').addEventListener('click', function () {
-      if (!_scaleRequireBetaEnabled('scale offset')) return;
       _scaleSetOffset(0);
       if ($('scale-known-input')) $('scale-known-input').value = '';
       try { statusOn('save-status', 'Offset cleared — showing raw scale grams', 'ok'); } catch (_) {}
@@ -5111,24 +4695,7 @@ async function saveCore(payload) {
     }
   }
 
-  let queueResult = null;
-  if (!synced) {
-    queueResult = Outbox.push(record);
-    if (!queueResult.ok) {
-      Telemetry.bump('failed');
-      renderRecentItemChips();
-      return {
-        synced:false,
-        queued:false,
-        storage_error:true,
-        error:{ message:OUTBOX_STORAGE_ERROR_MESSAGE },
-        ce,
-      };
-    }
-  }
-
-  // Recent entry is recorded only after the server accepted the Event or the
-  // complete queue was durably persisted.
+  // Recent entry
   Recent.add({
     ce: ce,
     at: Date.now(),
@@ -5143,13 +4710,14 @@ async function saveCore(payload) {
     reversal_of: payload.reversal_of || null,
   });
 
+  if (!synced) Outbox.push(record);
   // Phase 5: telemetry counters (cumulative across reloads)
   Telemetry.bump(synced ? 'saved' : 'failed');
   // If we just synced, schedule a telemetry heartbeat so the manager
   // dashboard sees the activity within the next few seconds.
   if (synced && state.jwt) Telemetry.post().catch(() => {});
   renderRecentItemChips();
-  return { synced, queued:!synced, error:err, ce };
+  return { synced, error: err, ce };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -5625,18 +5193,7 @@ function addToReview(payload) {
   // with existing notes-based inventory classification.
   if (payload.opening_par_v1 === true) record.opening_par_v1 = true;
 
-  const draftResult = Drafts.add(record);
-  // Numeric return compatibility is retained for older local test harnesses;
-  // the production Drafts implementation returns a verified result object.
-  if (draftResult && typeof draftResult === 'object' && !draftResult.ok) {
-    return {
-      ok:false,
-      ce,
-      draft:true,
-      storage_error:true,
-      error:OUTBOX_STORAGE_ERROR_MESSAGE,
-    };
-  }
+  Drafts.add(record);
   return { ok:true, ce, draft:true };
 }
 
@@ -6068,11 +5625,8 @@ function renderOpeningParChecklist() {
           return '<div class="opening-par-item' + (variance ? (' ' + variance.status) : '') + '" data-key="' + esc(row.key) +
             '" data-destination="' + esc(group.destination.id) + '" data-item="' + esc(row.item.id) +
             '" data-expected="' + esc(String(row.expectedQty)) + '">' +
-            '<div class="opening-par-name with-thumb">' +
-              itemThumbHTML(row.item, 'opening-par-thumb') +
-              '<span class="opening-par-name-text">' + esc(row.item.name || '?') +
-                '<span class="opening-par-meta">' + esc(meta) + (timestamp ? ' · ' + esc(timestamp) : '') + '</span>' +
-              '</span></div>' +
+            '<div class="opening-par-name">' + esc(row.item.name || '?') +
+              '<span class="opening-par-meta">' + esc(meta) + (timestamp ? ' · ' + esc(timestamp) : '') + '</span></div>' +
             '<div class="opening-par-expected"><span class="opening-par-meta">EXPECTED PAR</span>' + esc(String(row.expectedQty)) + '</div>' +
             '<div class="opening-par-qty-wrap">' +
               '<input class="opening-par-qty" type="number" inputmode="numeric" min="0" step="1" placeholder="Received"' +
@@ -6619,11 +6173,7 @@ async function undoLast() {
 
   if (last.status === 'QUEUED') {
     // Just yank it from the outbox before it syncs
-    const removed = Outbox.removeById(last.ce);
-    if (!removed.ok) {
-      statusOn('save-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-      return;
-    }
+    Outbox.removeById(last.ce);
     Recent.markUndone(last.ce);
     Feedback.ok();
     statusOn('save-status', '↶ Removed from queue: ' + last.item_name, 'info');
@@ -6639,11 +6189,6 @@ async function undoLast() {
       notes: 'undo of ' + last.ce,
       reversal_of: last.ce,
     });
-    if (!r.synced && r.queued === false) {
-      Feedback.err();
-      statusOn('save-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-      return;
-    }
     Recent.markUndone(last.ce);
     Feedback.ok();
     statusOn('save-status', '↶ Reversal posted (' + (r.synced ? 'synced' : 'queued') + '): ' + last.item_name, 'info');
@@ -6691,11 +6236,7 @@ async function syncOutbox(opts) {
     try {
       const { error } = await eventsInsert(rec);
       if (!error || error.code === '23505') {
-        const removed = Outbox.removeById(ev.client_event_id);
-        if (!removed.ok) {
-          failed++;
-          continue;
-        }
+        Outbox.removeById(ev.client_event_id);
         Recent.markStatus(ev.client_event_id, 'SYNCED');
         ok++;
       } else {
@@ -6751,7 +6292,7 @@ function bumpAttempt(ce, errMsg) {
   if (arr[i].attempts >= SYNC_MAX_ATTEMPTS) {
     Recent.markStatus(ce, 'ERROR');
   }
-  return Outbox.save(arr);
+  Outbox.save(arr);
 }
 function trySyncSoon(ms) {
   clearTimeout(state.syncTimer);
@@ -6901,7 +6442,7 @@ async function bleConnect() {
   // Legacy custom BARINV BLE bridge is disabled in the standalone Barback web link.
   // Scale weighing is owned by the QN-KS / Arboleaf adapter above:
   // Web Bluetooth where available, iOS-native only inside a Capacitor host, and
-  // manual grams when direct Bluetooth is unavailable. Remote bridge is release-gated.
+  // bridge/station mode as the browser-safe fallback.
   if (typeof _bleConnect === 'function') return _bleConnect(false);
   throw new Error('Legacy scale connector disabled. Use Connect Scale.');
 }
@@ -6980,90 +6521,6 @@ function showReview() {
 //     client_event_id are NEVER rewritten — audit trail of which
 //     session originally captured the row is preserved.
 //   • No DB calls. No SQL. No network. Pure localStorage mutations.
-
-// BARBACK_ITEM_THUMBNAILS_UI_START
-function itemImageUrl(item) {
-  if (!item) return '';
-  const raw = item.image_url || item.imageUrl || item.photo_url || item.photoUrl || item.image || item.photo || item.picture || '';
-  const url = String(raw || '').trim();
-  if (!url || /^javascript:/i.test(url)) return '';
-  return url;
-}
-
-function itemThumbHTML(item, extraClass) {
-  const url = itemImageUrl(item);
-  if (!url) return '';
-  return '<img class="item-thumb ' + esc(extraClass || '') + '" src="' + esc(url) +
-    '" alt="" loading="lazy" decoding="async" onerror="this.style.display=\'none\'">';
-}
-
-function itemById(id) {
-  if (!id) return null;
-  return (cache.items || []).find(item => item && item.id === id) || null;
-}
-
-function hydrateItemThumbs(root) {
-  const scope = root || document;
-  if (!scope || !scope.querySelectorAll) return;
-
-  scope.querySelectorAll('.item-row[data-id]').forEach(row => {
-    if (row.getAttribute('data-thumb-hydrated') === '1') return;
-    const item = itemById(row.getAttribute('data-id'));
-    const url = itemImageUrl(item);
-    if (!url) return;
-    const img = document.createElement('img');
-    img.className = 'item-thumb small';
-    img.src = url;
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.onerror = function(){ this.style.display = 'none'; };
-    row.classList.add('with-thumb');
-    row.insertBefore(img, row.firstChild);
-    row.setAttribute('data-thumb-hydrated', '1');
-  });
-
-  scope.querySelectorAll('.bm-card[data-id]').forEach(card => {
-    if (card.getAttribute('data-thumb-hydrated') === '1') return;
-    const item = itemById(card.getAttribute('data-id'));
-    const url = itemImageUrl(item);
-    if (!url) return;
-    const img = document.createElement('img');
-    img.className = 'item-thumb bm-thumb';
-    img.src = url;
-    img.alt = '';
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    img.onerror = function(){ this.style.display = 'none'; };
-    const star = card.querySelector('.bm-star');
-    if (star && star.nextSibling) card.insertBefore(img, star.nextSibling);
-    else card.insertBefore(img, card.firstChild);
-    card.setAttribute('data-thumb-hydrated', '1');
-  });
-}
-
-function startItemThumbHydrator() {
-  try {
-    hydrateItemThumbs(document);
-    if (!('MutationObserver' in window)) return;
-    const ids = ['search-results', 'bm-grid'];
-    ids.forEach(id => {
-      const el = $(id);
-      if (!el) return;
-      const obs = new MutationObserver(() => {
-        try { hydrateItemThumbs(el); } catch (_) {}
-      });
-      obs.observe(el, { childList:true, subtree:true });
-    });
-  } catch (_) {}
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startItemThumbHydrator);
-} else {
-  startItemThumbHydrator();
-}
-// BARBACK_ITEM_THUMBNAILS_UI_END
 
 // BARBACK_BARTENDER_BAR_LABELS_UI_START
 function barDisplayLabel(bar) {
@@ -7440,11 +6897,7 @@ function renderReview() {
 function onQueueDelete(ce) {
   if (!ce) return;
   if (!confirm('Delete this queued transaction? It will not sync later.')) return;
-  const removed = Outbox.removeById(ce);
-  if (!removed.ok) {
-    statusOn('review-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-    return;
-  }
+  try { Outbox.removeById(ce); } catch (_) {}
   try { Recent.markUndone(ce); } catch (_) {}
   try { refreshQueueCount(); } catch (_) {}
   try { renderReview(); } catch (_) {}
@@ -7601,11 +7054,7 @@ function onQueueEditSave(ce, form) {
   arr[i].attempts        = 0;          // reset retry counter so next SYNC tries again
   arr[i].last_error      = null;
   arr[i].last_attempt_at = null;
-  const saved = Outbox.save(arr);
-  if (!saved.ok) {
-    statusOn('review-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-    return;
-  }
+  Outbox.save(arr);
 
   // Mirror the visible change in the local Recent log (kept aligned
   // so the operator's display matches reality). The Recent entry for
@@ -7641,11 +7090,7 @@ function onQueueEditSave(ce, form) {
 function onDraftDelete(ce) {
   if (!ce) return;
   if (!confirm('Delete this draft? It will not be submitted.')) return;
-  const removed = Drafts.removeById(ce);
-  if (!removed.ok) {
-    statusOn('review-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-    return;
-  }
+  try { Drafts.removeById(ce); } catch (_) {}
   try { refreshDraftCount(); } catch (_) {}
   try { renderReview(); } catch (_) {}
   statusOn('review-status', 'Draft deleted', 'info');
@@ -7790,11 +7235,7 @@ function onDraftEditSave(ce, form) {
              remaining_percent: remaining_percent, weight_profile_source: weight_profile_source,
              bottle_size_ml: (_ml != null && _ml > 0) ? _ml : null,
              liquid_weight_g: liquid_weight_g, remaining_ml: remaining_ml };
-  const saved = Drafts.save(arr);
-  if (!saved.ok) {
-    statusOn('review-status', OUTBOX_STORAGE_ERROR_MESSAGE, 'err');
-    return;
-  }
+  Drafts.save(arr);
 
   form.style.display = 'none';
   form.innerHTML = '';
@@ -7846,10 +7287,7 @@ async function submitAllDraftsToBarinv() {
     const profNotes = buildProfileNotes(_tareForNotes, full_weight_g, remaining_percent, weight_profile_source, weight_g, liquid_weight_g, remaining_ml);
     if (profNotes) rec.notes = [rec.notes, profNotes].filter(Boolean).join(' ').trim();
     try {
-      const queued = Outbox.push(rec); // dedupes by client_event_id
-      if (!queued.ok) throw queued.error || new Error('outbox persistence failed');
-      const removedDraft = Drafts.removeById(rec.client_event_id);
-      if (!removedDraft.ok) throw removedDraft.error || new Error('draft persistence failed');
+      Outbox.push(rec);            // dedupes by client_event_id
       Recent.add({
         ce: rec.client_event_id,
         at: Date.now(),
@@ -7863,6 +7301,7 @@ async function submitAllDraftsToBarinv() {
         status: 'QUEUED',
         reversal_of: null,
       });
+      Drafts.removeById(rec.client_event_id);
       promoted++;
     } catch (e) {
       statusOn('review-status',
@@ -8464,31 +7903,15 @@ function repairStaleOutbox() {
   const fresh = out.filter(e => (e.queued_at || 0) >= cutoff);
   const stale = out.length - fresh.length;
   if (stale > 0) {
-    // Preserve the existing policy by moving stale rows only after a complete,
-    // verified quarantine copy succeeds. If either write fails, the active
-    // outbox remains unchanged and the blocking storage warning stays visible.
+    // Park stale entries under a quarantine key for later inspection
     try {
       const stash = (JSON.parse(localStorage.getItem(LS.staleQuarantine) || '[]') || []);
       stash.push({ at: Date.now(), entries: out.filter(e => (e.queued_at || 0) < cutoff) });
-      const serialized = JSON.stringify(stash);
-      localStorage.setItem(LS.staleQuarantine, serialized);
-      if (localStorage.getItem(LS.staleQuarantine) !== serialized) {
-        throw new Error('stale quarantine persistence verification failed');
-      }
-    } catch (e) {
-      showOutboxStorageFailure(e);
-      return { ok:false, quarantined:0, preserved:out.length };
-    }
-    const saved = Outbox.save(fresh);
-    if (!saved.ok) return { ok:false, quarantined:0, preserved:out.length };
-    const message = stale + ' old queued transaction' + (stale !== 1 ? 's were' : ' was') +
-      ' moved to the local stale-session quarantine. Download a Queue Backup from Review and call your manager.';
-    try { alert(message); } catch (_) {}
-    try { statusOn('review-status', message, 'warn'); } catch (_) {}
-    console.warn('[outbox-repair] quarantined', stale, 'stale entries');
-    return { ok:true, quarantined:stale, preserved:fresh.length };
+      localStorage.setItem(LS.staleQuarantine, JSON.stringify(stash.slice(-3)));
+    } catch (_) {}
+    Outbox.save(fresh);
+    console.warn('[outbox-repair] quarantined', stale, 'stale entries (>7 days old)');
   }
-  return { ok:true, quarantined:0, preserved:out.length };
 }
 function renderRecentItemChips() {
   const host = $('recent-items-chips');
@@ -8616,12 +8039,7 @@ function exportQueueBackup() {
     session: state.tokenPayload || null,
     server_session: state.serverSession || null,
     staff_id: state.staffId, staff_name: state.staffName,
-    review_drafts: Drafts.load(),
     outbox: Outbox.load(),
-    stale_quarantine: (() => {
-      try { return JSON.parse(localStorage.getItem(LS.staleQuarantine) || '[]'); }
-      catch (_) { return []; }
-    })(),
     recent: Recent.load(),
     queue_health: queueHealth(),
   };
@@ -8652,7 +8070,6 @@ function queueHealth() {
   };
 }
 $('review-export')?.addEventListener('click', exportQueueBackup);
-$('outbox-storage-export')?.addEventListener('click', exportQueueBackup);
 
 // 5. PWA — SW REGISTRATION DISABLED (PLAN-2026-06-04 SW-kill).
 // A prior barback_sw.js (from an earlier iteration of this PWA) was

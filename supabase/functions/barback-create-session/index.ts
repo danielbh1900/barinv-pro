@@ -45,7 +45,6 @@ interface CreateSessionBody {
   link_type?: "bar" | "table";
   opening_par_enabled?: boolean;
   opening_par_items?: Array<{ item_id: string; qty: number }>;
-  auto_approve_events?: boolean;
   nickname?: string;
   expires_at: string;
   pin_rotate_for?: string[];
@@ -426,14 +425,6 @@ Deno.serve(async (req: Request) => {
     return errorResponse("invalid Opening PAR configuration", 400);
   }
 
-  if (
-    body.auto_approve_events != null &&
-    typeof body.auto_approve_events !== "boolean"
-  ) {
-    return errorResponse("auto_approve_events must be boolean", 400);
-  }
-  const autoApproveEvents = body.auto_approve_events === true;
-
   // ── Insert the session row ───────────────────────────────────────
   const issuedBy = mgr.staffId; // may be null if no staff linkage
   if (!issuedBy) {
@@ -454,10 +445,9 @@ Deno.serve(async (req: Request) => {
       issued_by:     issuedBy,
       expires_at:    expiresAt.toISOString(),
       opening_par_config: openingParConfig,
-      auto_approve_events: autoApproveEvents,
     })
     .select(
-      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, opening_par_config, auto_approve_events",
+      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, opening_par_config",
     )
     .single();
   if (insErr || !session) {
@@ -590,7 +580,6 @@ Deno.serve(async (req: Request) => {
       expires_at: session.expires_at,
       opening_par_enabled: openingParConfig?.enabled === true,
       opening_par_item_count: openingParConfig?.items.length ?? 0,
-      auto_approve_events: autoApproveEvents,
     },
   });
 
