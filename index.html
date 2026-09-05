@@ -1437,7 +1437,6 @@ th.sortable span { font-size:10px; }
 
     <div class="login-tabs">
       <button class="login-tab active" onclick="switchLoginTab('admin')">Admin Login</button>
-      <button class="login-tab" onclick="switchLoginTab('barback')">Night Code</button>
     </div>
 
     <!-- Admin -->
@@ -1460,24 +1459,8 @@ th.sortable span { font-size:10px; }
       </div>
     </div>
 
-    <!-- Barback night code -->
-    <div class="login-panel" id="lp-barback">
-      <div style="font-family:'Fira Mono',monospace; font-size:11px; color:var(--muted); margin-bottom:16px; letter-spacing:0.05em; line-height:1.6;">
-        Enter the 6-digit code your admin shared for tonight.
-      </div>
-      <div class="field">
-        <label>Your Name</label>
-        <input type="text" id="bb-name" placeholder="John">
-      </div>
-      <div class="field">
-        <label>Night Code</label>
-        <input type="text" id="bb-code" placeholder="000000"
-               maxlength="6" inputmode="numeric" pattern="[0-9]*"
-               style="font-family:'Russo One',sans-serif; font-size:28px; letter-spacing:0.25em; text-align:center;"
-               onkeydown="if(event.key==='Enter')doNightCodeLogin()">
-      </div>
-      <button class="btn btn-a btn-full" onclick="doNightCodeLogin()">Enter →</button>
-      <div id="bb-err" class="alert alert-err"></div>
+    <div id="legacy-night-code-disabled" class="alert alert-err" style="margin-top:16px;">
+      Night Code login has been retired. Use the current Staff Access / Barback login link provided by your manager.
     </div>
 
     <div style="margin-top:20px; text-align:center;">
@@ -3222,11 +3205,8 @@ function showApp() {
 // LOGIN TABS
 // ══════════════════════════════════════════════════════
 function switchLoginTab(tab) {
-  document.querySelectorAll('.login-tab').forEach((el, i) => {
-    el.classList.toggle('active', (tab === 'admin' && i === 0) || (tab === 'barback' && i === 1));
-  });
+  document.querySelectorAll('.login-tab').forEach(el => el.classList.toggle('active', tab === 'admin'));
   document.getElementById('lp-admin').classList.toggle('active', tab === 'admin');
-  document.getElementById('lp-barback').classList.toggle('active', tab === 'barback');
 }
 
 // ══════════════════════════════════════════════════════
@@ -3284,46 +3264,6 @@ function showCreateAdmin() {
       alertEl.className = 'alert alert-ok show';
     }
   );
-}
-
-// ══════════════════════════════════════════════════════
-// BARBACK / NIGHT CODE AUTH
-// ══════════════════════════════════════════════════════
-async function doNightCodeLogin() {
-  const name = document.getElementById('bb-name').value.trim();
-  const code = document.getElementById('bb-code').value.trim();
-  const errEl = document.getElementById('bb-err');
-  errEl.className = 'alert';
-
-  if (!name || !code) {
-    errEl.textContent = 'Name and code are required.';
-    errEl.className = 'alert alert-err show';
-    return;
-  }
-
-  if (!/^\d{6}$/.test(code)) {
-    errEl.textContent = 'Code must be exactly 6 digits.';
-    errEl.className = 'alert alert-err show';
-    return;
-  }
-
-  try {
-    const { data, error } = await SB.from('nights').select('*').eq('code', code).eq('active', true).single();
-    if (error || !data) throw new Error('Invalid or expired night code.');
-
-    SESSION.type = 'barback';
-    SESSION.role = 'barback';
-    SESSION.user = { name, nightId: data.id, nightName: data.name, nightCode: code, nightDate: data.date };
-    // Set venue from the night's venue
-    if(data.venue_id) {
-      SESSION.venueId = data.venue_id;
-      localStorage.setItem('barinv_venue_id', data.venue_id);
-    }
-    await startApp();
-  } catch (e) {
-    errEl.textContent = e.message;
-    errEl.className = 'alert alert-err show';
-  }
 }
 
 function doLogout() {
@@ -7569,8 +7509,11 @@ async function init() {
   }
 
   showLoginScreen();
-  // If opened via barback link, show Night Code tab
-  if (barbackMode) switchLoginTab('barback');
+  // Legacy barback links remain fail-closed and point operators to Staff Access.
+  if (barbackMode) {
+    const retired = document.getElementById('legacy-night-code-disabled');
+    if (retired) retired.classList.add('show');
+  }
 }
 
 
