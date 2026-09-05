@@ -43,6 +43,8 @@ const JWT_TTL_HOURS_MAX         = 8;
 // a busy bar where the whole staff signs in once each is unaffected.
 const IP_RATE_LIMIT_THRESHOLD  = 30;
 const IP_RATE_LIMIT_WINDOW_MIN = 5;
+const LEGACY_TOKEN_RETIRED_MESSAGE =
+  "This barback link has expired or is no longer supported. Ask your manager for a new Staff Access link.";
 
 interface LoginBody {
   token: string;
@@ -179,13 +181,10 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── BARINV_SECURITY_PHASE2B_TRANCHE_B_F6 ─────────────────────────
-  // Verify the signed barback session token. The verifier accepts BOTH:
-  //   • v2 signed tokens "<payload>.<sig>" — HMAC-SHA256 over payload_b64u
-  //   • v1 legacy single-part tokens       — kept temporarily so URLs/QRs
-  //                                           already in operators' hands
-  //                                           keep working.
-  // Any verification failure → 401 with audit. session_id is read ONLY
-  // from the verified payload (never from a raw decode).
+  // Verify the signed barback session token. The shared verifier still
+  // understands v1 for migration/diagnostics, but this login boundary
+  // intentionally rejects every unsigned single-part token. session_id is
+  // read ONLY from the verified v2 payload (never from a raw decode).
   const verifyResult = await verifyBarbackSessionToken(body.token, JWT_SECRET);
   if (!verifyResult.ok) {
     try {
@@ -200,9 +199,17 @@ Deno.serve(async (req: Request) => {
   const tokenPayload = verifyResult.payload;
   const tokenVersion = verifyResult.version;
   if (tokenVersion === 1) {
-    // Legacy unsigned token — log so we can track migration progress and
-    // know when v1 acceptance can be removed.
-    console.warn("[barback-login] LEGACY v1 token accepted from ip=" + (ip || "unknown"));
+    // Retire unsigned v1 acceptance at the server boundary. Do not decode
+    // or look up the embedded session_id, and do not proceed to PIN/session
+    // authorization using an unsigned caller-supplied value.
+    try {
+      await svc.from("barback_audit_log").insert({
+        session_id: null, staff_id: body.staff_id,
+        action: "login_legacy_token_rejected", ip, user_agent: ua,
+        detail: { token_version: 1 },
+      });
+    } catch (_) { /* best-effort */ }
+    return errorResponse(LEGACY_TOKEN_RETIRED_MESSAGE, 410, "legacy_token_retired");
   }
   const sessionId = (tokenPayload?.session_id as string | undefined);
   if (!sessionId) return errorResponse("token missing session_id", 400);
