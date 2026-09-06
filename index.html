@@ -2846,6 +2846,21 @@ function esc(s) {
 }
 const escapeHtml = esc;
 
+// Validate URL schemes before placing a database-controlled value in an image
+// attribute.  Return the HTML-escaped value so callers can safely interpolate
+// it into a quoted attribute.
+function safeImageUrl(value, allowData = false) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw, window.location.href);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol === 'http:' || protocol === 'https:') return esc(raw);
+    if (allowData && protocol === 'data:' && /^data:image\//i.test(raw)) return esc(raw);
+  } catch {}
+  return '';
+}
+
 
 // ══════════════════════════════════════════════════════
 // CONFIG & STATE
@@ -3336,7 +3351,7 @@ function renderVenueSelector() {
   if(SESSION.venues.length <= 1 && SESSION.role !== 'admin') { sel.style.display = 'none'; return; }
   sel.style.display = '';
   sel.innerHTML = SESSION.venues.map(v =>
-    `<option value="${v.id}" ${v.id === SESSION.venueId ? 'selected' : ''}>${esc(v.name)}</option>`
+    `<option value="${esc(v.id)}" ${v.id === SESSION.venueId ? 'selected' : ''}>${esc(v.name)}</option>`
   ).join('') + (SESSION.role === 'admin' ? '<option value="__add">+ New Venue</option><option value="__manage">⚙ Manage Venues</option>' : '');
 }
 
@@ -3398,8 +3413,8 @@ function openManageVenues() {
         <div style="font-size:10px;color:var(--muted);">${esc(v.address||'')} ${v.phone ? '· '+esc(v.phone) : ''}</div>
       </div>
       <div style="display:flex;gap:6px;">
-        <button class="btn btn-ghost btn-xs" onclick="editVenue('${v.id}')">Edit</button>
-        ${v.id !== SESSION.venueId ? `<button class="btn btn-a2 btn-xs" onclick="closeModal();switchVenue('${v.id}')">Switch</button>` : ''}
+        <button class="btn btn-ghost btn-xs" onclick="editVenue('${esc(v.id)}')">Edit</button>
+        ${v.id !== SESSION.venueId ? `<button class="btn btn-a2 btn-xs" onclick="closeModal();switchVenue('${esc(v.id)}')">Switch</button>` : ''}
       </div>
     </div>
   `).join('');
@@ -3686,24 +3701,24 @@ async function loadPosConnections() {
       <td>${escapeHtml(r.name || '')}</td>
       <td>${escapeHtml(r.provider || '')}</td>
       <td>${r.is_active ? 'Active' : 'Inactive'}</td>
-      <td>${relDate(r.updated_at)}</td>
+      <td>${escapeHtml(relDate(r.updated_at))}</td>
       <td><div style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'Fira Mono',monospace;font-size:11px;color:var(--muted);">${escapeHtml(JSON.stringify(r.config || {}))}</div></td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-ghost btn-sm" onclick="editPosConnection('${r.id}')">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deletePosConnection('${r.id}')">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="editPosConnection('${esc(r.id)}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePosConnection('${esc(r.id)}')">Delete</button>
       </td>
     </tr>`).join('') : '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🔌</div><div class="empty-text">No POS connections yet</div></div></td></tr>';
 
     const sel = document.getElementById('pm-connection');
     if (sel) {
       const cur = sel.value;
-      sel.innerHTML = '<option value="">All Connections</option>' + rows.filter(r=>r.is_active).map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+      sel.innerHTML = '<option value="">All Connections</option>' + rows.filter(r=>r.is_active).map(r => `<option value="${esc(r.id)}">${escapeHtml(r.name)}</option>`).join('');
       if (rows.some(r => r.id === cur)) sel.value = cur;
     }
     const mapSel = document.getElementById('pmap-connection');
     if (mapSel) {
       const cur = mapSel.value;
-      mapSel.innerHTML = '<option value="">— select —</option>' + rows.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
+      mapSel.innerHTML = '<option value="">— select —</option>' + rows.map(r => `<option value="${esc(r.id)}">${escapeHtml(r.name)}</option>`).join('');
       if (rows.some(r => r.id === cur)) mapSel.value = cur;
     }
   } catch (e) {
@@ -3806,15 +3821,15 @@ async function fetchSquareLocations() {
     const bars = (barsRes.data || []).filter(b => b.active !== false);
     const connectionId = connRes.data?.[0]?.id || '';
 
-    const barOptions = '<option value="">— skip —</option>' + bars.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+    const barOptions = '<option value="">— skip —</option>' + bars.map(b => `<option value="${esc(b.id)}">${escapeHtml(b.name)}</option>`).join('');
 
     tbody.innerHTML = locations.map(loc => {
       const existing = existingMaps[loc.id];
       const selectedBar = existing?.bar_id || '';
       const opts = '<option value="">— skip —</option>' + bars.map(b =>
-        `<option value="${b.id}"${b.id === selectedBar ? ' selected' : ''}>${escapeHtml(b.name)}</option>`
+        `<option value="${esc(b.id)}"${b.id === selectedBar ? ' selected' : ''}>${escapeHtml(b.name)}</option>`
       ).join('');
-      return `<tr data-loc-id="${escapeHtml(loc.id)}" data-loc-name="${escapeHtml(loc.name)}" data-conn-id="${connectionId}">
+      return `<tr data-loc-id="${escapeHtml(loc.id)}" data-loc-name="${escapeHtml(loc.name)}" data-conn-id="${escapeHtml(connectionId)}">
         <td><b>${escapeHtml(loc.name)}</b>${loc.address ? '<br><span style="font-size:11px;color:var(--muted);">' + escapeHtml(loc.address) + '</span>' : ''}</td>
         <td><code style="font-size:11px;">${escapeHtml(loc.id)}</code></td>
         <td>${loc.status === 'ACTIVE' ? '<span style="color:var(--ok);">Active</span>' : escapeHtml(loc.status || '')}</td>
@@ -3892,12 +3907,12 @@ async function loadPosMapping() {
     const bSel = document.getElementById('pmap-bar');
     if (cSel) {
       const cur = cSel.value;
-      cSel.innerHTML = '<option value="">— select —</option>' + conns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+      cSel.innerHTML = '<option value="">— select —</option>' + conns.map(c => `<option value="${esc(c.id)}">${escapeHtml(c.name)}</option>`).join('');
       if (conns.some(c => c.id === cur)) cSel.value = cur;
     }
     if (bSel) {
       const cur = bSel.value;
-      bSel.innerHTML = '<option value="">— select —</option>' + bars.filter(b => b.active !== false).map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+      bSel.innerHTML = '<option value="">— select —</option>' + bars.filter(b => b.active !== false).map(b => `<option value="${esc(b.id)}">${escapeHtml(b.name)}</option>`).join('');
       if (bars.some(b => b.id === cur)) bSel.value = cur;
     }
     const tb = document.getElementById('pmap-tbody');
@@ -3908,8 +3923,8 @@ async function loadPosMapping() {
       <td>${escapeHtml(m.bars?.name || '')}</td>
       <td>${m.is_active ? 'Active' : 'Inactive'}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-ghost btn-sm" onclick="editPosMapping('${m.id}')">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="deletePosMapping('${m.id}')">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="editPosMapping('${esc(m.id)}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePosMapping('${esc(m.id)}')">Delete</button>
       </td>
     </tr>`).join('') : '<tr><td colspan="6"><div class="empty"><div class="empty-icon">🗺️</div><div class="empty-text">No mappings yet</div></div></td></tr>';
   } catch (e) {
@@ -3991,7 +4006,7 @@ function ensurePmNightOptions() {
   if (!sel) return;
   const nights = SESSION.cache.nights || [];
   const cur = sel.value;
-  sel.innerHTML = nights.map(n => `<option value="${n.id}">${escapeHtml(n.name)} (${n.date})</option>`).join('');
+  sel.innerHTML = nights.map(n => `<option value="${esc(n.id)}">${esc(n.name)} (${esc(n.date)})</option>`).join('');
   if (cur && nights.some(n => n.id === cur)) {
     sel.value = cur;
   } else {
@@ -4345,7 +4360,7 @@ function exportPosMonitorCSV(fmt) {
 // ── POS Sync from App ────────────────────────────────
 function openPosSyncModal() {
   const bars = SESSION.cache.bars?.filter(b => b.active) || [];
-  const barOptions = '<option value="__all__">🔄 All Mapped Bars</option>' + bars.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  const barOptions = '<option value="__all__">🔄 All Mapped Bars</option>' + bars.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
 
   // Default date range: last 30 days
   const now = new Date();
@@ -4539,7 +4554,7 @@ async function loadDashboard() {
     if (nightSel) {
       const cur = nightSel.value;
       nightSel.innerHTML = '<option value="">All Nights</option>' +
-        SESSION.cache.nights.map(n => `<option value="${n.id}" ${n.id === cur ? 'selected' : ''}>${n.name}</option>`).join('');
+        SESSION.cache.nights.map(n => `<option value="${esc(n.id)}" ${n.id === cur ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
       nightSel.value = cur;
     }
 
@@ -4596,13 +4611,13 @@ function eventRow(e) {
   const upc = isCase ? (Number(itemObj?.units_per_case)||1) : 1;
   const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
   return `
-    <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}<br><span style="color:var(--muted);font-size:10px;">${date}</span></td>
+    <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(time)}<br><span style="color:var(--muted);font-size:10px;">${esc(date)}</span></td>
     <td style="font-size:13px;">${esc(e.submitted_by)}</td>
     <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
     <td style="font-weight:500;">${esc(item)}${sku ? `<br><span style="font-size:10px;color:var(--muted);">${esc(sku)}</span>` : ''}</td>
     <td>${esc(bar)}</td>
     <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
-    <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
+    <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
   `;
 }
 
@@ -4617,7 +4632,7 @@ async function loadSubmitPage() {
   // Night selector
   const nightSel = document.getElementById('ev-night');
   nightSel.innerHTML = '<option value="">— select night —</option>' +
-    nights.filter(n => n.active).map(n => `<option value="${n.id}">${n.name} (${n.date})</option>`).join('');
+    nights.filter(n => n.active).map(n => `<option value="${esc(n.id)}">${esc(n.name)} (${esc(n.date)})</option>`).join('');
 
   // Pre-select for barback
   if (SESSION.role === 'barback' && SESSION.user.nightId) {
@@ -4628,7 +4643,7 @@ async function loadSubmitPage() {
   // Bar selector
   const barSel = document.getElementById('ev-bar');
   barSel.innerHTML = '<option value="">— select bar —</option>' +
-    bars.filter(b => b.active).map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    bars.filter(b => b.active).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
 
   // Items
   populateItemSelect();
@@ -4643,7 +4658,7 @@ function populateItemSelect(filter = '') {
   ) : items;
 
   sel.innerHTML = '<option value="">— select item —</option>' +
-    filtered.map(i => `<option value="${i.id}" data-sku="${i.sku || ''}">${i.name}${i.sku ? ' · ' + i.sku : ''}</option>`).join('');
+    filtered.map(i => `<option value="${esc(i.id)}" data-sku="${esc(i.sku || '')}">${esc(i.name)}${i.sku ? ' · ' + esc(i.sku) : ''}</option>`).join('');
 }
 
 function filterItems() {
@@ -4655,7 +4670,7 @@ function onBarChange() {
   const stSel = document.getElementById('ev-station');
   const stations = SESSION.cache.stations.filter(s => String(s.bar_id) === String(barId) && s.active);
   stSel.innerHTML = '<option value="">— select station —</option>' +
-    stations.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    stations.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
 }
 
 function onItemSelect() {
@@ -4896,9 +4911,9 @@ window.openParWizard = async function() {
   // Step 1: Pick which bar group(s) you're responsible for
   const checkboxes = groupKeys.map(g =>
     `<label style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;font-size:14px;">
-      <input type="checkbox" class="par-grp-cb" value="${g}" style="width:20px;height:20px;">
-      <span style="font-weight:700;color:var(--a);">${g}</span>
-      <span style="color:var(--muted);font-size:11px;">(${groups[g].length} bars: ${groups[g].map(b => b.name).join(', ')})</span>
+      <input type="checkbox" class="par-grp-cb" value="${esc(g)}" style="width:20px;height:20px;">
+      <span style="font-weight:700;color:var(--a);">${esc(g)}</span>
+      <span style="color:var(--muted);font-size:11px;">(${groups[g].length} bars: ${groups[g].map(b => esc(b.name)).join(', ')})</span>
     </label>`
   ).join('');
 
@@ -4935,16 +4950,16 @@ window.parWizardStep2 = function() {
 
   if(!items.length) { toast('No items with Par Level set. Ask admin to set Par Levels first.','t-err'); return; }
 
-  const barNames = selectedBars.map(b => b.name).join(', ');
+  const barNames = selectedBars.map(b => esc(b.name)).join(', ');
   const rows = items.map(item => `
     <div style="display:flex;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:8px;">
       <div style="flex:1;min-width:0;">
         <span style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">${esc(item.name)}</span>
-        <span style="font-size:10px;color:var(--muted);">Par: ${item.par_level}</span>
+        <span style="font-size:10px;color:var(--muted);">Par: ${Number(item.par_level)||0}</span>
       </div>
       <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
         <button onclick="parWizAdj(this,'-')" style="width:30px;height:30px;background:var(--s2);border:1px solid var(--border);color:var(--a3);font-size:16px;cursor:pointer;font-weight:700;">−</button>
-        <input type="number" min="0" step="1" value="${item.par_level}" data-item="${item.id}" class="par-wiz-input"
+        <input type="number" min="0" step="1" value="${Number(item.par_level)||0}" data-item="${esc(item.id)}" class="par-wiz-input"
           style="width:50px;padding:6px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:14px;">
         <button onclick="parWizAdj(this,'+')" style="width:30px;height:30px;background:var(--s2);border:1px solid var(--border);color:var(--a2);font-size:16px;cursor:pointer;font-weight:700;">+</button>
       </div>
@@ -5139,7 +5154,7 @@ async function handleScannedCode(code) {
 
 function openBarcodeManualPicker(code, lookupName) {
   const items = SESSION.cache.items.filter(i => i.active).sort((a, b) => a.name.localeCompare(b.name));
-  const optionsHtml = items.map(i => `<option value="${i.id}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
+  const optionsHtml = items.map(i => `<option value="${esc(i.id)}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
 
   openModal('Link Barcode to Item',
     `<div style="margin-bottom:14px;font-size:13px;line-height:1.6;">
@@ -5180,7 +5195,7 @@ function bcFilterItems() {
   if (!sel) return;
   const items = SESSION.cache.items.filter(i => i.active).sort((a, b) => a.name.localeCompare(b.name));
   const filtered = q ? items.filter(i => i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q)) : items;
-  sel.innerHTML = filtered.map(i => `<option value="${i.id}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
+  sel.innerHTML = filtered.map(i => `<option value="${esc(i.id)}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
 }
 
 // ══════════════════════════════════════════════════════
@@ -5207,12 +5222,12 @@ async function loadHistory() {
     const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
     return `
     <tr>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${new Date(e.created_at).toLocaleString()}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(new Date(e.created_at).toLocaleString())}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td style="font-weight:500;">${esc(e.items?.name || '—')}</td>
       <td>${esc(e.bars?.name || '—')}</td>
       <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
-      <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
+      <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
     </tr>`;
   }).join('');
 }
@@ -5226,8 +5241,8 @@ async function loadEvents() {
   const nf = document.getElementById('ef-night');
   const bf = document.getElementById('ef-bar');
   const nv = nf.value, bv = bf.value;
-  nf.innerHTML = '<option value="">All Nights</option>' + nights.map(n => `<option value="${n.id}" ${n.id === nv ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
-  bf.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${b.id}" ${b.id === bv ? 'selected' : ''}>${b.name}</option>`).join('');
+  nf.innerHTML = '<option value="">All Nights</option>' + nights.map(n => `<option value="${esc(n.id)}" ${n.id === nv ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
+  bf.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${esc(b.id)}" ${b.id === bv ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
   nf.value = nv; bf.value = bv;
 
   let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku, unit, units_per_case)').order('created_at', { ascending: false }).limit(200);
@@ -5283,17 +5298,17 @@ async function loadEvents() {
     const checked = EVENT_REVIEW.selectedIds.has(e.id) ? ' checked' : '';
     return `<tr>
       <td>${canSelect ? `<input type="checkbox" class="event-review-cb" value="${esc(e.id)}" onchange="eventReviewTogglePageItem(this)"${checked}>` : ''}</td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}<br><span style="color:var(--muted)">${date}</span></td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(time)}<br><span style="color:var(--muted)">${esc(date)}</span></td>
       <td>${esc(e.submitted_by)}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td style="font-weight:500;">${esc(e.items?.name || '—')} ${e.items?.sku ? `<br><span style="font-family:'Fira Mono',monospace;font-size:10px;color:var(--muted)">${esc(e.items.sku)}</span>` : ''}</td>
       <td>${esc(e.bars?.name || '—')}<br><span style="font-size:11px;color:var(--muted)">${esc(e.stations?.name || '')}</span></td>
       <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
-      <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
+      <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
-          ${e.status === 'PENDING' ? `<button class="btn btn-a2 btn-xs" onclick="setStatus('${e.id}','APPROVED')">✓</button>` : ''}
-          ${e.status === 'PENDING' ? `<button class="btn btn-danger btn-xs" onclick="setStatus('${e.id}','REJECTED')">✗</button>` : ''}
+          ${e.status === 'PENDING' ? `<button class="btn btn-a2 btn-xs" onclick="setStatus('${esc(e.id)}','APPROVED')">✓</button>` : ''}
+          ${e.status === 'PENDING' ? `<button class="btn btn-danger btn-xs" onclick="setStatus('${esc(e.id)}','REJECTED')">✗</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -6510,8 +6525,8 @@ function renderBars() {
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);">
       <span style="font-weight:600;">${esc(b.name)} <span class="badge ${b.active ? 'b-active' : 'b-inactive'}">${b.active ? 'active' : 'off'}</span></span>
       <div style="display:flex;gap:6px;">
-        <button class="btn btn-ghost btn-xs" onclick="editBarById('${b.id}')">Edit</button>
-        <button class="btn btn-danger btn-xs" onclick="deleteRow('bars','${b.id}',loadSetup)">×</button>
+        <button class="btn btn-ghost btn-xs" onclick="editBarById('${esc(b.id)}')">Edit</button>
+        <button class="btn btn-danger btn-xs" onclick="deleteRow('bars','${esc(b.id)}',loadSetup)">×</button>
       </div>
     </div>
   `).join('');
@@ -6538,8 +6553,8 @@ function renderStaff() {
         ${s.email || s.phone ? `<div style="font-size:10px;color:var(--muted);font-family:'Fira Mono',monospace;margin-top:2px;">${[s.email, s.phone].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
-        <button class="btn btn-ghost btn-xs" onclick="editStaffById('${s.id}')">Edit</button>
-        <button class="btn btn-danger btn-xs" onclick="deleteRow('staff','${s.id}',loadSetup)">×</button>
+        <button class="btn btn-ghost btn-xs" onclick="editStaffById('${esc(s.id)}')">Edit</button>
+        <button class="btn btn-danger btn-xs" onclick="deleteRow('staff','${esc(s.id)}',loadSetup)">×</button>
       </div>
     </div>
   `).join('');
@@ -6556,8 +6571,8 @@ function renderStations() {
       <td><span class="badge ${s.active ? 'b-active' : 'b-inactive'}">${s.active ? 'Active' : 'Off'}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-ghost btn-xs" onclick="editStationById('${s.id}')">Edit</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteRow('stations','${s.id}',loadSetup)">×</button>
+          <button class="btn btn-ghost btn-xs" onclick="editStationById('${esc(s.id)}')">Edit</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteRow('stations','${esc(s.id)}',loadSetup)">×</button>
         </div>
       </td>
     </tr>
@@ -6604,19 +6619,19 @@ function renderItems() {
   if (ind) ind.textContent = asc ? '▲' : '▼';
   tbody.innerHTML = items.map(i => `
     <tr>
-      <td style="font-weight:600;"><div style="display:flex;align-items:center;gap:8px;">${i.image_url ? `<img src="${esc(i.image_url)}" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display='none'">` : `<div style="width:28px;height:28px;background:var(--s3);border-radius:4px;flex-shrink:0;"></div>`}<span>${esc(i.name)}</span></div></td>
+      <td style="font-weight:600;"><div style="display:flex;align-items:center;gap:8px;">${safeImageUrl(i.image_url) ? `<img src="${safeImageUrl(i.image_url)}" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;" onerror="this.style.display='none'">` : `<div style="width:28px;height:28px;background:var(--s3);border-radius:4px;flex-shrink:0;"></div>`}<span>${esc(i.name)}</span></div></td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(i.sku || '—')}</td>
       <td>${esc(i.category || '—')}</td>
       <td><span class="badge" style="background:${(i.measurement_mode || 'shot') === 'shot' ? '#16253a' : (i.measurement_mode || 'shot') === 'ml' ? '#1b2930' : '#2d2415'};color:${(i.measurement_mode || 'shot') === 'shot' ? '#9fd0ff' : (i.measurement_mode || 'shot') === 'ml' ? '#98f0ff' : '#ffd38a'};border:1px solid ${ (i.measurement_mode || 'shot') === 'shot' ? '#355c85' : (i.measurement_mode || 'shot') === 'ml' ? '#3e7682' : '#7a6330'};">${esc(i.measurement_mode || 'shot')}</span></td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${i.bottle_size_ml ? esc(String(i.bottle_size_ml) + ' ml') : '—'}</td>
       <td><span class="badge" style="background:${i.service_mode === 'vip_only' ? '#331f17' : i.service_mode === 'all_bars' ? '#1a1a2e' : '#162619'};color:${i.service_mode === 'vip_only' ? '#ffb07b' : i.service_mode === 'all_bars' ? '#a8b4ff' : '#8cf3b5'};border:1px solid ${i.service_mode === 'vip_only' ? '#7a4c2f' : i.service_mode === 'all_bars' ? '#4a4a8a' : '#2f7a52'};">${esc(i.service_mode || 'regular_bar')}</span></td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${i.full_shots ?? '—'}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${Number(i.full_shots) || '—'}</td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(i.unit)}</td>
       <td><span class="badge ${i.active ? 'b-active' : 'b-inactive'}">${i.active ? 'Active' : 'Off'}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-ghost btn-xs" onclick="editItemById('${i.id}')">Edit</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteRow('items','${i.id}',loadSetup)">×</button>
+          <button class="btn btn-ghost btn-xs" onclick="editItemById('${esc(i.id)}')">Edit</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteRow('items','${esc(i.id)}',loadSetup)">×</button>
         </div>
       </td>
     </tr>
@@ -6640,7 +6655,7 @@ function openAddBar() {
 
 function editBar(bar) {
   openModal('Edit Bar',
-    `<div class="field"><label>Name</label><input type="text" id="m-name" value="${bar.name}"></div>
+    `<div class="field"><label>Name</label><input type="text" id="m-name" value="${esc(bar.name)}"></div>
      <div class="field"><label>Status</label><select id="m-active"><option value="true" ${bar.active ? 'selected' : ''}>Active</option><option value="false" ${!bar.active ? 'selected' : ''}>Inactive</option></select></div>`,
     async () => {
       const name = document.getElementById('m-name').value.trim();
@@ -6664,7 +6679,7 @@ function staffRoleCheckboxes(selected) {
   return STAFF_ROLES.map(([group, roles]) =>
     `<div style="margin-bottom:8px;"><div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;margin-bottom:4px;">${group}</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;">${roles.map(r =>
-      `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);background:var(--s2);"><input type="checkbox" class="m-role-cb" value="${r}" ${sel.includes(r)?'checked':''}> ${r}</label>`
+      `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 8px;border:1px solid var(--border);background:var(--s2);"><input type="checkbox" class="m-role-cb" value="${esc(r)}" ${sel.includes(r)?'checked':''}> ${esc(r)}</label>`
     ).join('')}</div></div>`
   ).join('');
 }
@@ -6747,7 +6762,7 @@ function openAddStation() {
   const bars = SESSION.cache.bars;
   openModal('Add Station',
     `<div class="field"><label>Bar</label>
-       <select id="m-bar">${bars.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('')}</select></div>
+       <select id="m-bar">${bars.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('')}</select></div>
      <div class="field"><label>Station Name</label><input type="text" id="m-name" placeholder="Station 1"></div>`,
     async () => {
       const bar_id = document.getElementById('m-bar').value;
@@ -6764,8 +6779,8 @@ function editStation(s) {
   const bars = SESSION.cache.bars;
   openModal('Edit Station',
     `<div class="field"><label>Bar</label>
-       <select id="m-bar">${bars.map(b => `<option value="${b.id}" ${b.id === s.bar_id ? 'selected' : ''}>${b.name}</option>`).join('')}</select></div>
-     <div class="field"><label>Name</label><input type="text" id="m-name" value="${s.name}"></div>
+     <select id="m-bar">${bars.map(b => `<option value="${esc(b.id)}" ${b.id === s.bar_id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
+     <div class="field"><label>Name</label><input type="text" id="m-name" value="${esc(s.name)}"></div>
      <div class="field"><label>Status</label><select id="m-active"><option value="true" ${s.active ? 'selected' : ''}>Active</option><option value="false" ${!s.active ? 'selected' : ''}>Inactive</option></select></div>`,
     async () => {
       const bar_id = document.getElementById('m-bar').value;
@@ -6822,11 +6837,11 @@ function itemMetaVisibilitySync() {
 function itemFormMetaHtml(item = {}) {
   const bottle = Number(item.bottle_size_ml || 750);
   const service = item.service_mode || (bottle === 1750 ? 'vip_only' : 'regular_bar');
-  const shots = item.full_shots ?? itemDefaultShotsForBottle(bottle) ?? '';
-  const shotWeight = item.shot_weight_g ?? 29.5;
+  const shots = Number(item.full_shots ?? itemDefaultShotsForBottle(bottle) ?? 0) || '';
+  const shotWeight = Number(item.shot_weight_g ?? 29.5) || 29.5;
   const isCase = (item.unit || '') === 'case';
   const isUnit = (item.unit || '') === 'can' || (item.unit || '') === 'each';
-  const caseQty = item.units_per_case || 24;
+  const caseQty = Number(item.units_per_case) || 24;
   return `
      <div id="m-case-fields" style="${isCase ? '' : 'display:none;'}">
        <div class="fg fg-2">
@@ -6869,8 +6884,8 @@ function itemFormMetaHtml(item = {}) {
          <div class="field"><label>Shot Weight (g)</label><input type="number" id="m-shot-weight" min="0" step="0.1" value="${shotWeight}" placeholder="29.5"></div>
        </div>
        <div class="fg fg-2">
-         <div class="field"><label>Empty Bottle Weight (g)</label><input type="number" id="m-empty-weight" min="0" step="1" value="${item.empty_bottle_weight_g ?? ''}" placeholder="450"></div>
-         <div class="field"><label>Full Bottle Weight (g)</label><input type="number" id="m-full-weight" min="0" step="1" value="${item.full_bottle_weight_g ?? ''}" placeholder="1155"></div>
+         <div class="field"><label>Empty Bottle Weight (g)</label><input type="number" id="m-empty-weight" min="0" step="1" value="${Number(item.empty_bottle_weight_g) || ''}" placeholder="450"></div>
+         <div class="field"><label>Full Bottle Weight (g)</label><input type="number" id="m-full-weight" min="0" step="1" value="${Number(item.full_bottle_weight_g) || ''}" placeholder="1155"></div>
        </div>
        <div style="margin-top:-2px;padding:8px 10px;border:1px solid var(--border);background:var(--s2);color:var(--muted);font-size:10px;line-height:1.5;">
          Rule set: use <b style="color:var(--text);">750ml</b> and <b style="color:var(--text);">1140ml</b> for regular bars, <b style="color:var(--text);">1750ml</b> as <b style="color:var(--text);">vip_only</b>, or pick <b style="color:var(--text);">all_bars</b> to show everywhere.
@@ -6897,7 +6912,8 @@ function itemAutoDefaultsFromBottle() {
 function itemPreviewImage(url) {
   const img = document.getElementById('m-image-preview');
   if(!img) return;
-  if(url && url.startsWith('http')) { img.src = url; img.style.display = ''; img.onerror = () => { img.style.display = 'none'; }; }
+  const safe = safeImageUrl(url);
+  if(safe) { img.src = safe; img.style.display = ''; img.onerror = () => { img.style.display = 'none'; }; }
   else { img.style.display = 'none'; }
 }
 
@@ -7016,26 +7032,26 @@ function openAddItem() {
 function editItem(i) {
   openModal('Edit Item',
     `<div class="fg fg-2">
-       <div class="field"><label>Name</label><input type="text" id="m-name" value="${i.name}"></div>
-       <div class="field"><label>SKU</label><input type="text" id="m-sku" value="${i.sku || ''}"></div>
+         <div class="field"><label>Name</label><input type="text" id="m-name" value="${esc(i.name)}"></div>
+         <div class="field"><label>SKU</label><input type="text" id="m-sku" value="${esc(i.sku || '')}"></div>
      </div>
      <div class="fg fg-2">
-       <div class="field"><label>Category</label><input type="text" id="m-cat" value="${i.category || ''}"></div>
+         <div class="field"><label>Category</label><input type="text" id="m-cat" value="${esc(i.category || '')}"></div>
        <div class="field"><label>Unit</label>
          <select id="m-unit" onchange="itemUnitChanged()">${['bottle','can','keg','case','each'].map(u => `<option ${i.unit===u ? 'selected' : ''}>${u}</option>`).join('')}</select>
        </div>
      </div>
      ${itemFormMetaHtml(i)}
      <div class="fg fg-2">
-       <div class="field"><label>Bottle Cost ($) <span style="color:var(--muted);font-size:10px;">purchase price</span></label><input type="number" id="m-cost-price" min="0" step="0.01" value="${i.cost_price || ''}" placeholder="45.00"></div>
-       <div class="field"><label>Shot Sale Price ($) <span style="color:var(--muted);font-size:10px;">POS menu price</span></label><input type="number" id="m-sale-price" min="0" step="0.01" value="${i.sale_price || ''}" placeholder="8.00"></div>
+       <div class="field"><label>Bottle Cost ($) <span style="color:var(--muted);font-size:10px;">purchase price</span></label><input type="number" id="m-cost-price" min="0" step="0.01" value="${Number(i.cost_price) || ''}" placeholder="45.00"></div>
+       <div class="field"><label>Shot Sale Price ($) <span style="color:var(--muted);font-size:10px;">POS menu price</span></label><input type="number" id="m-sale-price" min="0" step="0.01" value="${Number(i.sale_price) || ''}" placeholder="8.00"></div>
      </div>
      <div class="field"><label>Image <span style="color:var(--muted);font-size:10px;">(upload or paste URL)</span></label>
        <div style="display:flex;gap:8px;align-items:center;">
-         <input type="url" id="m-image" value="${i.image_url || ''}" placeholder="https://..." style="flex:1;" oninput="itemPreviewImage(this.value)">
+         <input type="url" id="m-image" value="${esc(i.image_url || '')}" placeholder="https://..." style="flex:1;" oninput="itemPreviewImage(this.value)">
          <input type="file" id="m-image-file" accept="image/*" style="display:none;" onchange="uploadItemImage()">
          <button type="button" id="m-image-upload-btn" class="btn btn-ghost btn-sm" onclick="triggerItemImageUpload()" title="Upload image" style="padding:4px 10px;font-size:16px;">📷</button>
-         <img id="m-image-preview" src="${i.image_url || ''}" style="width:40px;height:40px;object-fit:contain;border:1px solid var(--border);background:var(--s2);${i.image_url ? '' : 'display:none;'}">
+         <img id="m-image-preview" src="${safeImageUrl(i.image_url)}" style="width:40px;height:40px;object-fit:contain;border:1px solid var(--border);background:var(--s2);${safeImageUrl(i.image_url) ? '' : 'display:none;'}">
        </div>
      </div>
      <div class="field"><label>Status</label>
@@ -7126,16 +7142,16 @@ async function loadNights() {
         <div class="night-code-display">
           <div>
             <div class="night-code-label">Room Code</div>
-            <div class="night-code-val">${n.code}</div>
+            <div class="night-code-val">${esc(n.code)}</div>
           </div>
-          <button class="btn btn-ghost btn-xs" onclick="copyCode('${n.code}')">Copy</button>
+          <button class="btn btn-ghost btn-xs" onclick="copyCode('${esc(n.code)}')">Copy</button>
         </div>
       </td>
       <td><span class="badge ${n.active ? 'b-active' : 'b-inactive'}">${n.active ? 'Active' : 'Closed'}</span></td>
       <td>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-ghost btn-xs" onclick="toggleNight('${n.id}',${!n.active})">${n.active ? 'Close' : 'Reopen'}</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteRow('nights','${n.id}',loadNights)">×</button>
+          <button class="btn btn-ghost btn-xs" onclick="toggleNight('${esc(n.id)}',${!n.active})">${n.active ? 'Close' : 'Reopen'}</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteRow('nights','${esc(n.id)}',loadNights)">×</button>
         </div>
       </td>
     </tr>
@@ -7150,7 +7166,7 @@ function openAddNight() {
      <div class="field">
        <label>Room Code (share with barback staff)</label>
        <div style="display:flex;gap:8px;align-items:center;">
-         <input type="text" id="m-code" value="${code}" style="font-family:'Russo One',sans-serif;font-size:24px;letter-spacing:0.2em;max-width:160px;" readonly>
+        <input type="text" id="m-code" value="${esc(code)}" style="font-family:'Russo One',sans-serif;font-size:24px;letter-spacing:0.2em;max-width:160px;" readonly>
          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('m-code').value=(100000+Math.floor(Math.random()*900000)).toString()">Regenerate</button>
        </div>
      </div>`,
@@ -7360,7 +7376,7 @@ async function loadInventory() {
   const nightSel = document.getElementById('inv-night');
   const cur = nightSel.value;
   nightSel.innerHTML = '<option value="">— Select Night —</option>' +
-    SESSION.cache.nights.map(n => `<option value="${n.id}" ${n.id === cur ? 'selected' : ''}>${n.name} (${n.date})</option>`).join('');
+    SESSION.cache.nights.map(n => `<option value="${esc(n.id)}" ${n.id === cur ? 'selected' : ''}>${esc(n.name)} (${esc(n.date)})</option>`).join('');
   nightSel.value = cur;
 
   const nightId = nightSel.value;
@@ -7389,9 +7405,9 @@ async function loadInventory() {
 
       html += `<div class="click-station">
         <div class="click-station-head">
-          <div class="click-station-name">${st.name}</div>
-          ${bt ? `<span class="staff-chip sc-bartender"><span class="dot"></span>${bt.name}</span>` : ''}
-          ${bb ? `<span class="staff-chip sc-barback"><span class="dot"></span>${bb.name}</span>` : ''}
+          <div class="click-station-name">${esc(st.name)}</div>
+          ${bt ? `<span class="staff-chip sc-bartender"><span class="dot"></span>${esc(bt.name)}</span>` : ''}
+          ${bb ? `<span class="staff-chip sc-barback"><span class="dot"></span>${esc(bb.name)}</span>` : ''}
         </div>
         <div style="display:grid;grid-template-columns:1fr 80px 100px 100px;padding:7px 14px;background:rgba(255,255,255,0.01);border-bottom:1px solid var(--border);">
           <div style="font-family:'Fira Mono',monospace;font-size:9px;color:var(--muted);letter-spacing:0.15em;text-transform:uppercase;">Item</div>
@@ -7412,14 +7428,14 @@ async function loadInventory() {
           </div>
           <div class="click-placed">${p.qty}</div>
           <div class="clicker">
-            <button class="ck-btn ck-take" ontouchstart="" onclick="click_adj('${key}','taken',-1)">−</button>
-            <div class="ck-val" id="cv-taken-${key}">${CLICK_STATE[key].taken}</div>
-            <button class="ck-btn ck-take" ontouchstart="" onclick="click_adj('${key}','taken',1)">+</button>
+            <button class="ck-btn ck-take" ontouchstart="" onclick="click_adj('${esc(key)}','taken',-1)">−</button>
+            <div class="ck-val" id="cv-taken-${esc(key)}">${CLICK_STATE[key].taken}</div>
+            <button class="ck-btn ck-take" ontouchstart="" onclick="click_adj('${esc(key)}','taken',1)">+</button>
           </div>
           <div class="clicker">
-            <button class="ck-btn ck-ret" ontouchstart="" onclick="click_adj('${key}','returned',-1)">−</button>
-            <div class="ck-val" id="cv-returned-${key}">${CLICK_STATE[key].returned}</div>
-            <button class="ck-btn ck-ret" ontouchstart="" onclick="click_adj('${key}','returned',1)">+</button>
+            <button class="ck-btn ck-ret" ontouchstart="" onclick="click_adj('${esc(key)}','returned',-1)">−</button>
+            <div class="ck-val" id="cv-returned-${esc(key)}">${CLICK_STATE[key].returned}</div>
+            <button class="ck-btn ck-ret" ontouchstart="" onclick="click_adj('${esc(key)}','returned',1)">+</button>
           </div>
         </div>`;
       });
@@ -7536,8 +7552,8 @@ async function loadAnalytics() {
   const nSel = document.getElementById('an-night');
   const bSel = document.getElementById('an-bar');
   const nv = nSel.value, bv = bSel.value;
-  nSel.innerHTML = '<option value="">All Nights</option>' + nights.map(n => `<option value="${n.id}" ${n.id===nv?'selected':''}>${n.name}</option>`).join('');
-  bSel.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${b.id}" ${b.id===bv?'selected':''}>${b.name}</option>`).join('');
+  nSel.innerHTML = '<option value="">All Nights</option>' + nights.map(n => `<option value="${esc(n.id)}" ${n.id===nv?'selected':''}>${esc(n.name)}</option>`).join('');
+  bSel.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${esc(b.id)}" ${b.id===bv?'selected':''}>${esc(b.name)}</option>`).join('');
   nSel.value = nv; bSel.value = bv;
 
   // Fetch events
@@ -7667,7 +7683,7 @@ async function loadAnalytics() {
       <td style="font-family:'Fira Mono',monospace;color:var(--a2);">${d.delivered||0}</td>
       <td style="font-family:'Fira Mono',monospace;color:var(--a);">${d.returned||0}</td>
       <td style="font-family:'Fira Mono',monospace;font-weight:700;">${d.total}</td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;color:var(--muted);">${new Date(d.last).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;color:var(--muted);">${esc(new Date(d.last).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</td>
     </tr>
   `).join('') || '<tr><td colspan="6"><div class="empty"><div class="empty-text">No data</div></div></td></tr>';
 }
@@ -7692,8 +7708,8 @@ async function loadReports() {
   // Populate selects
   const nSel = document.getElementById('rp-night');
   const bSel = document.getElementById('rp-bar');
-  nSel.innerHTML = '<option value="">All</option>' + nights.map(n => `<option value="${n.id}">${esc(n.name)}</option>`).join('');
-  bSel.innerHTML = '<option value="">All</option>' + bars.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  nSel.innerHTML = '<option value="">All</option>' + nights.map(n => `<option value="${esc(n.id)}">${esc(n.name)}</option>`).join('');
+  bSel.innerHTML = '<option value="">All</option>' + bars.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
 
   await loadReportData();
 }
@@ -7764,8 +7780,8 @@ function renderReportTable(events) {
     const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
     const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
     return `<tr>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${date}</td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${time}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(date)}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(time)}</td>
       <td style="font-weight:600;">${esc(e.submitted_by)}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td>${esc(e.items?.name || '—')}</td>
@@ -7773,7 +7789,7 @@ function renderReportTable(events) {
       <td>${esc(e.bars?.name || '—')}</td>
       <td style="font-size:12px;color:var(--muted);">${esc(e.stations?.name || '—')}</td>
       <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
-      <td><span class="badge b-${e.status.toLowerCase()}">${e.status}</span></td>
+      <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
     </tr>`;
   }).join('');
 }
@@ -7953,24 +7969,24 @@ function whRenderItems() {
     const stock = item.stock;
     const min = item.min;
     const isLow = min>0 && stock<min;
-    const sz = item.size ? ` · ${item.size}${item.unit||'ml'}` : '';
+    const sz = item.size ? ` · ${esc(item.size)}${esc(item.unit||'ml')}` : '';
     return `<div class="wh-itemCard${isLow?' wh-low':stock>0?' wh-ok':''}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
         <div>
           <div style="font-weight:700;font-size:13px;">${esc(item.brand||'—')}</div>
-          <div style="font-size:11px;color:var(--muted);">${esc(item.cat||'')}${esc(sz)}</div>
+          <div style="font-size:11px;color:var(--muted);">${esc(item.cat||'')}${sz}</div>
           ${isLow?`<div class="wh-lowAlert">⚠ Low (min ${min})</div>`:''}
         </div>
         <div class="wh-stockBox"><div class="wh-stockNum">${stock}</div><div class="wh-stockSub">in stock</div></div>
       </div>
       <div class="wh-pm">
-        <button class="wh-minus" onclick="whAdj('${item.id}',-1)">−</button>
-        <button class="wh-plus"  onclick="whAdj('${item.id}',+1)">+</button>
+        <button class="wh-minus" onclick="whAdj('${esc(item.id)}',-1)">−</button>
+        <button class="wh-plus"  onclick="whAdj('${esc(item.id)}',+1)">+</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="btn btn-ghost btn-xs" style="flex:1;" onclick="whTransfer('${item.id}')">↗ Transfer to Bar</button>
-        <button class="btn btn-ghost btn-xs" onclick="whSetMin('${item.id}')">⚙ Min</button>
-        <button class="btn btn-danger btn-xs" onclick="whDel('${item.id}')">×</button>
+        <button class="btn btn-ghost btn-xs" style="flex:1;" onclick="whTransfer('${esc(item.id)}')">↗ Transfer to Bar</button>
+        <button class="btn btn-ghost btn-xs" onclick="whSetMin('${esc(item.id)}')">⚙ Min</button>
+        <button class="btn btn-danger btn-xs" onclick="whDel('${esc(item.id)}')">×</button>
       </div>
     </div>`;
   }).join('');
@@ -8102,7 +8118,7 @@ async function loadStockManager() {
   const catSel = document.getElementById('stk-cat');
   const cats = [...new Set(items.map(i => i.category).filter(Boolean))].sort();
   const cv = catSel.value;
-  catSel.innerHTML = '<option value="">All Categories</option>' + cats.map(c => `<option value="${c}" ${c===cv?'selected':''}>${c}</option>`).join('');
+  catSel.innerHTML = '<option value="">All Categories</option>' + cats.map(c => `<option value="${esc(c)}" ${c===cv?'selected':''}>${esc(c)}</option>`).join('');
   catSel.value = cv;
 
   renderStockTable();
@@ -8177,10 +8193,10 @@ function renderStockTable() {
         <td style="text-align:center;">${statusBadge}</td>
         <td style="text-align:center;">
           <div style="display:flex;gap:4px;justify-content:center;align-items:center;">
-            <button class="btn btn-ghost btn-xs" onclick="stockAdj('${i.id}',-1)" style="width:28px;">−</button>
-            <span style="font-family:'Fira Mono',monospace;font-size:14px;font-weight:700;min-width:30px;text-align:center;${stockColor}" id="stk-v-${i.id}">${stock}</span>
-            <button class="btn btn-ghost btn-xs" onclick="stockAdj('${i.id}',1)" style="width:28px;">+</button>
-            <button class="btn btn-ghost btn-xs" onclick="stockSet('${i.id}')" style="font-size:10px;">Set</button>
+            <button class="btn btn-ghost btn-xs" onclick="stockAdj('${esc(i.id)}',-1)" style="width:28px;">−</button>
+            <span style="font-family:'Fira Mono',monospace;font-size:14px;font-weight:700;min-width:30px;text-align:center;${stockColor}" id="stk-v-${esc(i.id)}">${stock}</span>
+            <button class="btn btn-ghost btn-xs" onclick="stockAdj('${esc(i.id)}',1)" style="width:28px;">+</button>
+            <button class="btn btn-ghost btn-xs" onclick="stockSet('${esc(i.id)}')" style="font-size:10px;">Set</button>
           </div>
         </td>
       </tr>`;
@@ -8222,7 +8238,7 @@ window.stockBulkEdit = async function() {
     `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);">
       <div style="flex:1;font-size:12px;font-weight:600;">${esc(i.name)}</div>
       <div style="font-size:10px;color:var(--muted);width:60px;">${esc(i.category||'')}</div>
-      <input type="number" min="0" value="${Number(i.liquor_room_stock)||0}" data-id="${i.id}" class="stk-bulk-input" style="width:60px;text-align:center;padding:4px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:13px;">
+      <input type="number" min="0" value="${Number(i.liquor_room_stock)||0}" data-id="${esc(i.id)}" class="stk-bulk-input" style="width:60px;text-align:center;padding:4px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:13px;">
     </div>`
   ).join('');
 
@@ -8293,11 +8309,11 @@ async function loadParLevels() {
   if(!wrap) return;
   wrap.innerHTML = items.filter(i=>i).map(item => `
     <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <div style="flex:1;font-size:13px;font-weight:600;">${item.name}</div>
-      <div style="font-size:11px;color:var(--muted);font-family:'Fira Mono',monospace;min-width:60px;">${item.sku||'—'}</div>
-      <input type="number" min="0" value="${item.par_level||0}" data-id="${item.id}"
+      <div style="flex:1;font-size:13px;font-weight:600;">${esc(item.name)}</div>
+      <div style="font-size:11px;color:var(--muted);font-family:'Fira Mono',monospace;min-width:60px;">${esc(item.sku||'—')}</div>
+      <input type="number" min="0" value="${Number(item.par_level)||0}" data-id="${esc(item.id)}"
         style="width:70px;padding:5px 8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:12px;text-align:center;"
-        onchange="updatePar('${item.id}',this.value)">
+        onchange="updatePar('${esc(item.id)}',this.value)">
     </div>
   `).join('');
 }
@@ -8318,7 +8334,7 @@ async function loadVarianceReport() {
   const { nights, bars, items, staff } = SESSION.cache;
   const nv = nightSel.value;
   nightSel.innerHTML = '<option value="">— Select Night —</option>' +
-    nights.map(n => `<option value="${n.id}" ${n.id===nv?'selected':''}>${n.name} (${n.date})</option>`).join('');
+    nights.map(n => `<option value="${esc(n.id)}" ${n.id===nv?'selected':''}>${esc(n.name)} (${esc(n.date)})</option>`).join('');
   nightSel.value = nv;
   if(!nv) { document.getElementById('var-content').innerHTML = '<div class="empty"><div class="empty-text">Select a night to view variance</div></div>'; return; }
 
@@ -8450,11 +8466,12 @@ async function loadVarianceReport() {
 function exportVariancePDF() {
   const nightSel = document.getElementById('var-night');
   const nightName = nightSel?.options[nightSel.selectedIndex]?.text || 'Night';
+  const safeNightName = esc(nightName);
   const tbl = document.getElementById('var-content')?.innerHTML || '';
   const win = window.open('','_blank');
-  win.document.write(`<html><head><title>Variance - ${nightName}</title>
+  win.document.write(`<html><head><title>Variance - ${safeNightName}</title>
   <style>body{font-family:monospace;font-size:11px;padding:20px}h2{color:#ff8c00}table{width:100%;border-collapse:collapse;margin-bottom:14px}th{background:#111;color:#ff8c00;padding:5px 8px;text-align:left}td{padding:4px 8px;border-bottom:1px solid #eee}.panel{margin-bottom:16px;border:1px solid #ddd;padding:10px}.panel-head{padding:8px 10px;border-bottom:1px solid #ddd;font-weight:700}.panel-title{font-size:11px;letter-spacing:1px;color:#666}</style>
-  </head><body><h2>Variance Report — ${nightName}</h2>${tbl}<script>window.onload=()=>window.print()<\/script></body></html>`);
+  </head><body><h2>Variance Report — ${safeNightName}</h2>${tbl}<script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
 
@@ -8601,9 +8618,9 @@ async function loadAccountability() {
   if(!nSel) return;
   const nv = nSel.value, bv = bSel.value;
   nSel.innerHTML = '<option value="">— Select Night —</option>' +
-    nights.map(n => `<option value="${n.id}" ${n.id===nv?'selected':''}>${n.name} (${n.date})</option>`).join('');
+    nights.map(n => `<option value="${esc(n.id)}" ${n.id===nv?'selected':''}>${esc(n.name)} (${esc(n.date)})</option>`).join('');
   bSel.innerHTML = '<option value="">All Bars</option>' +
-    bars.filter(b=>b.active).map(b => `<option value="${b.id}" ${b.id===bv?'selected':''}>${b.name}</option>`).join('');
+    bars.filter(b=>b.active).map(b => `<option value="${esc(b.id)}" ${b.id===bv?'selected':''}>${esc(b.name)}</option>`).join('');
   nSel.value = nv; bSel.value = bv;
 
   const content = document.getElementById('acc-content');
@@ -8823,7 +8840,7 @@ async function loadGuestlist() {
   if(!sel) return;
   const nv = sel.value;
   sel.innerHTML = '<option value="">— Select Night —</option>' +
-    nights.filter(n=>n.active).map(n=>`<option value="${n.id}" ${n.id===nv?'selected':''}>${n.name}</option>`).join('');
+    nights.filter(n=>n.active).map(n=>`<option value="${esc(n.id)}" ${n.id===nv?'selected':''}>${esc(n.name)}</option>`).join('');
   sel.value = nv;
   if(!nv) { document.getElementById('gl-tbody').innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-text">Select a night</div></div></td></tr>'; return; }
 
@@ -8833,11 +8850,11 @@ async function loadGuestlist() {
   tbody.innerHTML = guests.map(g => `<tr>
     <td style="font-weight:600;">${esc(g.name)}</td>
     <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(g.phone||'—')}</td>
-    <td><span class="badge ${g.ticket_type==='VIP'?'b-active':'b-inactive'}">${g.ticket_type||'General'}</span></td>
+    <td><span class="badge ${g.ticket_type==='VIP'?'b-active':'b-inactive'}">${esc(g.ticket_type||'General')}</span></td>
     <td><span class="badge ${g.checked_in?'b-active':'b-pending'}">${g.checked_in?'✓ In':'Pending'}</span></td>
     <td><div style="display:flex;gap:6px;">
-      <button class="btn btn-a2 btn-xs" onclick="checkInGuest('${g.id}',${!g.checked_in})">${g.checked_in?'Undo':'Check In'}</button>
-      <button class="btn btn-danger btn-xs" onclick="deleteGuest('${g.id}')">×</button>
+      <button class="btn btn-a2 btn-xs" onclick="checkInGuest('${esc(g.id)}',${!g.checked_in})">${g.checked_in?'Undo':'Check In'}</button>
+      <button class="btn btn-danger btn-xs" onclick="deleteGuest('${esc(g.id)}')">×</button>
     </div></td>
   </tr>`).join('');
   // count
@@ -9010,7 +9027,7 @@ async function loadVipTables() {
   if (!sel) return;
   const nights = SESSION.cache.nights || [];
   const current = sel.value;
-  sel.innerHTML = '<option value="">— Select Night —</option>' + nights.filter(n => n.active).map(n => `<option value="${n.id}" ${String(n.id)===String(current)?'selected':''}>${esc(n.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">— Select Night —</option>' + nights.filter(n => n.active).map(n => `<option value="${esc(n.id)}" ${String(n.id)===String(current)?'selected':''}>${esc(n.name)}</option>`).join('');
   sel.value = current;
 
   const remote = await vipRemoteEnabled();
@@ -9047,12 +9064,12 @@ async function loadVipTables() {
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.netOrders)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.minimumCovered)}</td>
         <td style="font-family:'Fira Mono',monospace;">${formatCurrency(c.remaining)}</td>
-        <td><span class="badge ${vipStatusBadgeClass(c.status)}">${c.status}</span></td>
+        <td><span class="badge ${vipStatusBadgeClass(c.status)}">${esc(c.status)}</span></td>
         <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button class="btn btn-a btn-xs" onclick="vipQuickAddSpend('${r.id}')">+$ Order</button>
-          <button class="btn btn-ghost btn-xs" onclick="openVipTableModal('${r.id}')">Edit</button>
-          <button class="btn btn-a2 btn-xs" onclick="toggleVipTableClosed('${r.id}')">${r.is_closed ? 'Reopen' : 'Close'}</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteVipTable('${r.id}')">×</button>
+          <button class="btn btn-a btn-xs" onclick="vipQuickAddSpend('${esc(r.id)}')">+$ Order</button>
+          <button class="btn btn-ghost btn-xs" onclick="openVipTableModal('${esc(r.id)}')">Edit</button>
+          <button class="btn btn-a2 btn-xs" onclick="toggleVipTableClosed('${esc(r.id)}')">${r.is_closed ? 'Reopen' : 'Close'}</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteVipTable('${esc(r.id)}')">×</button>
         </div></td>
       </tr>`;
     }).join('');
@@ -9770,8 +9787,8 @@ async function loadSuppliers() {
       </div>
       <div style="display:flex;gap:8px;align-items:flex-start;">
         <span class="badge ${s.active?'b-active':'b-inactive'}">${s.active?'Active':'Inactive'}</span>
-        <button class="btn btn-ghost btn-xs" onclick="editSupplierById('${s.id}')">Edit</button>
-        <button class="btn btn-danger btn-xs" onclick="deleteSupplier('${s.id}')">×</button>
+        <button class="btn btn-ghost btn-xs" onclick="editSupplierById('${esc(s.id)}')">Edit</button>
+        <button class="btn btn-danger btn-xs" onclick="deleteSupplier('${esc(s.id)}')">×</button>
       </div>
     </div>
   `).join('');
@@ -9804,14 +9821,14 @@ function openAddSupplier() {
 
 function editSupplier(s) {
   openModal('Edit Supplier', `
-    <div class="field"><label>Company Name</label><input id="sup-name" value="${s.name}"></div>
+    <div class="field"><label>Company Name</label><input id="sup-name" value="${esc(s.name)}"></div>
     <div class="fg fg-2">
-      <div class="field"><label>Contact Person</label><input id="sup-contact" value="${s.contact||''}"></div>
-      <div class="field"><label>Phone</label><input id="sup-phone" value="${s.phone||''}"></div>
+      <div class="field"><label>Contact Person</label><input id="sup-contact" value="${esc(s.contact||'')}"></div>
+      <div class="field"><label>Phone</label><input id="sup-phone" value="${esc(s.phone||'')}"></div>
     </div>
-    <div class="field"><label>Email</label><input id="sup-email" value="${s.email||''}"></div>
-    <div class="field"><label>Address</label><input id="sup-address" value="${s.address||''}"></div>
-    <div class="field"><label>Notes</label><input id="sup-notes" value="${s.notes||''}"></div>
+    <div class="field"><label>Email</label><input id="sup-email" value="${esc(s.email||'')}"></div>
+    <div class="field"><label>Address</label><input id="sup-address" value="${esc(s.address||'')}"></div>
+    <div class="field"><label>Notes</label><input id="sup-notes" value="${esc(s.notes||'')}"></div>
     <div class="field"><label>Status</label>
       <select id="sup-active"><option value="true" ${s.active?'selected':''}>Active</option><option value="false" ${!s.active?'selected':''}>Inactive</option></select>
     </div>
@@ -9863,8 +9880,8 @@ async function loadRecipes() {
         <div style="flex:1;">
           <div style="font-size:15px;font-weight:700;">${esc(r.name)}</div>
           <div style="font-size:11px;color:var(--muted);font-family:'Fira Mono',monospace;margin-top:2px;">
-            ${r.category||'—'} · ${ingredientCount} ingredient${ingredientCount!==1?'s':''}
-            ${r.yield_qty ? ` · Yield: ${r.yield_qty} ${r.yield_unit||'serving'}` : ''}
+            ${esc(r.category||'—')} · ${ingredientCount} ingredient${ingredientCount!==1?'s':''}
+            ${r.yield_qty ? ` · Yield: ${esc(r.yield_qty)} ${esc(r.yield_unit||'serving')}` : ''}
           </div>
           ${r.description ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">${esc(r.description)}</div>` : ''}
         </div>
@@ -9874,9 +9891,9 @@ async function loadRecipes() {
           ${margin !== null ? `<span class="margin-badge ${marginClass}">${margin.toFixed(0)}% margin</span>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          <button class="btn btn-ghost btn-xs" onclick="viewRecipe('${r.id}')">View</button>
-          <button class="btn btn-ghost btn-xs" onclick="editRecipeById('${r.id}')">Edit</button>
-          <button class="btn btn-danger btn-xs" onclick="deleteRecipe('${r.id}')">×</button>
+          <button class="btn btn-ghost btn-xs" onclick="viewRecipe('${esc(r.id)}')">View</button>
+          <button class="btn btn-ghost btn-xs" onclick="editRecipeById('${esc(r.id)}')">Edit</button>
+          <button class="btn btn-danger btn-xs" onclick="deleteRecipe('${esc(r.id)}')">×</button>
         </div>
       </div>
     </div>`;
@@ -9913,15 +9930,15 @@ function openAddRecipe() {
 function editRecipeBasic(r) {
   openModal('Edit Recipe', `
     <div class="fg fg-2">
-      <div class="field"><label>Recipe Name</label><input id="rec-name" value="${r.name}"></div>
-      <div class="field"><label>Category</label><input id="rec-cat" value="${r.category||''}"></div>
+      <div class="field"><label>Recipe Name</label><input id="rec-name" value="${esc(r.name)}"></div>
+      <div class="field"><label>Category</label><input id="rec-cat" value="${esc(r.category||'')}"></div>
     </div>
     <div class="fg fg-2">
-      <div class="field"><label>Yield Qty</label><input id="rec-yield-qty" type="number" value="${r.yield_qty||1}" step="0.01"></div>
-      <div class="field"><label>Yield Unit</label><input id="rec-yield-unit" value="${r.yield_unit||'serving'}"></div>
+      <div class="field"><label>Yield Qty</label><input id="rec-yield-qty" type="number" value="${Number(r.yield_qty)||1}" step="0.01"></div>
+      <div class="field"><label>Yield Unit</label><input id="rec-yield-unit" value="${esc(r.yield_unit||'serving')}"></div>
     </div>
-    <div class="field"><label>Sale Price</label><input id="rec-price" type="number" value="${r.sale_price||0}" step="0.01"></div>
-    <div class="field"><label>Description</label><input id="rec-desc" value="${r.description||''}"></div>
+    <div class="field"><label>Sale Price</label><input id="rec-price" type="number" value="${Number(r.sale_price)||0}" step="0.01"></div>
+    <div class="field"><label>Description</label><input id="rec-desc" value="${esc(r.description||'')}"></div>
     <div class="field"><label>Status</label><select id="rec-active"><option value="true" ${r.active?'selected':''}>Active</option><option value="false" ${!r.active?'selected':''}>Inactive</option></select></div>
   `, async () => {
     const { error } = await SB.from('recipes').update({
@@ -9949,17 +9966,17 @@ async function viewRecipe(id) {
 
   const ingredients = (r.recipe_ingredients||[]).map(ri => `
     <div class="recipe-cost-line">
-      <span>${ri.items?.name||'Unknown'} <span style="color:var(--muted);font-size:10px;">(${ri.quantity} ${ri.unit||''})</span></span>
+      <span>${esc(ri.items?.name||'Unknown')} <span style="color:var(--muted);font-size:10px;">(${esc(ri.quantity)} ${esc(ri.unit||'')})</span></span>
       <span style="color:var(--a);">${formatCurrency(Number(ri.items?.cost_price||0)*Number(ri.quantity||0))}</span>
     </div>
   `).join('');
 
   const { data: items } = await SB.from('items').select('id,name,cost_price,unit').order('name');
-  const itemOpts = (items||[]).map(i => `<option value="${i.id}" data-cost="${i.cost_price||0}" data-unit="${i.unit||''}">${i.name}</option>`).join('');
+  const itemOpts = (items||[]).map(i => `<option value="${esc(i.id)}" data-cost="${esc(i.cost_price||0)}" data-unit="${esc(i.unit||'')}">${esc(i.name)}</option>`).join('');
 
   openModal(`📖 ${r.name}`, `
     <div style="margin-bottom:12px;">
-      <div style="font-size:12px;color:var(--muted);font-family:'Fira Mono',monospace;">${r.category||''} · Yield: ${r.yield_qty||1} ${r.yield_unit||'serving'}</div>
+      <div style="font-size:12px;color:var(--muted);font-family:'Fira Mono',monospace;">${esc(r.category||'')} · Yield: ${esc(r.yield_qty||1)} ${esc(r.yield_unit||'serving')}</div>
     </div>
     <div class="recipe-cost-preview">
       ${ingredients || '<div style="color:var(--muted);font-size:12px;">No ingredients yet</div>'}
@@ -9984,7 +10001,7 @@ async function viewRecipe(id) {
     ${(r.recipe_ingredients||[]).length > 0 ? `
     <div style="margin-top:10px;">
       <div style="font-size:11px;font-family:'Fira Mono',monospace;color:var(--muted);margin-bottom:6px;">REMOVE INGREDIENT</div>
-      ${(r.recipe_ingredients||[]).map(ri=>`<button class="btn btn-ghost btn-xs" style="margin:2px;" onclick="removeIngredient('${ri.id}','${id}')">× ${ri.items?.name||'?'}</button>`).join('')}
+      ${(r.recipe_ingredients||[]).map(ri=>`<button class="btn btn-ghost btn-xs" style="margin:2px;" onclick="removeIngredient('${esc(ri.id)}','${esc(id)}')">× ${esc(ri.items?.name||'?')}</button>`).join('')}
     </div>` : ''}
   `, null, '<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>');
 }
@@ -10030,14 +10047,14 @@ async function loadOrders() {
       <div class="panel-body" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
         <div>
           <div style="font-weight:700;font-size:13px;">${esc(o.po_number||'PO-'+o.id.slice(-6).toUpperCase())}</div>
-          <div style="font-size:11px;color:var(--muted);font-family:'Fira Mono',monospace;">${esc(o.suppliers?.name||'No supplier')} · ${date} · ${(o.po_items||[]).length} items</div>
+          <div style="font-size:11px;color:var(--muted);font-family:'Fira Mono',monospace;">${esc(o.suppliers?.name||'No supplier')} · ${esc(date)} · ${(o.po_items||[]).length} items</div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-family:'Fira Mono',monospace;font-size:14px;color:var(--a);">${formatCurrency(o.total_cost||0)}</span>
-          <span class="${statusCls}">${o.status}</span>
-          <button class="btn btn-ghost btn-xs" onclick="viewOrder('${o.id}')">View</button>
-          ${o.status==='DRAFT'||o.status==='SENT' ? `<button class="btn btn-a2 btn-xs" onclick="markReceived('${o.id}')">✓ Received</button>` : ''}
-          <button class="btn btn-danger btn-xs" onclick="deleteOrder('${o.id}')">×</button>
+          <span class="${statusCls}">${esc(o.status)}</span>
+        <button class="btn btn-ghost btn-xs" onclick="viewOrder('${esc(o.id)}')">View</button>
+          ${o.status==='DRAFT'||o.status==='SENT' ? `<button class="btn btn-a2 btn-xs" onclick="markReceived('${esc(o.id)}')">✓ Received</button>` : ''}
+          <button class="btn btn-danger btn-xs" onclick="deleteOrder('${esc(o.id)}')">×</button>
         </div>
       </div>
     </div>`;
@@ -10052,7 +10069,7 @@ async function openAddOrder() {
   openModal('New Purchase Order', `
     <div class="fg fg-2">
       <div class="field"><label>Supplier</label>
-        <select id="po-supplier">${(suppliers||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select>
+        <select id="po-supplier">${(suppliers||[]).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>
       </div>
       <div class="field"><label>PO Number (optional)</label><input id="po-number" placeholder="Auto-generated if empty"></div>
     </div>
@@ -10060,7 +10077,7 @@ async function openAddOrder() {
     <div style="font-size:11px;font-family:'Fira Mono',monospace;color:var(--muted);letter-spacing:1px;margin:12px 0 6px;">ADD ITEMS</div>
     <div id="po-items-list"></div>
     <div style="display:grid;grid-template-columns:1fr 80px 90px auto;gap:8px;align-items:center;margin-top:8px;">
-      <select id="po-item-sel" style="padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-size:12px;">${(items||[]).map(i=>`<option value="${i.id}" data-cost="${i.cost_price||0}">${i.name}</option>`).join('')}</select>
+      <select id="po-item-sel" style="padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-size:12px;">${(items||[]).map(i=>`<option value="${esc(i.id)}" data-cost="${esc(i.cost_price||0)}">${esc(i.name)}</option>`).join('')}</select>
       <input id="po-item-qty" type="number" value="1" min="1" style="padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:12px;">
       <input id="po-item-cost" type="number" step="0.01" value="0" style="padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:12px;" placeholder="Unit cost">
       <button class="btn btn-a btn-sm" onclick="addPOItemRow()">Add</button>
@@ -10117,7 +10134,7 @@ function addPOItemRow() {
     row.className = 'po-item-row';
     row.dataset.id = id; row.dataset.qty = qty; row.dataset.cost = cost;
     row.style.cssText = 'display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;align-items:center;';
-    row.innerHTML = `<span>${name}</span><span style="font-family:'Fira Mono',monospace;">${qty} × ${formatCurrency(cost)} = <b>${formatCurrency(qty*cost)}</b></span><button onclick="this.parentElement.remove();updatePOTotal()" style="background:none;border:none;color:var(--a3);cursor:pointer;font-size:16px;">×</button>`;
+    row.innerHTML = `<span>${esc(name)}</span><span style="font-family:'Fira Mono',monospace;">${esc(qty)} × ${formatCurrency(cost)} = <b>${formatCurrency(qty*cost)}</b></span><button onclick="this.parentElement.remove();updatePOTotal()" style="background:none;border:none;color:var(--a3);cursor:pointer;font-size:16px;">×</button>`;
     list.appendChild(row);
     updatePOTotal();
   }
@@ -10168,18 +10185,18 @@ async function viewOrder(id) {
   if(!o) return;
   const rows = (o.po_items||[]).map(pi => `
     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-      <span>${pi.items?.name||'?'}</span>
+      <span>${esc(pi.items?.name||'?')}</span>
       <span style="font-family:'Fira Mono',monospace;">${pi.quantity} × ${formatCurrency(pi.unit_cost)} = <b>${formatCurrency(pi.total_cost)}</b></span>
     </div>`).join('');
   openModal(`📦 ${o.po_number}`, `
     <div style="font-family:'Fira Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:12px;">
-      ${o.suppliers?.name||'—'} · ${new Date(o.created_at).toLocaleDateString()} · Status: ${o.status}
+      ${esc(o.suppliers?.name||'—')} · ${esc(new Date(o.created_at).toLocaleDateString())} · Status: ${esc(o.status)}
     </div>
     ${rows}
     <div style="text-align:right;font-family:'Fira Mono',monospace;font-size:14px;color:var(--a);padding:8px 0;font-weight:700;">
       TOTAL: ${formatCurrency(o.total_cost||0)}
     </div>
-    ${o.notes ? `<div style="font-size:12px;color:var(--muted);margin-top:8px;">Notes: ${o.notes}</div>` : ''}
+    ${o.notes ? `<div style="font-size:12px;color:var(--muted);margin-top:8px;">Notes: ${esc(o.notes)}</div>` : ''}
   `, null, '<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>');
 }
 
@@ -10227,13 +10244,13 @@ async function loadInvoices() {
     return `<tr>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(i.invoice_number||'—')}</td>
       <td style="font-weight:600;">${esc(i.suppliers?.name||'—')}</td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${i.invoice_date||'—'}</td>
-      <td style="font-family:'Fira Mono',monospace;font-size:11px;color:${i.due_date && new Date(i.due_date)<new Date()?'var(--a3)':'var(--muted)'};">${i.due_date||'—'}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(i.invoice_date||'—')}</td>
+      <td style="font-family:'Fira Mono',monospace;font-size:11px;color:${i.due_date && new Date(i.due_date)<new Date()?'var(--a3)':'var(--muted)'};">${esc(i.due_date||'—')}</td>
       <td style="font-family:'Fira Mono',monospace;font-weight:700;color:var(--a);">${formatCurrency(i.amount||0)}</td>
-      <td><span class="${cls}">${i.status}</span></td>
+      <td><span class="${cls}">${esc(i.status)}</span></td>
       <td><div style="display:flex;gap:6px;">
-        ${i.status!=='PAID' ? `<button class="btn btn-a2 btn-xs" onclick="markInvoicePaid('${i.id}')">Mark Paid</button>` : ''}
-        <button class="btn btn-danger btn-xs" onclick="deleteInvoice('${i.id}')">×</button>
+        ${i.status!=='PAID' ? `<button class="btn btn-a2 btn-xs" onclick="markInvoicePaid('${esc(i.id)}')">Mark Paid</button>` : ''}
+        <button class="btn btn-danger btn-xs" onclick="deleteInvoice('${esc(i.id)}')">×</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -10244,12 +10261,12 @@ async function openAddInvoice() {
   const { data: suppliers } = await SB.from('suppliers').select('id,name').order('name');
   const { data: pos } = await SB.from('purchase_orders').select('id,po_number').eq('status','RECEIVED').order('created_at',{ascending:false}).limit(20);
   const allItems = (SESSION.cache.items||[]).filter(i => i.active !== false).sort((a,b) => (a.name||'').localeCompare(b.name||''));
-  const itemOpts = allItems.map(i => `<option value="${i.id}">${i.name} (${i.unit||'bottle'})</option>`).join('');
+  const itemOpts = allItems.map(i => `<option value="${esc(i.id)}">${esc(i.name)} (${esc(i.unit||'bottle')})</option>`).join('');
 
   openModal('Log Invoice', `
     <div class="fg fg-2">
       <div class="field"><label>Supplier</label>
-        <select id="inv-sup">${(suppliers||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select>
+        <select id="inv-sup">${(suppliers||[]).map(s=>`<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Invoice Number</label><input id="inv-num" placeholder="INV-2024-001"></div>
     </div>
@@ -10259,7 +10276,7 @@ async function openAddInvoice() {
       <div class="field"><label>Due Date</label><input id="inv-due" type="date"></div>
     </div>
     <div class="field"><label>Linked PO (optional)</label>
-      <select id="inv-po"><option value="">None</option>${(pos||[]).map(p=>`<option value="${p.id}">${p.po_number}</option>`).join('')}</select>
+      <select id="inv-po"><option value="">None</option>${(pos||[]).map(p=>`<option value="${esc(p.id)}">${esc(p.po_number)}</option>`).join('')}</select>
     </div>
     <div style="border:1px solid var(--border);padding:12px;margin:12px 0;background:var(--s1);">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -10321,7 +10338,7 @@ window.invAddLine = function() {
   const wrap = document.getElementById('inv-lines');
   if(!wrap) return;
   const allItems = (SESSION.cache.items||[]).filter(i => i.active !== false).sort((a,b) => (a.name||'').localeCompare(b.name||''));
-  const itemOpts = allItems.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+  const itemOpts = allItems.map(i => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
   const row = document.createElement('div');
   row.className = 'inv-line-row';
   row.style.cssText = 'display:grid;grid-template-columns:1fr 70px 30px;gap:6px;align-items:center;margin-bottom:6px;';
@@ -10356,7 +10373,7 @@ async function loadCostCenter() {
   const { nights } = SESSION.cache;
   const sel = document.getElementById('cost-night');
   const nv = sel?.value||'';
-  if(sel) sel.innerHTML = '<option value="">All Time</option>' + nights.map(n=>`<option value="${n.id}" ${n.id===nv?'selected':''}>${n.name}</option>`).join('');
+  if(sel) sel.innerHTML = '<option value="">All Time</option>' + nights.map(n=>`<option value="${esc(n.id)}" ${n.id===nv?'selected':''}>${esc(n.name)}</option>`).join('');
   if(sel) sel.value = nv;
 
   // Fetch events
@@ -10437,7 +10454,7 @@ async function loadCostCenter() {
     const vStr = variance > 0 ? `+${variance}` : String(variance);
     const cStr = costImpact !== 0 ? (costImpact > 0 ? '+' : '') + formatCurrency(costImpact) : '—';
     return `<div class="avt-row">
-      <div style="font-weight:600;font-size:12px;">${item.name}</div>
+    <div style="font-weight:600;font-size:12px;">${esc(item.name)}</div>
       <div style="font-family:'Fira Mono',monospace;font-size:11px;text-align:right;">${theoretical||'—'}</div>
       <div style="font-family:'Fira Mono',monospace;font-size:11px;text-align:right;">${actual}</div>
       <div style="font-family:'Fira Mono',monospace;font-size:11px;text-align:right;">${theoretical||'—'}</div>
@@ -10463,13 +10480,13 @@ async function loadReceipts() {
   const { data: suppliers } = await SB.from('suppliers').select('id,name').order('name');
   const vendorSel = document.getElementById('rcp-vendor');
   if(vendorSel) vendorSel.innerHTML = '<option value="">— select or type below —</option>' +
-    (suppliers||[]).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    (suppliers||[]).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
 
   const { staff } = SESSION.cache;
   const bySel = document.getElementById('rcp-by');
   if(bySel) bySel.innerHTML = '<option value="">— select —</option>' +
     staff.filter(s=>s.active).map(s => `<option value="${esc(s.name)}">${esc(s.name)} (${esc(s.role)})</option>`).join('') +
-    `<option value="${SESSION.user?.email?.split('@')[0]||'admin'}">${SESSION.user?.email?.split('@')[0]||'admin'} (admin)</option>`;
+    `<option value="${esc(SESSION.user?.email?.split('@')[0]||'admin')}">${esc(SESSION.user?.email?.split('@')[0]||'admin')} (admin)</option>`;
 
   // Load saved receipts
   const { data: receipts, error } = await SB.from('receipts')
@@ -10502,9 +10519,9 @@ async function loadReceipts() {
           <span class="badge ${r.status==='APPROVED'?'b-approved':'b-pending'}" style="margin-top:4px;">${esc(r.status||'PENDING')}</span>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
-          ${r.image_data ? `<button class="btn btn-ghost btn-xs" onclick="rcpViewImage('${r.id}')">🖼 View</button>` : ''}
-          <button class="btn btn-a2 btn-xs" onclick="rcpApprove('${r.id}')">${r.status==='APPROVED'?'✓':'Approve'}</button>
-          <button class="btn btn-danger btn-xs" onclick="rcpDelete('${r.id}')">×</button>
+          ${r.image_data ? `<button class="btn btn-ghost btn-xs" onclick="rcpViewImage('${esc(r.id)}')">🖼 View</button>` : ''}
+        <button class="btn btn-a2 btn-xs" onclick="rcpApprove('${esc(r.id)}')">${r.status==='APPROVED'?'✓':'Approve'}</button>
+        <button class="btn btn-danger btn-xs" onclick="rcpDelete('${esc(r.id)}')">×</button>
         </div>
       </div>
     </div>`;
@@ -10576,7 +10593,8 @@ function rcpOnImage(e) {
   reader.onload = (ev) => {
     RCP_IMAGE_DATA = ev.target.result;
     const upload = document.getElementById('rcp-upload');
-    upload.innerHTML = `<img src="${RCP_IMAGE_DATA}" alt="Receipt">`;
+    const safeImage = safeImageUrl(RCP_IMAGE_DATA, true);
+    upload.innerHTML = safeImage ? `<img src="${safeImage}" alt="Receipt">` : '';
     upload.classList.add('has-img');
     document.getElementById('rcp-ocr-btn').disabled = false;
     document.getElementById('rcp-ocr-status').textContent = 'Image loaded — tap OCR to read';
@@ -10750,7 +10768,9 @@ async function rcpSave() {
 function rcpViewImage(id) {
   SB.from('receipts').select('image_data,vendor_name').eq('id', id).single().then(({ data }) => {
     if(!data?.image_data) { toast('No image stored','t-err'); return; }
-    openModal('🧾 ' + (data.vendor_name||'Receipt'), `<img src="${data.image_data}" style="width:100%;max-height:70vh;object-fit:contain;">`, null,
+    const safeImage = safeImageUrl(data.image_data, true);
+    if (!safeImage) { toast('Stored receipt image is invalid','t-err'); return; }
+    openModal('🧾 ' + (data.vendor_name||'Receipt'), `<img src="${safeImage}" alt="Receipt" style="width:100%;max-height:70vh;object-fit:contain;">`, null,
       '<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>');
   });
 }
@@ -11028,9 +11048,9 @@ function dspRenderStaffAssign() {
     const current = DSP_STAFF_MAP[barId]?.[field] || '';
     const eligibleStaffIds = SelectedNightStaffRoleV1.staffIds(DSP_NIGHT_ASSIGNMENTS, role);
     const filtered = staff.filter(s => !role || eligibleStaffIds.has(s.id));
-    return `<select onchange="dspSetStaff('${barId}','${field}',this.value)">
+    return `<select onchange="dspSetStaff('${esc(barId)}','${esc(field)}',this.value)">
       <option value="">— ${field} —</option>
-      ${filtered.map(s => `<option value="${s.id}" ${s.id === current ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+      ${filtered.map(s => `<option value="${esc(s.id)}" ${s.id === current ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
     </select>`;
   };
 
@@ -11041,7 +11061,7 @@ function dspRenderStaffAssign() {
         <div class="dsp-bar-label">${esc(b.name)}</div>
         ${staffOpts('bartender', b.id, 'bartender')}
         ${staffOpts('barback', b.id, 'barback')}
-        <button class="dsp-remove" onclick="dspDeselectBar('${b.id}')" title="Remove">×</button>
+        <button class="dsp-remove" onclick="dspDeselectBar('${esc(b.id)}')" title="Remove">×</button>
       </div>
     `).join('')}
     <button class="btn btn-a btn-sm btn-full" style="margin-top:10px;" onclick="dspCollapseDest()">✓ Done — Start Dispatch</button>
@@ -11150,7 +11170,7 @@ async function loadDispatch() {
       <div class="dsp-group-label">${cat} (${catBars.length})</div>
       <div class="dsp-group-chips">
         ${catBars.map(b =>
-          `<div class="dsp-bar-chip ${DSP_SELECTED_BARS.includes(b.id) ? 'sel' : ''}" onclick="dspToggleBar('${b.id}')">${esc(b.name)}</div>`
+          `<div class="dsp-bar-chip ${DSP_SELECTED_BARS.includes(b.id) ? 'sel' : ''}" onclick="dspToggleBar('${esc(b.id)}')">${esc(b.name)}</div>`
         ).join('')}
       </div>
     </div>`;
@@ -11168,7 +11188,7 @@ async function loadDispatch() {
   const nSel = document.getElementById('dsp-night');
   const nv = nSel?.value || '';
   if (nSel) {
-    nSel.innerHTML = nights.filter(n => n.active).map(n => `<option value="${n.id}" ${n.id === nv ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
+    nSel.innerHTML = nights.filter(n => n.active).map(n => `<option value="${esc(n.id)}" ${n.id === nv ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
     if (nv) nSel.value = nv;
     DSP_LOCKED_NIGHT = nSel.value;
     await dspLoadNightAssignments(nSel.value);
@@ -11362,18 +11382,19 @@ function dspRenderCards() {
     const isCase = item.unit === 'case';
     const isUnitItem = item.unit === 'can' || item.unit === 'each';
     const meta = isCase
-      ? [item.category || '', `case of ${item.units_per_case || '?'}`].filter(Boolean).join(' · ')
+      ? [esc(item.category || ''), `case of ${Number(item.units_per_case) || '?'}`].filter(Boolean).join(' · ')
       : isUnitItem
-      ? [item.category || '', item.unit].filter(Boolean).join(' · ')
+      ? [esc(item.category || ''), esc(item.unit || '')].filter(Boolean).join(' · ')
       : [
-          item.category || '',
+          esc(item.category || ''),
           item.bottle_size_ml ? `${esc(String(item.bottle_size_ml))}ml` : '',
           mode === 'shot' && item.full_shots ? `${esc(String(item.full_shots))} shots` : '',
-          mode !== 'shot' ? mode : ''
+          mode !== 'shot' ? esc(mode) : ''
         ].filter(Boolean).join(' · ');
-    return `<div class="dsp-card" id="dsp-c-${item.id}">
+    const itemImage = safeImageUrl(item.image_url);
+    return `<div class="dsp-card" id="dsp-c-${esc(item.id)}">
       <div style="display:flex;gap:12px;align-items:flex-start;">
-        ${item.image_url ? `<img src="${esc(item.image_url)}" class="dsp-card-img" onerror="this.style.display='none'">` : ''}
+        ${itemImage ? `<img src="${itemImage}" class="dsp-card-img" onerror="this.style.display='none'">` : ''}
         <div style="flex:1;min-width:0;">
           <div class="dsp-card-name">${esc(item.name)}</div>
           <div class="dsp-card-net">Net: <b>${net}</b>${isCase ? ` <span style="color:var(--a);font-size:10px;">(${net * (item.units_per_case||1)} units)</span>` : ''}${meta ? ` · ${meta}` : ''}${weighedBottles ? ` · <span style="color:var(--a2);">${weighedBottles} weighed (${weighedShots.toFixed(1)} shots used)</span>` : ''}${Number(item.liquor_room_stock) >= 0 ? ` · <span style="color:${Number(item.liquor_room_stock) <= 0 ? 'var(--a3)' : Number(item.liquor_room_stock) <= (Number(item.par_level)||0) ? '#ffd700' : 'var(--a2)'};">📦 ${item.liquor_room_stock} in stock</span>` : ''}</div>
@@ -11388,22 +11409,22 @@ function dspRenderCards() {
       </div>
       <div class="dsp-actions">
         <div style="display:grid;grid-template-columns:50px 1fr 1fr;gap:4px;align-items:center;">
-          <input type="number" id="dsp-qty-${item.id}" min="1" value="1" step="1" style="width:100%;padding:8px 4px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:13px;text-align:center;" onclick="this.select()">
+          <input type="number" id="dsp-qty-${esc(item.id)}" min="1" value="1" step="1" style="width:100%;padding:8px 4px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;font-size:13px;text-align:center;" onclick="this.select()">
           ${DSP_MODE === 'taking'
-            ? `<button class="dsp-btn dsp-btn-take" onclick="dspAdj('${item.id}','taken',Number(document.getElementById('dsp-qty-${item.id}').value||1))">+ Taken</button>
-               <button class="dsp-btn dsp-btn-take5" onclick="dspAdj('${item.id}','taken',5)">+5</button>`
-            : `<button class="dsp-btn dsp-btn-ret" onclick="dspAdj('${item.id}','returned',Number(document.getElementById('dsp-qty-${item.id}').value||1))">Return</button>
-               ${(item.empty_bottle_weight_g && !['Non-Alcoholic','BEER','Mixer','Energy Drink','Energy Drink / Mixer'].includes(item.category)) ? `<button class="dsp-btn" onclick="dspWeighReturn('${item.id}')" style="border-color:var(--a);color:var(--a);">⚖ Weigh</button>` : `<button class="dsp-btn dsp-btn-ret" onclick="dspAdj('${item.id}','returned',5)">+5 Ret</button>`}`
+            ? `<button class="dsp-btn dsp-btn-take" onclick="dspAdj('${esc(item.id)}','taken',Number(document.getElementById('dsp-qty-${esc(item.id)}').value||1))">+ Taken</button>
+               <button class="dsp-btn dsp-btn-take5" onclick="dspAdj('${esc(item.id)}','taken',5)">+5</button>`
+            : `<button class="dsp-btn dsp-btn-ret" onclick="dspAdj('${esc(item.id)}','returned',Number(document.getElementById('dsp-qty-${esc(item.id)}').value||1))">Return</button>
+               ${(item.empty_bottle_weight_g && !['Non-Alcoholic','BEER','Mixer','Energy Drink','Energy Drink / Mixer'].includes(item.category)) ? `<button class="dsp-btn" onclick="dspWeighReturn('${esc(item.id)}')" style="border-color:var(--a);color:var(--a);">⚖ Weigh</button>` : `<button class="dsp-btn dsp-btn-ret" onclick="dspAdj('${esc(item.id)}','returned',5)">+5 Ret</button>`}`
           }
         </div>
         ${DSP_MODE === 'taking' ? `
         <div style="display:grid;grid-template-columns:${'1fr' + (mode === 'shot' ? ' 1fr' : '')};gap:4px;">
-          <button class="dsp-btn dsp-btn-comp" onclick="dspAdj('${item.id}','comp',Number(document.getElementById('dsp-qty-${item.id}').value||1))">Comp</button>
-          ${mode === 'shot' ? `<button class="dsp-btn dsp-btn-shot" onclick="dspAdj('${item.id}','shot',Number(document.getElementById('dsp-qty-${item.id}').value||1))">Shots</button>` : ''}
+          <button class="dsp-btn dsp-btn-comp" onclick="dspAdj('${esc(item.id)}','comp',Number(document.getElementById('dsp-qty-${esc(item.id)}').value||1))">Comp</button>
+          ${mode === 'shot' ? `<button class="dsp-btn dsp-btn-shot" onclick="dspAdj('${esc(item.id)}','shot',Number(document.getElementById('dsp-qty-${esc(item.id)}').value||1))">Shots</button>` : ''}
         </div>` : ''}
         <div style="margin-top:4px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
-          <button class="dsp-btn" onclick="dspTransfer('${item.id}')" style="border-color:#6c8cff;color:#6c8cff;">↔ Transfer</button>
-          <button class="dsp-btn" onclick="dspResetItem('${item.id}')" style="border-color:var(--a3);color:var(--a3);">✕ Reset</button>
+          <button class="dsp-btn" onclick="dspTransfer('${esc(item.id)}')" style="border-color:#6c8cff;color:#6c8cff;">↔ Transfer</button>
+          <button class="dsp-btn" onclick="dspResetItem('${esc(item.id)}')" style="border-color:var(--a3);color:var(--a3);">✕ Reset</button>
           <button class="dsp-btn" onclick="setDspMode(DSP_MODE==='taking'?'returning':'taking')" style="border-color:var(--muted);color:var(--muted);font-size:10px;">${DSP_MODE === 'taking' ? '🔙 Switch' : '📦 Switch'}</button>
         </div>
       </div>
@@ -11416,6 +11437,7 @@ function dspRenderCards() {
 window.dspAdj = function(itemId, type, delta) {
   const item = SESSION.cache.items.find(i => i.id === itemId);
   const name = item?.name || 'Item';
+  const itemImage = safeImageUrl(item?.image_url);
   const qty = Number(delta || 0);
   if (qty <= 0) return;
 
@@ -11430,7 +11452,7 @@ window.dspAdj = function(itemId, type, delta) {
 
   openModal('Confirm',
     `<div style="display:flex;gap:16px;align-items:center;padding:10px 0;">
-      ${item?.image_url ? `<img src="${esc(item.image_url)}" style="width:120px;height:120px;object-fit:contain;flex-shrink:0;border:1px solid var(--border);background:var(--s2);" onerror="this.style.display='none'">` : ''}
+      ${itemImage ? `<img src="${itemImage}" style="width:120px;height:120px;object-fit:contain;flex-shrink:0;border:1px solid var(--border);background:var(--s2);" onerror="this.style.display='none'">` : ''}
       <div style="text-align:center;flex:1;">
         <div style="font-size:36px;font-family:'Russo One',sans-serif;color:${colors[type] || 'var(--text)'};">${qty}</div>
         <div style="font-size:10px;color:var(--muted);letter-spacing:0.15em;margin-top:4px;">${labels[type] || type.toUpperCase()}</div>
@@ -11474,15 +11496,16 @@ window.dspTransfer = function(itemId) {
   const nightId = document.getElementById('dsp-night')?.value || '';
 
   const barOptions = bars.map(b =>
-    `<option value="${b.id}">${esc(b.name)}</option>`
+    `<option value="${esc(b.id)}">${esc(b.name)}</option>`
   ).join('');
 
+  const itemImage = safeImageUrl(item.image_url);
   openModal(`↔ Transfer — ${item.name}`,
     `<div style="display:flex;gap:16px;align-items:center;margin-bottom:16px;">
-      ${item.image_url ? `<img src="${esc(item.image_url)}" style="width:80px;height:80px;object-fit:contain;flex-shrink:0;border:1px solid var(--border);background:var(--s2);" onerror="this.style.display='none'">` : ''}
+      ${itemImage ? `<img src="${itemImage}" style="width:80px;height:80px;object-fit:contain;flex-shrink:0;border:1px solid var(--border);background:var(--s2);" onerror="this.style.display='none'">` : ''}
       <div>
         <div style="font-family:'Russo One',sans-serif;font-size:16px;">${esc(item.name)}</div>
-        <div style="font-size:11px;color:var(--muted);">${esc(item.category || '')} · ${item.unit}</div>
+        <div style="font-size:11px;color:var(--muted);">${esc(item.category || '')} · ${esc(item.unit || '')}</div>
       </div>
     </div>
     <div class="fg fg-2">
@@ -11668,7 +11691,7 @@ window.dspEditPreviewItem = function(itemId) {
       <label style="font-weight:600;font-size:13px;color:${color};min-width:80px;">${label}</label>
       <div style="display:flex;align-items:center;gap:8px;">
         <button class="btn btn-ghost btn-sm" style="width:34px;height:34px;font-size:18px;padding:0;" onclick="dspEditPreviewAdj('${key}',-1)">−</button>
-        <input id="dsp-edit-${key}" type="number" min="0" value="${s[key] || 0}" style="width:60px;text-align:center;font-size:16px;font-family:'Fira Mono',monospace;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px;">
+        <input id="dsp-edit-${esc(key)}" type="number" min="0" value="${Number(s[key]) || 0}" style="width:60px;text-align:center;font-size:16px;font-family:'Fira Mono',monospace;background:var(--s2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px;">
         <button class="btn btn-ghost btn-sm" style="width:34px;height:34px;font-size:18px;padding:0;" onclick="dspEditPreviewAdj('${key}',1)">+</button>
       </div>
     </div>`;
