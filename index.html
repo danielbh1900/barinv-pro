@@ -4522,10 +4522,10 @@ function renderDashboardStats(total, pending, delivered, returned) {
   const el = document.getElementById('dash-stats');
   if (!el) return;
   el.innerHTML = `
-      <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">Total Events</div></div>
+      <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">All Status Events</div></div>
       <div class="stat-card sc-a4"><div class="stat-val">${pending}</div><div class="stat-lbl">Pending</div></div>
-      <div class="stat-card sc-a2"><div class="stat-val">${delivered}</div><div class="stat-lbl">Delivered</div></div>
-      <div class="stat-card sc-a3"><div class="stat-val">${returned}</div><div class="stat-lbl">Returned</div></div>
+      <div class="stat-card sc-a2"><div class="stat-val">${delivered}</div><div class="stat-lbl">Approved Delivered</div></div>
+      <div class="stat-card sc-a3"><div class="stat-val">${returned}</div><div class="stat-lbl">Approved Returned</div></div>
     `;
 }
 
@@ -4553,12 +4553,13 @@ async function loadDashboard() {
     // The SB.from() wrapper already scopes this query to venue_id; re-check each
     // row so nothing foreign can ever be counted or rendered.
     const events = (data || []).filter(eventBelongsToActiveVenue);
+    const approvedEvents = events.filter(event => event && event.status === 'APPROVED');
 
     // Stats
     const total    = events.length;
     const pending  = events.filter(e => e.status === 'PENDING').length;
-    const delivered= events.filter(e => e.action === 'DELIVERED').length;
-    const returned = events.filter(e => e.action === 'RETURNED').length;
+    const delivered= approvedEvents.filter(e => e.action === 'DELIVERED').length;
+    const returned = approvedEvents.filter(e => e.action === 'RETURNED').length;
 
     renderDashboardStats(total, pending, delivered, returned);
 
@@ -7552,10 +7553,11 @@ async function loadAnalytics() {
   const total = events.length;
   const approved = events.filter(e => e.status === 'APPROVED').length;
   const pending  = events.filter(e => e.status === 'PENDING').length;
-  const uniqueStaff = [...new Set(events.map(e => e.submitted_by))].length;
+  const approvedEvents = events.filter(e => e && e.status === 'APPROVED');
+  const uniqueStaff = [...new Set(approvedEvents.map(e => e.submitted_by))].length;
 
   document.getElementById('an-stats').innerHTML = `
-    <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">Total Events</div></div>
+    <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">All Status Events</div></div>
     <div class="stat-card sc-a2"><div class="stat-val">${approved}</div><div class="stat-lbl">Approved</div></div>
     <div class="stat-card sc-a4"><div class="stat-val">${pending}</div><div class="stat-lbl">Pending</div></div>
     <div class="stat-card sc-dim"><div class="stat-val">${uniqueStaff}</div><div class="stat-lbl">Active Staff</div></div>
@@ -7572,7 +7574,7 @@ async function loadAnalytics() {
 
   // ── CHART 1: Bartender Activity ──
   const staffCounts = {};
-  events.forEach(e => {
+  approvedEvents.forEach(e => {
     staffCounts[e.submitted_by] = (staffCounts[e.submitted_by] || 0) + 1;
   });
   const staffSorted = Object.entries(staffCounts).sort((a,b) => b[1]-a[1]).slice(0,10);
@@ -7589,7 +7591,7 @@ async function loadAnalytics() {
 
   // ── CHART 2: Top Items (by net usage: delivered - returned, in individual units) ──
   const itemCounts = {};
-  events.forEach(e => {
+  approvedEvents.forEach(e => {
     const name = e.items?.name || 'Unknown';
     const itemObj = SESSION.cache.items.find(i => i.id === e.item_id);
     const upc = (itemObj?.unit === 'case') ? (Number(itemObj?.units_per_case)||1) : 1;
@@ -7614,7 +7616,7 @@ async function loadAnalytics() {
   // ── CHART 3: Timeline (events by hour) ──
   const hourCounts = {};
   for (let h = 0; h < 24; h++) hourCounts[h] = 0;
-  events.forEach(e => {
+  approvedEvents.forEach(e => {
     const h = new Date(e.created_at).getHours();
     hourCounts[h]++;
   });
@@ -7648,7 +7650,7 @@ async function loadAnalytics() {
 
   // ── BARTENDER DETAIL TABLE ──
   const staffDetail = {};
-  events.forEach(e => {
+  approvedEvents.forEach(e => {
     const k = e.submitted_by;
     if (!staffDetail[k]) staffDetail[k] = { request:0, delivered:0, returned:0, total:0, last: e.created_at };
     staffDetail[k][e.action.toLowerCase()] = (staffDetail[k][e.action.toLowerCase()] || 0) + 1;
@@ -7735,10 +7737,13 @@ function renderReportTable(events) {
   const totalQty = events.reduce((s,e) => s + (e.qty||1), 0);
   const approved = events.filter(e => e.status === 'APPROVED').length;
   const pending  = events.filter(e => e.status === 'PENDING').length;
+  const selectedStatus = document.getElementById('rp-status')?.value || '';
+  const totalLabel = selectedStatus ? esc(selectedStatus) + ' Events' : 'All Status Events';
+  const totalQtyLabel = selectedStatus ? esc(selectedStatus) + ' Qty' : 'All Status Qty';
 
   document.getElementById('rp-stats').innerHTML = `
-    <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">Total Events</div></div>
-    <div class="stat-card sc-a2"><div class="stat-val">${totalQty}</div><div class="stat-lbl">Total Qty</div></div>
+    <div class="stat-card sc-a"><div class="stat-val">${total}</div><div class="stat-lbl">${totalLabel}</div></div>
+    <div class="stat-card sc-a2"><div class="stat-val">${totalQty}</div><div class="stat-lbl">${totalQtyLabel}</div></div>
     <div class="stat-card sc-a4"><div class="stat-val">${pending}</div><div class="stat-lbl">Pending</div></div>
     <div class="stat-card sc-dim"><div class="stat-val">${approved}</div><div class="stat-lbl">Approved</div></div>
   `;

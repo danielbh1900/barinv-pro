@@ -2874,6 +2874,7 @@ const Pilot = {
       .from('events')
       .select('bar_id, created_at')
       .eq('night_id', nightId)
+      .eq('status', 'APPROVED')
       .in('source', ['barback_web_link', 'barback_live_pilot'])
       .gte('created_at', fiveMinAgo)
       .limit(2000);
@@ -3130,6 +3131,7 @@ const Pilot = {
       .from('events')
       .select('session_id, created_at')
       .in('session_id', ids)
+      .eq('status', 'APPROVED')
       .in('source', ['barback_web_link', 'barback_live_pilot'])
       .order('created_at', { ascending: true })
       .limit(500);
