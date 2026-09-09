@@ -141,6 +141,17 @@
     .identity-bar .logout { padding:6px 12px; background:#7c2d12; color:#fff;
       border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:600; }
 
+    /* FAST_DELIVERY_BATCH1_SCOPE_STATUS_START */
+    .barback-scope-banner { margin:10px auto 0; max-width:720px; padding:10px 12px;
+      border:1px solid #374151; border-radius:8px; background:#111827; color:#e5e7eb;
+      font-size:12px; line-height:1.45; }
+    .barback-scope-banner.warn { border-color:#f59e0b; background:#2b1f0b; color:#fcd34d; }
+    .barback-scope-main { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+    .barback-scope-main b { color:#fb923c; }
+    .barback-scope-meta { margin-top:4px; color:#9ca3af; font-size:11px; }
+    .barback-scope-meta strong { color:#e5e7eb; }
+    /* FAST_DELIVERY_BATCH1_SCOPE_STATUS_END */
+
     /* ── Scan/save action-tinted callouts ────────────────────────── */
     .scan-cta {
       width:100%; padding:24px 12px;
@@ -159,9 +170,11 @@
       margin-top:6px; border-radius:6px;
     }
     .item-row {
+      min-height:44px; display:flex; align-items:center;
       padding:12px 14px; border-bottom:1px solid #1a1a1a;
       cursor:pointer; font-size:14px;
     }
+    #search-input:focus { outline:3px solid #fb923c; outline-offset:2px; border-color:#fb923c; }
     .item-row:last-child { border-bottom:none; }
     .item-row:active { background:#1a1a1a; }
     .item-row .sku { color:#666; font-size:11px; float:right; }
@@ -618,6 +631,10 @@
     <div class="who" id="who-line">—</div>
     <button class="logout" id="logout-btn">Logout</button>
   </div>
+  <div id="barback-scope-banner" class="barback-scope-banner" role="status" aria-live="polite">
+    <div id="barback-scope-content" class="barback-scope-main">Checking assigned night and bars…</div>
+    <div id="barback-queue-state" class="barback-scope-meta">Preparing local queue status…</div>
+  </div>
 
   <div class="wrap">
 
@@ -740,7 +757,7 @@
         <input type="checkbox" id="rapid-mode">
         <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, ask quantity after each scan</label>
       </div>
-      <input id="search-input" type="text" placeholder="or type barcode / name (or use HID scanner)..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <input id="search-input" type="text" aria-label="Search item by name or barcode" placeholder="Search item name or scan barcode…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
       <div id="search-results" class="item-results" style="display:none;"></div>
       <div id="picked-item" class="selected-item" style="display:none;"></div>
@@ -1303,6 +1320,38 @@ function statusOn(id, msg, level) {
 function clearStatus(id) {
   const el = $(id);
   if (el) el.innerHTML = '';
+}
+
+// FAST_DELIVERY_BATCH1_SCOPE_STATUS_START — presentation-only operator context.
+// Values come from the already-authenticated session/cache; this helper does
+// not widen scope, change auth, or alter submission payloads.
+function renderBarbackScopeBanner() {
+  const banner = $('barback-scope-banner');
+  const content = $('barback-scope-content');
+  const queueState = $('barback-queue-state');
+  if (!banner || !content || !queueState) return;
+  const p = state.tokenPayload || {};
+  const venue = (cache.venues || []).find(v => v.id === p.venue_id) || {};
+  const night = (cache.nights || []).find(n => n.id === p.night_id) || {};
+  let allowed = [];
+  try { allowed = getAllowedDestinationsForCurrentSession() || []; } catch (_) { allowed = []; }
+  const venueLabel = venue.name || p.venue_name || 'Assigned venue';
+  const nightLabel = night.name || p.night_label || 'Selected night';
+  const nightDate = night.date ? ' · ' + night.date : '';
+  const barLabels = allowed.map(b => barDisplayLabel(b)).filter(Boolean);
+  const hasScope = !!p.night_id && allowed.length > 0;
+  banner.classList.toggle('warn', !hasScope);
+  content.innerHTML = '<b>' + esc(venueLabel) + '</b>' +
+    '<span>·</span><span>' + esc(nightLabel + nightDate) + '</span>' +
+    '<span>·</span><span>' + esc(allowed.length ? (barLabels.join(', ') || (allowed.length + ' allowed bars')) : 'Allowed bars not loaded') + '</span>';
+  const drafts = (() => { try { return Drafts.count(); } catch (_) { return 0; } })();
+  const queued = (() => { try { return Outbox.count(); } catch (_) { return 0; } })();
+  const storageIssue = !!(Drafts._volatile || Outbox._volatile);
+  const network = navigator.onLine ? 'Online' : 'Offline';
+  const action = storageIssue
+    ? 'Storage issue — keep this page open and retry'
+    : (queued ? 'Tap SYNC to retry queued work' : (drafts ? 'Review saved drafts before submitting' : 'Ready for new work'));
+  queueState.innerHTML = '<strong>' + network + '</strong> · Drafts: ' + drafts + ' · Pending sync: ' + queued + ' · ' + esc(action);
 }
 function fmtTime(d) {
   d = d ? new Date(d) : new Date();
@@ -2121,7 +2170,7 @@ function startJwtKeepalive() {
       state.tokenPayload = null;
       state.staffId = null;
       state.staffName = null;
-      alert('Your barback session has expired. Please sign in again.');
+      alert('Your barback session expired. Sign in again to continue. Local drafts and queued work remain on this device.');
       showScreen('screen-token');
     }
   }, PHASE3_SESSION_KEEPALIVE_MS);
@@ -2370,6 +2419,7 @@ function enterMain() {
     console.warn('Opening PAR Review draft creation failed', error);
   }
   refreshQueueCount();
+  renderBarbackScopeBanner();
   renderRecentMini();
   try { refreshDraftCount(); } catch (_) {}   // init main-screen draft indicator (persisted drafts)
   renderRecentItemChips();   // Phase 5
@@ -2785,6 +2835,7 @@ $('search-input').addEventListener('keydown', (e) => {
         String(x.name || '').toLowerCase().indexOf(v.toLowerCase()) >= 0
       );
       if (matches.length === 1) setPickedItem(matches[0]);
+      else statusOn('save-status', matches.length ? 'Tap an item below to choose it' : 'No matching item — refine the search or browse items', 'warn');
     }
   }
 });
@@ -5104,7 +5155,7 @@ async function saveCore(payload) {
       if (state.expirationInterval) { clearInterval(state.expirationInterval); state.expirationInterval = null; }
       $('expiration-strip').style.display = 'none';
       setTimeout(() => {
-        alert('Your barback session is no longer valid (revoked or expired). Please sign in again.');
+        alert('Your session is no longer valid. Sign in again to continue. Local drafts and queued work remain on this device.');
         showScreen('screen-token');
       }, 0);
       return { synced:false, error: { message:'session revoked' }, ce };
@@ -6493,7 +6544,10 @@ function addCurrentSelectionToReview(opts) {
 
 $('save-btn').addEventListener('click', async () => {
   clearStatus('save-status');
-  if (!state.tokenPayload) { statusOn('save-status','Session lost — log in again','err'); return; }
+  if (!state.tokenPayload) {
+    statusOn('save-status','Session expired or unavailable — sign in again. Local drafts remain on this device.','err');
+    return;
+  }
   if (!state.selectedAction) { showOverlay('PICK ACTION', 'TAKEN or RETURN', 'err'); Feedback.warn(); return; }
   if (!state.selectedItemId) {
     let _dn = 0; try { _dn = Drafts.count(); } catch (_) {}
@@ -6514,7 +6568,8 @@ $('save-btn').addEventListener('click', async () => {
   // PLAN-2026-06-13 — routed through the SHARED core so manual + scanner match.
   $('save-btn').dataset.busy = '1';
   $('save-btn').disabled = true;
-  $('save-btn').textContent = '… ADDING';
+  $('save-btn').textContent = '… SAVING';
+  statusOn('save-status', 'Saving locally to Review…', 'info');
   const res = addCurrentSelectionToReview({});
   $('save-btn').dataset.busy = '';
   $('save-btn').disabled = false;
@@ -6522,6 +6577,7 @@ $('save-btn').addEventListener('click', async () => {
 
   if (!res.ok) {
     Feedback.warn();
+    statusOn('save-status', res.storage_error ? 'Could not save locally — keep this page open and retry' : 'Not added — ' + (res.error || 'check the item and try again'), 'err');
     showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
     return;   // keep the operator's entry so they can fix and retry
   }
@@ -6532,13 +6588,13 @@ $('save-btn').addEventListener('click', async () => {
       state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + res.qty +
       (res.fail ? (' · ' + res.fail + ' failed') : ''), 'ok');
     statusOn('save-status',
-      'Added to Review for ' + res.added + ' bar' + (res.added !== 1 ? 's' : '') +
+      'Saved locally to Review for ' + res.added + ' bar' + (res.added !== 1 ? 's' : '') +
         ' · qty ' + res.qty + ' — tap VIEW ALL to submit', 'ok');
   } else {
     showOverlay('✓ ADDED TO REVIEW',
       state.selectedItemName + ' · qty ' + res.qty + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') + ' pending', 'ok');
     statusOn('save-status',
-      'Added to Review · qty ' + res.qty + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') +
+      'Saved locally to Review · qty ' + res.qty + ' · ' + n + ' draft' + (n !== 1 ? 's' : '') +
         ' pending — tap VIEW ALL to submit', 'ok');
   }
 
@@ -6734,7 +6790,7 @@ async function syncOutbox(opts) {
     if (state.jwtCheckInterval)   { clearInterval(state.jwtCheckInterval);   state.jwtCheckInterval = null; }
     $('expiration-strip').style.display = 'none';
     setTimeout(() => {
-      alert('Sync failed — your barback session was revoked or expired. Please sign in again.');
+      alert('Sync paused because your session expired or was revoked. Sign in again; queued work remains on this device.');
       showScreen('screen-token');
     }, 0);
     return { ok:false, msg:'session revoked — sign in again', total: ok };
@@ -6783,6 +6839,7 @@ function refreshQueueCount() {
     btn.classList.toggle('green', n === 0);
     btn.classList.toggle('footer-status', n > 0);
   }
+  renderBarbackScopeBanner();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -6839,7 +6896,7 @@ function startExpirationTimer() {
       state.expirationInterval = null;
       Auth.clearSession();
       Feedback.err();
-      alert('Session expired. Please sign in again with your manager\'s link.');
+      alert('Your session expired. Use your manager\'s link to sign in again. Local drafts and queued work remain on this device.');
       logout();
       return;
     }
@@ -7917,6 +7974,7 @@ function refreshDraftCount() {
     }
   } catch (_) {}
   const btn = $('review-submit-all');
+  renderBarbackScopeBanner();
   if (!btn) return;
   if (n > 0) {
     btn.textContent = '⬆ SUBMIT ALL (' + n + ') TO BARINV';
@@ -8543,7 +8601,7 @@ document.addEventListener('visibilitychange', () => {
       Auth.clearSession();
       state.jwt = null; state.tokenPayload = null;
       state.staffId = null; state.staffName = null;
-      alert('Your barback session expired while the app was in the background. Please sign in again.');
+      alert('Your session expired while the app was in the background. Sign in again to continue. Local drafts and queued work remain on this device.');
       showScreen('screen-token');
       return;
     }
@@ -8570,7 +8628,7 @@ window.addEventListener('pageshow', (ev) => {
         expiryDebug('pageshow', { local_ms: ms, persisted: !!(ev && ev.persisted) });
         Auth.clearSession();
         state.jwt = null; state.tokenPayload = null;
-        alert('Session expired while the tab was suspended. Please sign in again.');
+        alert('Your session expired while the tab was suspended. Sign in again to continue. Local drafts and queued work remain on this device.');
         showScreen('screen-token');
         return;
       }
