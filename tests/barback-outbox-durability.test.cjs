@@ -149,6 +149,8 @@ async function runSubmitAll({ queueResult, draftRemoveResult }) {
     },
     buildWeightNotes: () => '',
     buildProfileNotes: () => '',
+    isMovementAllowed: () => true,
+    movementBlockMessage: () => 'movement blocked',
     confirm: () => true,
     statusOn: (...args) => calls.push(['status', ...args]),
     refreshDraftCount: () => calls.push(['refresh-drafts']),

@@ -723,6 +723,7 @@
         <button type="button" class="action" data-action="TAKEN">TAKEN</button>
         <button type="button" class="action" data-action="RETURNED">RETURN</button>
       </div>
+      <div id="movement-permission-banner" class="small" style="display:none;margin-top:6px;color:#fbbf24;"></div>
     </div>
 
     <div class="row" id="bar-pick-row" style="display:none;">
@@ -2019,10 +2020,47 @@ const state = {
   jwt: null,              // signed access token from barback-login
   jwtExpiresAt: null,     // ISO string
   serverSession: null,    // the session row echoed by the login response
+  allowedMovements: { take: true, return: true },
   openingParSession: null, // authenticated session snapshot; never sourced from live Master PAR
   authPath: null,         // 'phase3' or 'phase2_test'
   ble: { available:false, deviceId:null, connected:false, lastWeight:null, lastStable:false },
 };
+
+function normalizeAllowedMovements(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { take: true, return: true };
+  return (typeof raw.take === 'boolean' && typeof raw.return === 'boolean')
+    ? { take: raw.take, return: raw.return }
+    : { take: true, return: true };
+}
+
+function setAllowedMovements(raw) {
+  state.allowedMovements = normalizeAllowedMovements(raw);
+  const banner = $('movement-permission-banner');
+  if (banner) {
+    const m = state.allowedMovements;
+    banner.textContent = (!m.take && m.return) ? 'This link is RETURN only.'
+      : (m.take && !m.return) ? 'This link is TAKE only.' : '';
+    banner.style.display = banner.textContent ? '' : 'none';
+  }
+  $$('.action').forEach(btn => {
+    const enabled = btn.dataset.action === 'TAKEN' ? state.allowedMovements.take : state.allowedMovements.return;
+    btn.disabled = !enabled;
+    btn.style.opacity = enabled ? '' : '0.45';
+    btn.style.cursor = enabled ? '' : 'not-allowed';
+  });
+  if (state.selectedAction && !isMovementAllowed(state.selectedAction)) state.selectedAction = null;
+}
+
+function isMovementAllowed(action) {
+  const m = state.allowedMovements || { take: true, return: true };
+  return action === 'TAKEN' ? m.take : action === 'RETURNED' ? m.return : false;
+}
+
+function movementBlockMessage(action) {
+  if (action === 'TAKEN' && !isMovementAllowed(action)) return 'This link is RETURN only.';
+  if (action === 'RETURNED' && !isMovementAllowed(action)) return 'This link is TAKE only.';
+  return 'This movement is not allowed for the current link.';
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  Token + URL helpers
@@ -2094,6 +2132,7 @@ function boot() {
         state.jwt          = existing.scoped_jwt;
         state.jwtExpiresAt = existing.jwt_expires_at || null;
         state.serverSession = existing.server_session || null;
+        setAllowedMovements(state.serverSession && state.serverSession.allowed_movements);
         state.openingParSession = existing.opening_par || null;
         state.authPath     = 'phase3';
         Phase3.rehydrate(existing.scoped_jwt);
@@ -2283,6 +2322,7 @@ $('pin-submit').addEventListener('click', async () => {
     state.jwt           = res.session.scoped_jwt;
     state.jwtExpiresAt  = res.session.jwt_expires_at || null;
     state.serverSession = res.session.server_session || null;
+    setAllowedMovements(state.serverSession && state.serverSession.allowed_movements);
     state.openingParSession = res.session.opening_par || null;
     if (res.session.staff_name) state.staffName = res.session.staff_name;
     if (res.session.bundle) applyBundle(res.session.bundle, state.tokenPayload && state.tokenPayload.venue_id);
@@ -2316,6 +2356,7 @@ function enterMain() {
     return;
   }
   const p = state.tokenPayload;
+  setAllowedMovements((state.serverSession && state.serverSession.allowed_movements) || (p && p.allowed_movements));
   const venue  = (cache.venues || []).find(v => v.id === p.venue_id);
   const night  = (cache.nights || []).find(n => n.id === p.night_id);
   const bar    = p.bar_id ? (cache.bars || []).find(b => b.id === p.bar_id) : null;
@@ -2458,6 +2499,10 @@ function applyActionTint() {
 // ════════════════════════════════════════════════════════════════════
 $$('.action').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (!isMovementAllowed(btn.dataset.action)) {
+      statusOn('save-status', movementBlockMessage(btn.dataset.action), 'err');
+      return;
+    }
     state.selectedAction = btn.dataset.action;
     applyActionTint();
     Feedback.scan();
@@ -5017,6 +5062,9 @@ async function eventsInsert(record) {
 async function saveCore(payload) {
   const p = state.tokenPayload;
   if (!p) return { synced:false, error:'no session' };
+  if (!isMovementAllowed(payload && payload.action)) {
+    return { synced:false, queued:false, error: movementBlockMessage(payload && payload.action) };
+  }
   const ce = uuidv4();
   const userNotes = payload.notes || '';
 
@@ -5539,6 +5587,9 @@ function saveWeightProfileFromInputs() {
 function addToReview(payload) {
   const p = state.tokenPayload;
   if (!p) return { ok:false, error:'no session' };
+  if (!isMovementAllowed(payload && payload.action)) {
+    return { ok:false, error: movementBlockMessage(payload && payload.action) };
+  }
   // Role/scope SAFETY backstop — never let an out-of-scope item (e.g.
   // vip_only for a barback, or any unscoped item under fail-closed) reach
   // Drafts, regardless of caller path (button, scanner, HID, draft edit).
@@ -6488,6 +6539,9 @@ function addCurrentSelectionToReview(opts) {
   opts = opts || {};
   if (!state.tokenPayload)   return { ok:false, error:'Session lost — log in again' };
   if (!state.selectedAction) return { ok:false, error:'Pick TAKEN or RETURN first' };
+  if (!isMovementAllowed(state.selectedAction)) {
+    return { ok:false, error: movementBlockMessage(state.selectedAction) };
+  }
   const itemId   = opts.item ? opts.item.id   : state.selectedItemId;
   const itemName = opts.item ? opts.item.name : state.selectedItemName;
   if (!itemId) return { ok:false, error:'Pick or scan an item first' };
@@ -6686,6 +6740,10 @@ async function undoLast() {
   } else {
     // Already synced — insert a reverse-direction event
     const reverseAction = last.action === 'TAKEN' ? 'RETURNED' : 'TAKEN';
+    if (!isMovementAllowed(reverseAction)) {
+      statusOn('save-status', movementBlockMessage(reverseAction) + ' Undo was not posted; the original record remains unchanged.', 'err');
+      return;
+    }
     const r = await saveCore({
       item_id: last.item_id,
       item_name: last.item_name + ' [REVERSAL]',
@@ -6729,6 +6787,11 @@ async function syncOutbox(opts) {
     const ev = target[i];
     if (opts.progress) opts.progress(i + 1, target.length);
     const { queued_at, attempts, last_error, last_attempt_at, ...rec } = ev;
+    if (!isMovementAllowed(rec.action)) {
+      bumpAttempt(ev.client_event_id, movementBlockMessage(rec.action));
+      failed++;
+      continue;
+    }
     // PLAN-2026-06-05 — Patch B: backfill ONLY venue_id when it's
     // missing on a queued row. Older rows queued before Patch A do
     // not carry venue_id; the strict RLS policy needs that field to
@@ -7641,6 +7704,9 @@ function onQueueEditSave(ce, form) {
   if (action !== 'TAKEN' && action !== 'RETURNED') {
     statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
   }
+  if (!isMovementAllowed(action)) {
+    statusOn('review-status', movementBlockMessage(action), 'err'); return;
+  }
   const qty = parseFloat(qtyStr);
   if (!isFinite(qty) || qty <= 0) {
     statusOn('review-status', 'Qty must be a positive number', 'err'); return;
@@ -7798,6 +7864,9 @@ function onDraftEditSave(ce, form) {
   if (action !== 'TAKEN' && action !== 'RETURNED') {
     statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
   }
+  if (!isMovementAllowed(action)) {
+    statusOn('review-status', movementBlockMessage(action), 'err'); return;
+  }
   const qty = parseFloat(qtyStr);
   if (!isFinite(qty) || qty <= 0) {
     statusOn('review-status', 'Qty must be a positive number', 'err'); return;
@@ -7885,6 +7954,10 @@ async function submitAllDraftsToBarinv() {
   // status to SYNCED (mirrors the saveCore→Recent.add path).
   let promoted = 0;
   for (const d of drafts) {
+    if (!isMovementAllowed(d.action)) {
+      statusOn('review-status', movementBlockMessage(d.action) + ' Remove or edit the blocked draft before submitting.', 'err');
+      continue;
+    }
     // STRIP every draft-only helper field so the Outbox row is a clean
     // events-shape record. item_name/drafted_at are UI helpers;
     // weight_g/bottle_state/measurement_source are the Manual Scale MVP

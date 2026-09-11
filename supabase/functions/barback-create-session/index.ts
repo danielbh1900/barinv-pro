@@ -46,6 +46,7 @@ interface CreateSessionBody {
   opening_par_enabled?: boolean;
   opening_par_items?: Array<{ item_id: string; qty: number }>;
   auto_approve_events?: boolean;
+  allowed_movements?: unknown;
   nickname?: string;
   expires_at: string;
   pin_rotate_for?: string[];
@@ -55,6 +56,27 @@ interface CreateSessionBody {
 type SessionLinkMode = "bar" | "table";
 
 class SessionInputError extends Error {}
+
+type AllowedMovements = { take: boolean; return: boolean };
+
+function normalizeAllowedMovements(value: unknown): AllowedMovements {
+  if (value == null) return { take: true, return: true };
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new SessionInputError("allowed_movements must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  const keys = Object.keys(raw);
+  if (keys.some((key) => key !== "take" && key !== "return")) {
+    throw new SessionInputError("allowed_movements contains an unknown key");
+  }
+  if (typeof raw.take !== "boolean" || typeof raw.return !== "boolean") {
+    throw new SessionInputError("allowed_movements.take and return must be boolean");
+  }
+  if (!raw.take && !raw.return) {
+    throw new SessionInputError("at least one movement must be enabled");
+  }
+  return { take: raw.take, return: raw.return };
+}
 
 function uniqueIdArray(value: unknown, field: string): string[] {
   if (value == null) return [];
@@ -398,6 +420,14 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  let allowedMovements: AllowedMovements;
+  try {
+    allowedMovements = normalizeAllowedMovements(body.allowed_movements);
+  } catch (e) {
+    if (e instanceof SessionInputError) return errorResponse(e.message, 400);
+    return errorResponse("invalid allowed movement configuration", 400);
+  }
+
   let openingParConfig: {
     enabled: true;
     version: number;
@@ -405,6 +435,11 @@ Deno.serve(async (req: Request) => {
     items: Array<{ item_id: string; qty: number }>;
   } | null = null;
   try {
+    if (body.opening_par_enabled === true && !allowedMovements.take) {
+      throw new SessionInputError(
+        "Opening PAR requires TAKE. Return-only cleanup sessions cannot require Opening PAR.",
+      );
+    }
     if (body.opening_par_enabled === true) {
       if (resolvedScope.mode !== "bar" || !resolvedScope.effectiveDestinationIds.length) {
         throw new SessionInputError("Opening PAR requires at least one validated operational destination");
@@ -450,6 +485,7 @@ Deno.serve(async (req: Request) => {
       bar_id:        primaryBarId,
       allowed_bars:  allowedBars,
       allowed_staff: allowedStaff,
+      allowed_movements: allowedMovements,
       nickname:      body.nickname ?? null,
       issued_by:     issuedBy,
       expires_at:    expiresAt.toISOString(),
@@ -457,7 +493,7 @@ Deno.serve(async (req: Request) => {
       auto_approve_events: autoApproveEvents,
     })
     .select(
-      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, opening_par_config, auto_approve_events",
+      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, allowed_movements, nickname, issued_by, issued_at, expires_at, opening_par_config, auto_approve_events",
     )
     .single();
   if (insErr || !session) {
@@ -558,6 +594,7 @@ Deno.serve(async (req: Request) => {
     bar_id:            session.bar_id ?? null,
     allowed_bars:      session.allowed_bars,
     allowed_staff:     session.allowed_staff,
+    allowed_movements: session.allowed_movements ?? allowedMovements,
     allowed_staff_meta: allowedStaffMeta,
     venue_name:        venueRow?.name ?? null,
     bar_name:          barRow?.name ?? null,
@@ -591,6 +628,7 @@ Deno.serve(async (req: Request) => {
       opening_par_enabled: openingParConfig?.enabled === true,
       opening_par_item_count: openingParConfig?.items.length ?? 0,
       auto_approve_events: autoApproveEvents,
+      allowed_movements: allowedMovements,
     },
   });
 

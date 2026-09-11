@@ -407,6 +407,25 @@
             </div>
           </div>
         </section>
+        <section class="row" id="c-allowed-movements-card" style="padding:12px;background:#111827;border:1px solid #374151;border-radius:6px;">
+          <label>ALLOWED MOVEMENTS</label>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:7px;">
+            <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#ddd;">
+              <input type="checkbox" id="c-allow-take" checked style="width:auto;">
+              <span>TAKE / OUT</span>
+            </label>
+            <label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:normal;color:#ddd;">
+              <input type="checkbox" id="c-allow-return" checked style="width:auto;">
+              <span>RETURN / BACK</span>
+            </label>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
+            <button type="button" class="btn btn-secondary movement-preset" data-movement-preset="both">Normal</button>
+            <button type="button" class="btn btn-secondary movement-preset" data-movement-preset="return">Return-only cleanup</button>
+            <button type="button" class="btn btn-secondary movement-preset" data-movement-preset="take">Take-only</button>
+          </div>
+          <div class="small muted" id="c-allowed-movements-help" style="margin-top:6px;">Both movement types are enabled by default.</div>
+        </section>
         <div class="row">
           <label>EXPIRES AT</label>
           <input id="c-expires" type="datetime-local">
@@ -1030,6 +1049,8 @@ function clearManagerVenueScopedState() {
     'c-opening-par-enabled'].forEach(id => {
     if ($(id)) $(id).checked = false;
   });
+  if ($('c-allow-take')) $('c-allow-take').checked = true;
+  if ($('c-allow-return')) $('c-allow-return').checked = true;
   if ($('c-linktype')) $('c-linktype').value = 'bar';
   if ($('venue-meta')) $('venue-meta').textContent = '—';
   if ($('c-result-card')) $('c-result-card').style.display = 'none';
@@ -1984,12 +2005,35 @@ function renderManagerScopeReview() {
   const exception = autoSet.size !== actualSet.size || Array.from(autoSet).some(id => !actualSet.has(id));
   if ($('c-destination-exception')) $('c-destination-exception').style.display = exception ? '' : 'none';
   if ($('c-scope-review-body')) {
+    const movements = managerAllowedMovements();
+    const movementLabel = movements.take && movements.return ? 'TAKE + RETURN'
+      : movements.return ? 'RETURN ONLY' : movements.take ? 'TAKE ONLY' : 'NONE';
     $('c-scope-review-body').innerHTML = '<b>Staff:</b> ' + esc(staffNames.join(', ') || 'none') + '<br>' +
       '<b>Destinations:</b> ' + esc(destinationNames.join(', ') || 'none') +
+      '<br><b>Actions:</b> ' + movementLabel +
       (exception ? '<br><span style="color:#fbbf24;">Session-specific assignment exception.</span>' : '');
   }
   renderManagerOpeningPar();
 }
+
+function managerAllowedMovements() {
+  return {
+    take: !!($('c-allow-take') && $('c-allow-take').checked),
+    return: !!($('c-allow-return') && $('c-allow-return').checked),
+  };
+}
+
+function applyManagerMovementPreset(name) {
+  const values = name === 'return' ? { take: false, return: true }
+    : name === 'take' ? { take: true, return: false }
+    : { take: true, return: true };
+  if ($('c-allow-take')) $('c-allow-take').checked = values.take;
+  if ($('c-allow-return')) $('c-allow-return').checked = values.return;
+  renderManagerScopeReview();
+}
+
+$$('.movement-preset').forEach(btn => btn.addEventListener('click', () => applyManagerMovementPreset(btn.dataset.movementPreset)));
+['c-allow-take', 'c-allow-return'].forEach(id => $(id)?.addEventListener('change', renderManagerScopeReview));
 
 function syncAssignedDestinationsFromStaff() {
   applyManagerDestinationScope(automaticManagerDestinationScope());
@@ -2105,6 +2149,13 @@ $('c-create').addEventListener('click', async () => {
   const barId = scope.primaryId;
   const allowedBars = scope.additionalIds;
   const allowedStaff = selectedManagerStaffIds();
+  const allowedMovements = managerAllowedMovements();
+  if (!allowedMovements.take && !allowedMovements.return) {
+    statusOn('c-status', 'Enable TAKE / OUT or RETURN / BACK before generating a link.', 'err'); return;
+  }
+  if (!allowedMovements.take && $('c-opening-par-enabled')?.checked) {
+    statusOn('c-status', 'Opening PAR requires TAKE. Return-only cleanup sessions cannot require Opening PAR.', 'err'); return;
+  }
   if (!allowedStaff.length) { statusOn('c-status', 'Select at least one assigned staff member.', 'err'); return; }
   if (!barId && !allowedBars.length) { statusOn('c-status', 'Selected staff have no active assigned destinations.', 'err'); return; }
   const expRaw = $('c-expires').value;
@@ -2127,6 +2178,7 @@ $('c-create').addEventListener('click', async () => {
       bar_id:         barId,
       allowed_bars:   allowedBars,
       allowed_staff:  allowedStaff,
+      allowed_movements: allowedMovements,
       link_type:      $('c-linktype').value,
       nickname:       nickname,
       expires_at:     new Date(expRaw).toISOString(),
@@ -2413,10 +2465,14 @@ async function renderSessions(silent) {
     const autoApprovePill = s.auto_approve_events
       ? '<span class="pill active" style="background:#064e3b;border-color:#10b981;color:#a7f3d0;">AUTO-APPROVE</span> '
       : '';
+    const sessionMovements = s.allowed_movements || { take: true, return: true };
+    const movementMode = s.movement_mode || (sessionMovements.take && sessionMovements.return
+      ? 'BOTH' : (sessionMovements.return ? 'RETURN ONLY' : 'TAKE ONLY'));
+    const movementPill = '<span class="pill active" style="background:#1e3a8a;border-color:#60a5fa;color:#bfdbfe;">' + esc(movementMode) + '</span> ';
     const canAct = !revoked && !expired;
     return '<div class="session-row' + (revoked || expired ? ' revoked' : '') + '">' +
       '<div class="meta">' +
-        pill + ' ' + autoApprovePill + '<b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
+        pill + ' ' + movementPill + autoApprovePill + '<b>' + esc(s.nickname || '(no nickname)') + '</b><br>' +
         '<span class="muted">' + esc(nightLabel) + ' · ' + esc(barInfo) + '</span><br>' +
         '<span class="muted">expires ' + fmtTime(s.expires_at) +
         (revoked ? ' · revoked ' + fmtTime(s.revoked_at) : '') + '</span><br>' +

@@ -52,6 +52,14 @@ interface LoginBody {
   pin: string;
 }
 
+function normalizeAllowedMovements(raw: unknown): { take: boolean; return: boolean } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { take: true, return: true };
+  const value = raw as Record<string, unknown>;
+  return typeof value.take === "boolean" && typeof value.return === "boolean"
+    ? { take: value.take, return: value.return }
+    : { take: true, return: true };
+}
+
 function fromBase64UrlToString(s: string): string {
   let v = s.replace(/-/g, "+").replace(/_/g, "/");
   while (v.length % 4 !== 0) v += "=";
@@ -526,6 +534,7 @@ Deno.serve(async (req: Request) => {
       night_id:      session.night_id,
       bar_id:        scopedPrimaryBarId,
       allowed_bars:  scopedAllowedBars,
+      allowed_movements: normalizeAllowedMovements(session.allowed_movements),
       nickname:      session.nickname,
       issued_by:     session.issued_by,
       issued_at:     session.issued_at,

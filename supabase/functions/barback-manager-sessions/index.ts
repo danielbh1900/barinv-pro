@@ -31,6 +31,20 @@ function openingParItemCount(raw: unknown): number {
   }).length;
 }
 
+function normalizeAllowedMovements(raw: unknown): { take: boolean; return: boolean } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { take: true, return: true };
+  const value = raw as Record<string, unknown>;
+  return typeof value.take === "boolean" && typeof value.return === "boolean"
+    ? { take: value.take, return: value.return }
+    : { take: true, return: true };
+}
+
+function movementMode(value: { take: boolean; return: boolean }): string {
+  if (value.take && value.return) return "BOTH";
+  if (value.return) return "RETURN ONLY";
+  return "TAKE ONLY";
+}
+
 function wholeQuantityText(raw: unknown): string {
   const text = String(raw ?? "").trim();
   if (!/^(0|[1-9][0-9]*)$/.test(text)) {
@@ -98,7 +112,7 @@ Deno.serve(async (req: Request) => {
   );
   let query = svc.from("barback_sessions")
     .select(
-      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, nickname, issued_by, issued_at, expires_at, revoked_at, pilot_mode, rehearsal_mode, opening_par_config, auto_approve_events",
+      "id, venue_id, night_id, bar_id, allowed_bars, allowed_staff, allowed_movements, nickname, issued_by, issued_at, expires_at, revoked_at, pilot_mode, rehearsal_mode, opening_par_config, auto_approve_events",
     )
     .eq("venue_id", body.venue_id)
     .order("issued_at", { ascending: false })
@@ -174,6 +188,7 @@ Deno.serve(async (req: Request) => {
       ? "revoked"
       : (+new Date(row.expires_at) <= now ? "expired" : "active");
     const openingParCount = openingParItemCount(row.opening_par_config);
+    const allowedMovements = normalizeAllowedMovements(row.allowed_movements);
     const sessionReceipts = receiptsBySession.get(row.id) ?? [];
     const sessionCompletions = completionsBySession.get(row.id) ?? [];
     const varianceCounts = { match: 0, short: 0, over: 0 };
@@ -228,6 +243,8 @@ Deno.serve(async (req: Request) => {
       pilot_mode: row.pilot_mode === true,
       rehearsal_mode: row.rehearsal_mode === true,
       auto_approve_events: row.auto_approve_events === true,
+      allowed_movements: allowedMovements,
+      movement_mode: movementMode(allowedMovements),
     };
   });
 

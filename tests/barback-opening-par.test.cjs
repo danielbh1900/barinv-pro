@@ -71,6 +71,8 @@ function addToReviewHarness() {
     getCurrentUserRole: () => 'barback',
     scopeBlockReason: () => 'blocked',
     isAreaAllowedForSession: id => id === 'bar-1',
+    isMovementAllowed: () => true,
+    movementBlockMessage: () => 'movement blocked',
     normalizeBottleState: (state, weight) => state || (weight ? 'PARTIAL' : 'UNOPENED'),
     normalizeWeightG: value => Number(value) > 0 ? Number(value) : null,
     uuidv4: () => `ce-${++sequence}`,
