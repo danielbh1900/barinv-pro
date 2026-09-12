@@ -940,6 +940,10 @@
             <button type="button" id="phase1-voice-item-toggle" aria-pressed="false">OFF</button>
           </div>
           <span id="phase1-voice-status" class="phase1-voice-status">Voice Guide: Off</span>
+          <div id="phase1-voice-diagnostics" class="phase1-voice-status" aria-live="polite">
+            Speech API: <span id="phase1-voice-speech-api">—</span> · Utterance API: <span id="phase1-voice-utterance-api">—</span><br>
+            Voices loaded: <span id="phase1-voice-voices">—</span> · Last voice test: <span id="phase1-voice-last-test">not tested</span>
+          </div>
         </div>
         <!-- Manual Scale MVP — optional weight + bottle state. Stored as the
              existing helper fields; hidden until PARTIAL/profile work needs it. -->
@@ -1590,13 +1594,30 @@ const VoiceGuide = {
   supported: false,
   lastMessage: '',
   lastSpokenAt: 0,
+  lastVoiceTest: 'not tested',
+  voices: [],
+  voicesListenerBound: false,
   init() {
-    this.supported = !!(window && window.speechSynthesis && window.SpeechSynthesisUtterance);
+    const synth = typeof window !== 'undefined' && window.speechSynthesis;
+    this.supported = !!(synth && typeof synth.speak === 'function' && typeof window.SpeechSynthesisUtterance === 'function');
     try {
       this.enabled = this.supported && localStorage.getItem(BARBACK_VOICE_GUIDE_KEY) === '1';
       this.speakItemNames = localStorage.getItem(BARBACK_VOICE_ITEM_NAMES_KEY) === '1';
     } catch (_) { this.enabled = false; this.speakItemNames = false; }
+    this.refreshVoices();
     this.updateUI();
+  },
+  refreshVoices() {
+    if (!this.supported) return [];
+    try {
+      const synth = window.speechSynthesis;
+      this.voices = typeof synth.getVoices === 'function' ? synth.getVoices() : [];
+      if (!this.voicesListenerBound && typeof synth.addEventListener === 'function') {
+        this.voicesListenerBound = true;
+        synth.addEventListener('voiceschanged', () => { this.refreshVoices(); this.updateUI(); }, { once: false });
+      }
+    } catch (_) { this.voices = []; }
+    return this.voices;
   },
   updateUI(message) {
     const summary = $('phase1-voice-summary');
@@ -1604,6 +1625,10 @@ const VoiceGuide = {
     const toggle = $('phase1-voice-toggle');
     const itemToggle = $('phase1-voice-item-toggle');
     const test = $('phase1-voice-test');
+    const speechApi = $('phase1-voice-speech-api');
+    const utteranceApi = $('phase1-voice-utterance-api');
+    const voices = $('phase1-voice-voices');
+    const lastTest = $('phase1-voice-last-test');
     const text = message || (this.supported ? (this.enabled ? 'Voice Guide: On' : 'Voice Guide: Off') : 'Voice unavailable on this browser');
     if (summary) {
       summary.textContent = this.supported
@@ -1612,6 +1637,10 @@ const VoiceGuide = {
       summary.classList.toggle('voice-on', this.enabled && this.supported);
     }
     if (status) status.textContent = text;
+    if (speechApi) speechApi.textContent = this.supported ? 'available' : 'unavailable';
+    if (utteranceApi) utteranceApi.textContent = typeof window !== 'undefined' && typeof window.SpeechSynthesisUtterance === 'function' ? 'available' : 'unavailable';
+    if (voices) voices.textContent = this.supported ? (this.voices.length ? String(this.voices.length) : 'loading') : 'unavailable';
+    if (lastTest) lastTest.textContent = this.lastVoiceTest;
     if (toggle) {
       toggle.disabled = !this.supported;
       toggle.textContent = this.enabled ? 'TURN OFF' : 'TURN ON';
@@ -1630,6 +1659,32 @@ const VoiceGuide = {
     this.updateUI(this.enabled ? 'Voice Guide: On' : 'Voice Guide: Off');
     if (!this.enabled) { try { window.speechSynthesis.cancel(); } catch (_) {} }
     return this.enabled;
+  },
+  testVoice() {
+    if (!this.supported) {
+      this.lastVoiceTest = 'unavailable';
+      this.updateUI('Voice unavailable in this browser.');
+      return false;
+    }
+    try {
+      const synth = window.speechSynthesis;
+      this.refreshVoices();
+      synth.cancel();
+      const utterance = new window.SpeechSynthesisUtterance('Voice Guide is on.');
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      utterance.onstart = () => { this.lastVoiceTest = 'success'; this.updateUI('Voice Guide is on.'); };
+      utterance.onerror = () => { this.lastVoiceTest = 'blocked'; this.updateUI('Voice blocked by this browser. Try Test Voice again or use Safari for voice.'); };
+      this.lastVoiceTest = 'sent';
+      this.updateUI('Voice test sent. If you heard nothing, this browser may block speech.');
+      synth.speak(utterance);
+      return true;
+    } catch (_) {
+      this.lastVoiceTest = 'error';
+      this.updateUI('Voice blocked by this browser. Try Test Voice again or use Safari for voice.');
+      return false;
+    }
   },
   setSpeakItemNames(value) {
     this.speakItemNames = !!value;
@@ -1675,11 +1730,11 @@ function initPhase1VoiceControl() {
   VoiceGuide.init();
   $('phase1-voice-toggle')?.addEventListener('click', () => {
     const on = VoiceGuide.setEnabled(!VoiceGuide.enabled);
-    if (on) VoiceGuide.speak('Voice Guide is on.', { urgent: true });
+    if (on) VoiceGuide.testVoice();
   });
   $('phase1-voice-test')?.addEventListener('click', () => {
     if (!VoiceGuide.enabled) VoiceGuide.setEnabled(true);
-    VoiceGuide.speak('Voice Guide is on.', { urgent: true });
+    VoiceGuide.testVoice();
   });
   $('phase1-voice-item-toggle')?.addEventListener('click', () => {
     VoiceGuide.setSpeakItemNames(!VoiceGuide.speakItemNames);

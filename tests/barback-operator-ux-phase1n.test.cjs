@@ -17,7 +17,7 @@ test('Phase 1N adds an opt-in Speak Item Names control and local preference', ()
 test('Phase 1N keeps item names off by default and preserves generic phrases', () => {
   assert.match(html, /speakItemNames: false/);
   assert.match(html, /if \(!this\.speakItemNames\) return this\.speak\(generic, options\)/);
-  assert.match(html, /VoiceGuide\.speak\('Voice Guide is on\.'/);
+  assert.match(html, /VoiceGuide\.testVoice\(\)/);
   assert.match(html, /VoiceGuide\.speakState\('Scanned, not added\.'/);
   assert.match(html, /VoiceGuide\.speakState\('Added to draft\.'/);
   assert.match(html, /VoiceGuide\.speakState\('Not added\.'/);
