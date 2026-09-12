@@ -830,6 +830,11 @@ window.__BB_VENDOR_READY.then(() => {
 // Independent Manager rollout kill switch. This gates both visibility and
 // request construction; keep OFF until a separately authorised rollout.
 const OPENING_PAR_MANAGER_V1_ENABLED = true;
+// Phase 5 telemetry views are not installed in production yet. Keep the
+// Diagnostics surface reversible without touching session-management paths.
+const BARBACK_DIAGNOSTICS_ENABLED = false;
+const BARBACK_DIAGNOSTICS_DISABLED_MESSAGE =
+  'Diagnostics temporarily disabled — telemetry migration not installed.';
 
 const CFG_KEYS = ['barinv_supabase_config', 'barinv_cfg', 'cfg', 'supabase_config'];
 function loadCfg() {
@@ -1002,13 +1007,24 @@ function showTab(name) {
   if (name === 'sessions') { renderSessions(); startSessionsAutoRefresh(); populateDangerZoneNights(); }
   else { stopSessionsAutoRefresh(); }
   if (name === 'audit')    renderAudit();
-  if (name === 'diag')     { renderDiagnostics(); renderAnalyticsSummary(); startDiagAutoRefresh(); }
+  if (name === 'diag') {
+    if (BARBACK_DIAGNOSTICS_ENABLED) {
+      renderDiagnostics(); renderAnalyticsSummary(); startDiagAutoRefresh();
+    } else {
+      renderDiagnosticsDisabled();
+    }
+  }
   else                     { stopDiagAutoRefresh(); }
   if (name === 'pilot')    { Pilot.onShow(); }
   else                     { Pilot.onHide(); }
 }
 function statusOn(id, msg, level) {
   $(id).innerHTML = '<div class="status ' + (level || 'warn') + '">' + esc(msg) + '</div>';
+}
+function renderDiagnosticsDisabled() {
+  stopDiagAutoRefresh();
+  if ($('diag-list')) $('diag-list').innerHTML = '<div class="muted small">' + esc(BARBACK_DIAGNOSTICS_DISABLED_MESSAGE) + '</div>';
+  if ($('diag-analytics')) $('diag-analytics').innerHTML = '<div class="muted small">' + esc(BARBACK_DIAGNOSTICS_DISABLED_MESSAGE) + '</div>';
 }
 
 function clearManagerVenueScopedState() {
@@ -2054,6 +2070,13 @@ function renderDestinationCustomizationState() {
 $$('button[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => showTab(btn.dataset.tab));
 });
+if (!BARBACK_DIAGNOSTICS_ENABLED) {
+  const diagnosticsTabButton = document.querySelector('button[data-tab="diag"]');
+  if (diagnosticsTabButton) {
+    diagnosticsTabButton.hidden = true;
+    diagnosticsTabButton.setAttribute('aria-hidden', 'true');
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════
 //  Expires quick-set
@@ -2683,6 +2706,7 @@ $('dz-export-csv')?.addEventListener('click', async () => {
 let _diagAutoTimer = null;
 function startDiagAutoRefresh() {
   stopDiagAutoRefresh();
+  if (!BARBACK_DIAGNOSTICS_ENABLED) return;
   if (!$('diag-auto')?.checked) return;
   _diagAutoTimer = setInterval(() => {
     const active = document.querySelector('.tab[data-tab="diag"]');
@@ -2702,6 +2726,10 @@ $('diag-active-only')?.addEventListener('change', () => renderDiagnostics(false)
 $('diag-analytics-refresh')?.addEventListener('click', renderAnalyticsSummary);
 
 async function renderDiagnostics(silent) {
+  if (!BARBACK_DIAGNOSTICS_ENABLED) {
+    renderDiagnosticsDisabled();
+    return;
+  }
   if (!silent) $('diag-list').innerHTML = '<div class="muted small">loading…</div>';
   const nightIds = state.nights.map(n => n.id);
   if (!nightIds.length) {
@@ -2750,6 +2778,10 @@ async function renderDiagnostics(silent) {
 }
 
 async function renderAnalyticsSummary() {
+  if (!BARBACK_DIAGNOSTICS_ENABLED) {
+    renderDiagnosticsDisabled();
+    return;
+  }
   $('diag-analytics').innerHTML = '<div class="muted small">loading…</div>';
   const venueId = state.venueId;
   // Run all four lookups in parallel
@@ -2913,10 +2945,16 @@ const Pilot = {
     const nightId = this.selectedNightId();
     if (!nightId) return;
     // Active barbacks + queue total + alerts come from the alerts view.
-    const { data: alerts } = await SB
-      .from('v_barback_pilot_alerts')
-      .select('*')
-      .eq('night_id', nightId);
+    let alerts = [];
+    if (BARBACK_DIAGNOSTICS_ENABLED) {
+      const { data } = await SB
+        .from('v_barback_pilot_alerts')
+        .select('*')
+        .eq('night_id', nightId);
+      alerts = data || [];
+    } else if ($('pilot-alerts-list')) {
+      $('pilot-alerts-list').innerHTML = '<div class="muted small">' + esc(BARBACK_DIAGNOSTICS_DISABLED_MESSAGE) + '</div>';
+    }
     const live = (alerts || []).filter(a => a.status === 'active');
     const queueTotal = live.reduce((s, a) => s + (a.queue_count || 0), 0);
     const alertCount = (alerts || []).filter(a =>
@@ -2964,6 +3002,10 @@ const Pilot = {
 
   // ── Pre-event readiness checks ─────────────────────────────────
   async runChecks() {
+    if (!BARBACK_DIAGNOSTICS_ENABLED) {
+      statusOn('pilot-readiness-status', BARBACK_DIAGNOSTICS_DISABLED_MESSAGE, 'warn');
+      return;
+    }
     const nightId = this.selectedNightId();
     if (!nightId) { statusOn('pilot-readiness-status', 'Pick a night first', 'err'); return; }
 
@@ -3097,6 +3139,10 @@ const Pilot = {
   },
 
   async markReady() {
+    if (!BARBACK_DIAGNOSTICS_ENABLED) {
+      statusOn('pilot-readiness-status', BARBACK_DIAGNOSTICS_DISABLED_MESSAGE, 'warn');
+      return;
+    }
     const nightId = this.selectedNightId();
     if (!nightId) return;
     if (!confirm('MARK EVENT READY — record this as the GO decision for the night?')) return;
@@ -3119,6 +3165,10 @@ const Pilot = {
 
   // ── Health monitor — alerts list ───────────────────────────────
   async renderAlerts() {
+    if (!BARBACK_DIAGNOSTICS_ENABLED) {
+      if ($('pilot-alerts-list')) $('pilot-alerts-list').innerHTML = '<div class="muted small">' + esc(BARBACK_DIAGNOSTICS_DISABLED_MESSAGE) + '</div>';
+      return;
+    }
     const nightId = this.selectedNightId();
     if (!nightId) return;
     const { data, error } = await SB
@@ -3355,6 +3405,10 @@ const Pilot = {
 
   // ── Operational export bundle ──────────────────────────────────
   async exportBundle() {
+    if (!BARBACK_DIAGNOSTICS_ENABLED) {
+      statusOn('pilot-export-status', BARBACK_DIAGNOSTICS_DISABLED_MESSAGE, 'warn');
+      return;
+    }
     const nightId = this.selectedNightId();
     if (!nightId) { statusOn('pilot-export-status', 'Pick a night', 'err'); return; }
     statusOn('pilot-export-status', 'Building bundle…', 'info');
