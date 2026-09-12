@@ -79,6 +79,64 @@
 
     /* ── Page wrapper ─────────────────────────────────────────────── */
     .wrap { padding:12px; max-width:600px; margin:0 auto; padding-bottom:120px; }
+    .phase1-block { margin:12px 0; padding:12px; border:1px solid #222; border-radius:10px; background:#0f0f0f; }
+    .phase1-sticky-summary { position:sticky; bottom:calc(62px + env(safe-area-inset-bottom, 8px)); z-index:80;
+      display:flex; gap:8px; align-items:center; margin:10px 0; padding:8px 10px;
+      border:1px solid #374151; border-radius:9px; background:rgba(17,24,39,.96); box-shadow:0 4px 18px rgba(0,0,0,.45); }
+    .phase1-sticky-summary .phase1-current-action { flex:1; min-width:0; color:#e5e7eb; font-size:12px; line-height:1.3; }
+    .phase1-sticky-summary .phase1-current-action b { color:#fb923c; }
+    .phase1-sticky-summary button { flex:1 1 0; min-height:52px; padding:10px 12px; border:1px solid #4b5563; border-radius:7px;
+      background:#1f2937; color:#fff; font-size:14px; font-weight:900; cursor:pointer; }
+    .phase1-sticky-summary button:disabled { opacity:.45; cursor:not-allowed; }
+    .phase1-sticky-add-slot { flex:1 1 0; min-width:0; }
+    .phase1-sticky-add-slot #save-btn { width:100%; min-height:52px; margin:0; padding:10px 12px; font-size:14px; }
+    .phase1-sticky-summary .phase1-sticky-actions { display:flex; flex:1 1 auto; min-width:0; gap:8px; }
+    .phase1-back-btn { min-height:52px; padding:14px 16px !important; font-size:15px !important; font-weight:900 !important; }
+    .phase1-scale-toggle { width:100%; display:flex; justify-content:space-between; align-items:center; gap:8px;
+      padding:8px 10px; margin:0 0 8px; border:1px solid #374151; border-radius:7px; background:#111827;
+      color:#cbd5e1; font-size:12px; font-weight:800; cursor:pointer; text-align:left; }
+    .phase1-scale-toggle .phase1-scale-state { color:#7dd3fc; font-weight:600; }
+    #main-scale-row.phase1-scale-collapsed #main-ble,
+    #main-scale-row.phase1-scale-collapsed #main-ble-hint,
+    #main-scale-row.phase1-scale-collapsed #main-bridge { display:none !important; }
+    .phase1-last-added { display:none; margin:10px 0; padding:14px; border:2px solid #22c55e; border-radius:10px;
+      background:linear-gradient(135deg,rgba(6,78,59,.95),rgba(15,23,42,.96)); color:#fff; }
+    .phase1-last-added.active { display:block; }
+    .phase1-last-added .phase1-last-added-label { color:#a7f3d0; font-size:11px; font-weight:900; letter-spacing:.12em; }
+    .phase1-last-added .phase1-last-added-main { margin-top:5px; font-size:20px; font-weight:900; line-height:1.2; }
+    .phase1-last-added .phase1-last-added-meta { margin-top:5px; color:#d1fae5; font-size:12px; line-height:1.4; }
+    .phase1-last-added .phase1-last-added-view { margin-top:10px; color:#bbf7d0; font-size:13px; font-weight:900; letter-spacing:.04em; }
+    .phase1-measure-input-line { display:flex; align-items:stretch; gap:6px; }
+    .phase1-measure-input-line input { min-width:0; flex:1 1 auto; text-align:center; font-size:26px !important; font-weight:900; }
+    .phase1-measure-unit-row { display:flex; gap:6px; margin-bottom:8px; }
+    .phase1-measure-unit-row button { flex:1 1 0; min-height:44px; border:1px solid #374151; border-radius:7px; background:#111827; color:#cbd5e1; font-size:13px; font-weight:900; cursor:pointer; }
+    .phase1-measure-unit-row button.selected { background:#7c2d12; border-color:#fb923c; color:#fff; }
+    .phase1-stepper-btn { flex:0 0 54px; border:1px solid #4b5563; border-radius:8px; background:#1f2937; color:#fff; font-size:28px; font-weight:900; cursor:pointer; }
+    .phase1-gram-controls { display:flex; gap:6px; margin-top:7px; }
+    .phase1-gram-controls button { flex:1 1 0; min-height:42px; border:1px solid #374151; border-radius:7px; background:#111827; color:#d1fae5; font-size:12px; font-weight:900; cursor:pointer; }
+    .phase1-more-options { padding:0; overflow:hidden; }
+    .phase1-more-options > summary { padding:12px; color:#cbd5e1; font-size:12px; font-weight:900; letter-spacing:.08em; cursor:pointer; list-style:none; }
+    .phase1-more-options > summary::-webkit-details-marker { display:none; }
+    .phase1-more-options > summary::before { content:'＋ '; color:#7dd3fc; }
+    .phase1-more-options[open] > summary::before { content:'− '; }
+    .phase1-more-options-inner { padding:0 12px 12px; }
+    .phase1-more-options .phase1-back-btn { width:100%; margin:0 0 8px; }
+    #main-scale-row { display:none; }
+    #phase1-more-options[open] #main-scale-row { display:block; }
+    #phase1-scale-details .wrap { padding-bottom:40px; }
+    #phase1-scale-details-host > * { margin:10px 0; }
+    @media (max-width:600px) {
+      #screen-main .phase1-block { margin:6px 0; padding:8px; }
+      #screen-main .action { padding:24px 6px; font-size:19px; }
+      #screen-main .scan-cta { padding:16px 10px; margin:5px 0; }
+      #screen-main input, #screen-main select { padding:10px; }
+      #screen-main .phase1-stepper-btn { flex-basis:52px; }
+      #screen-main .phase1-sticky-summary { display:block; padding:8px; }
+      #screen-main .phase1-sticky-summary .phase1-current-action { margin-bottom:7px; }
+      #screen-main .phase1-sticky-summary .phase1-sticky-actions { display:flex; }
+      #screen-main .phase1-last-added { padding:16px; }
+      #screen-main .phase1-last-added .phase1-last-added-main { font-size:26px; }
+    }
     h1 { font-size:18px; margin:0 0 4px; letter-spacing:0.04em; }
     h2 { font-size:13px; margin:0 0 12px; color:#888; font-weight:500; letter-spacing:0.06em; }
     .row { margin:10px 0; }
@@ -644,8 +702,12 @@
          navigator.bluetooth exists (NOT gated on getAvailability). iPhone/iOS shows
          the manual note. "Use latest stable weight" fills the context-appropriate
          field (RETURN → QTY grams; otherwise Weight (g)); never submits. -->
-    <div class="row" id="main-scale-row">
+    <div class="row phase1-block" id="main-scale-row">
       <label>SCALE</label>
+      <button type="button" id="main-scale-toggle" class="phase1-scale-toggle" aria-expanded="true">
+        <span>OPEN SCALE DETAILS</span><span class="phase1-scale-state">manual grams available</span>
+      </button>
+      <div id="phase1-scale-summary" class="small muted">Manual grams available · Scale details</div>
       <div id="main-ble" style="display:none;padding:10px;border:1px solid #374151;border-radius:8px;background:#0f1620;">
         <div id="scale-certification-gate" role="alert" style="margin-bottom:10px;padding:9px;border:1px solid #f59e0b;border-radius:6px;background:#2b1f0b;color:#fcd34d;font-size:12px;line-height:1.45;">
           <div style="font-weight:800;">Beta scale estimate — operator verification required</div>
@@ -717,7 +779,7 @@
       </div>
     </div>
 
-    <div class="row">
+    <div class="row phase1-block">
       <label>ACTION</label>
       <div class="action-row">
         <button type="button" class="action" data-action="TAKEN">TAKEN</button>
@@ -750,7 +812,7 @@
       </div>
     </div>
 
-    <div class="row">
+    <div class="row phase1-block">
       <label>SCAN OR SEARCH ITEM</label>
       <div class="recent-chips" id="recent-items-chips" style="display:none;"></div>
       <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
@@ -764,9 +826,25 @@
       <div id="picked-item" class="selected-item" style="display:none;"></div>
     </div>
 
-    <div class="row">
-      <label>QTY (TAKEN: bottles · RETURN: grams)</label>
-      <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
+    <div class="row phase1-block" id="phase1-measure-block">
+      <label>MEASURE UNIT</label>
+      <div class="phase1-measure-unit-row" role="group" aria-label="Measure unit">
+        <button type="button" id="phase1-measure-units" aria-pressed="true">UNITS</button>
+        <button type="button" id="phase1-measure-weight" aria-pressed="false">WEIGHT / GRAMS</button>
+      </div>
+      <label id="phase1-qty-label">UNITS (choose TAKE or RETURN)</label>
+      <div class="phase1-measure-input-line">
+        <button type="button" class="phase1-stepper-btn phase1-units-only" id="phase1-taken-minus" aria-label="Decrease unit quantity">−</button>
+        <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
+        <button type="button" class="phase1-stepper-btn phase1-units-only" id="phase1-taken-plus" aria-label="Increase unit quantity">＋</button>
+      </div>
+      <div id="phase1-qty-help" class="muted small" style="margin-top:5px;">Default: 1 unit</div>
+      <div id="phase1-return-gram-controls" class="phase1-gram-controls" style="display:none;" aria-label="Adjust return grams">
+        <button type="button" data-phase1-gram-step="-50">−50g</button>
+        <button type="button" data-phase1-gram-step="-10">−10g</button>
+        <button type="button" data-phase1-gram-step="10">＋10g</button>
+        <button type="button" data-phase1-gram-step="50">＋50g</button>
+      </div>
       <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support (hidden on iPhone). Fills QTY (grams); never submits. -->
       <div id="rf-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
         <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling RETURN grams.</div>
@@ -783,27 +861,28 @@
       <div id="rf-ble-hint" style="display:none;margin-top:8px;font-size:11px;color:#9ca3af;line-height:1.4;">📱 Scale connection is available on Android Chrome. On iPhone, enter return grams in QTY manually.</div>
     </div>
 
-    <!-- Manual Scale MVP — optional weight + bottle state. Stored in the
-         draft as helper fields and flattened into NOTES at submit time;
-         no new DB columns are sent. Leave blank / NOT WEIGHED for the
-         normal count-only workflow. -->
-    <div class="row">
-      <label>⚖️ WEIGHT (grams · optional · manual scale)</label>
-      <input id="weight-g-input" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 642" autocomplete="off">
-      <!-- PARTIAL UX — fill WEIGHT from the connected scale without scrolling back to the scale panel. Corrected grams; enabled only when stable. -->
-      <button type="button" id="weight-use-scale" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">⚖️ Use current scale weight</button>
-      <div id="remaining-display" class="small" style="margin-top:4px;min-height:14px;color:#7dd3fc;"></div>
-    </div>
-
-    <div class="row">
-      <label>BOTTLE STATE (optional)</label>
-      <select id="bottle-state-select" style="width:100%;padding:12px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
-        <option value="UNOPENED" selected>UNOPENED</option>
-        <option value="NOT_WEIGHED">NOT WEIGHED</option>
-        <option value="PARTIAL">PARTIAL</option>
-      </select>
-      <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
-    </div>
+    <details class="phase1-block phase1-more-options" id="phase1-more-options">
+      <summary>MORE OPTIONS</summary>
+      <div class="phase1-more-options-inner">
+        <button type="button" class="btn btn-secondary phase1-back-btn" id="phase1-more-options-back">← BACK / COLLAPSE</button>
+        <!-- Manual Scale MVP — optional weight + bottle state. Stored as the
+             existing helper fields; hidden until PARTIAL/profile work needs it. -->
+        <div class="row phase1-block" id="phase1-weight-options" style="display:none;">
+          <label>⚖️ BOTTLE WEIGHT (GRAMS · OPTIONAL)</label>
+          <input id="weight-g-input" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 642" autocomplete="off">
+          <!-- PARTIAL UX — fill WEIGHT from the connected scale without scrolling back to the scale panel. Corrected grams; enabled only when stable. -->
+          <button type="button" id="weight-use-scale" style="display:none;margin-top:6px;width:100%;padding:9px;font-size:13px;font-weight:600;background:#064e3b;color:#a7f3d0;border:1px solid #10b981;border-radius:6px;cursor:pointer;">⚖️ Use current scale weight</button>
+          <div id="remaining-display" class="small" style="margin-top:4px;min-height:14px;color:#7dd3fc;"></div>
+        </div>
+        <div class="row phase1-block">
+          <label>BOTTLE STATE (optional)</label>
+          <select id="bottle-state-select" style="width:100%;padding:12px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:6px;">
+            <option value="UNOPENED" selected>UNOPENED</option>
+            <option value="NOT_WEIGHED">NOT WEIGHED</option>
+            <option value="PARTIAL">PARTIAL</option>
+          </select>
+          <div class="muted small" style="margin-top:4px;">⚖️ PARTIAL requires weight.</div>
+        </div>
 
     <!-- Scale V2 — local per-item weight profile (localStorage only, no DB).
          Visible only when an item is selected; drives Estimated Remaining %. -->
@@ -823,16 +902,28 @@
       </details>
     </div>
 
-    <div class="row">
-      <label>NOTES (optional)</label>
-      <input id="notes-input" type="text" autocomplete="off">
-    </div>
+        <div class="row phase1-block">
+          <label>NOTES (optional)</label>
+          <input id="notes-input" type="text" autocomplete="off">
+        </div>
+      </div>
+    </details>
 
     <button class="btn btn-success" id="save-btn">➕ ADD TO REVIEW</button>
     <div class="muted small" style="margin:-4px 0 6px 0;">
       Items pile up in the Review list. Tap <b>VIEW ALL</b> to inspect, edit, and finally <b>SUBMIT ALL TO BARINV</b>.
     </div>
     <div id="save-status"></div>
+
+    <div id="phase1-sticky-summary" class="phase1-sticky-summary" role="status" aria-live="polite">
+      <div id="phase1-current-action" class="phase1-current-action">Choose TAKE or RETURN · Review: 0 drafts</div>
+      <div class="phase1-sticky-actions">
+        <div id="phase1-sticky-add-slot" class="phase1-sticky-add-slot"></div>
+        <button type="button" id="phase1-review-btn">VIEW REVIEW</button>
+      </div>
+    </div>
+
+    <div id="phase1-last-added-card" class="phase1-last-added" role="status" aria-live="polite" tabindex="0"></div>
 
     <!-- BLE attach (Capacitor-only; hidden in plain Safari) -->
     <div class="ble-card" id="ble-card" style="display:none;">
@@ -869,11 +960,24 @@
   </div>
 </div>
 
+<!-- ============================ SCREEN 4B: SCALE DETAILS ============================ -->
+<div class="screen" id="phase1-scale-details">
+  <div class="wrap">
+    <h1>Scale Details</h1>
+    <h2>Optional tools — manual grams remains available on the work screen.</h2>
+    <button type="button" class="btn btn-secondary phase1-back-btn" id="phase1-scale-back">← BACK TO WORK</button>
+    <div id="phase1-scale-details-host" class="phase1-block"></div>
+    <button type="button" class="btn btn-secondary phase1-back-btn" id="phase1-scale-back-bottom">← BACK TO WORK</button>
+  </div>
+</div>
+
 <!-- ============================ SCREEN 4: REVIEW (last 20 + queue) ============================ -->
 <div class="screen" id="screen-review">
   <div class="wrap">
     <h1>Transaction review</h1>
     <h2 id="review-meta">drafts · queued · synced</h2>
+
+    <button class="btn btn-secondary phase1-back-btn" id="review-back-top">← RETURN TO WORK</button>
 
     <div class="row">
       <label>📝 REVIEW · NOT SUBMITTED YET</label>
@@ -892,7 +996,7 @@
       <div id="review-synced" class="recent">—</div>
     </div>
 
-    <button class="btn btn-secondary" id="review-back">← Back</button>
+    <button class="btn btn-secondary phase1-back-btn" id="review-back">← RETURN TO WORK</button>
     <button class="btn" id="review-sync">↑ SYNC QUEUE</button>
     <button class="btn btn-secondary" id="review-export">⬇ DOWNLOAD QUEUE BACKUP (.json)</button>
     <button class="btn btn-danger" id="review-clear">⚠ CLEAR SYNCED HISTORY (test mode)</button>
@@ -1095,7 +1199,7 @@
   <div class="bm-head">
     <div class="bm-head-top">
       <span class="bm-title">📋 BROWSE ITEMS</span>
-      <button type="button" class="bm-close" id="bm-close">✕ CLOSE</button>
+    <button type="button" class="bm-close phase1-back-btn" id="bm-close">← BACK TO WORK</button>
     </div>
     <input id="bm-search" class="bm-search" type="text" inputmode="search"
            placeholder="Filter items…" autocomplete="off" autocapitalize="off"
@@ -1354,11 +1458,129 @@ function renderBarbackScopeBanner() {
     : (queued ? 'Tap SYNC to retry queued work' : (drafts ? 'Review saved drafts before submitting' : 'Ready for new work'));
   queueState.innerHTML = '<strong>' + network + '</strong> · Drafts: ' + drafts + ' · Pending sync: ' + queued + ' · ' + esc(action);
 }
+function renderPhase1LastAdded() {
+  const card = $('phase1-last-added-card');
+  if (!card) return;
+  let draft = null, recent = null;
+  try { draft = (Drafts.load() || [])[0] || null; } catch (_) {}
+  try { recent = (Recent.load() || [])[0] || null; } catch (_) {}
+  const dAt = draft ? Number(draft.drafted_at || 0) : 0;
+  const rAt = recent ? Number(recent.at || 0) : 0;
+  const row = dAt >= rAt ? draft : recent;
+  if (!row) { card.classList.remove('active'); card.innerHTML = ''; return; }
+  const stateLabel = draft && row === draft ? 'DRAFT · local Review' : (row.status || 'RECENT');
+  const action = row.action === 'TAKEN' ? 'TAKEN' : 'RETURN';
+  const item = row.item_name || row.item_id || 'Item';
+  const bar = row.bar_id ? reviewBarLabel(row.bar_id) : 'Any bar';
+  const staff = row.staff_name || state.staffName || 'Current operator';
+  const when = row.drafted_at || row.at || Date.now();
+  card.innerHTML = '<div class="phase1-last-added-label">LAST ADDED</div>' +
+    '<div class="phase1-last-added-main">' + esc(action) + ' · ' + esc(item) + '</div>' +
+    '<div class="phase1-last-added-meta">Qty/grams ' + esc(String(row.qty)) + ' · ' + esc(bar) + ' · ' + esc(staff) +
+    ' · ' + esc(stateLabel) + ' · ' + esc(fmtTime(when)) + '</div>' +
+    '<div class="phase1-last-added-view">VIEW REVIEW →</div>';
+  card.classList.add('active');
+}
+function renderPhase1StickySummary() {
+  const el = $('phase1-current-action');
+  if (!el) return;
+  let drafts = 0, queued = 0;
+  try { drafts = Drafts.count(); } catch (_) {}
+  try { queued = Outbox.count(); } catch (_) {}
+  const action = state.selectedAction === 'TAKEN' ? 'TAKEN' : state.selectedAction === 'RETURNED' ? 'RETURN' : 'Choose TAKE or RETURN';
+  el.innerHTML = '<b>' + esc(action) + '</b> · Review: ' + drafts + ' draft' + (drafts === 1 ? '' : 's') +
+    (queued ? ' · ' + queued + ' queued' : '');
+  const btn = $('phase1-review-btn');
+  if (btn) { btn.textContent = drafts ? 'VIEW REVIEW (' + drafts + ')' : 'VIEW REVIEW'; btn.disabled = !drafts && !queued; }
+}
 function fmtTime(d) {
   d = d ? new Date(d) : new Date();
   const h = String(d.getHours()).padStart(2,'0');
   const m = String(d.getMinutes()).padStart(2,'0');
   return h + ':' + m;
+}
+
+// Phase 1E keeps ACTION and MEASURE as separate axes. Future TRANSFER can use
+// the same action axis without adding a transfer path in this patch.
+let phase1MeasureUnit = 'UNITS';
+function phase1AdjustMeasure(delta, minimum) {
+  const input = $('qty-input');
+  if (!input) return;
+  const current = Number(input.value);
+  const base = Number.isFinite(current) ? current : minimum;
+  input.value = String(Math.max(minimum, base + delta));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function renderPhase1MeasureControls() {
+  const action = state.selectedAction;
+  const taken = action === 'TAKEN';
+  const returned = action === 'RETURNED';
+  const weight = phase1MeasureUnit === 'WEIGHT';
+  const measureBlock = $('phase1-measure-block');
+  const label = $('phase1-qty-label');
+  const gramControls = $('phase1-return-gram-controls');
+  const unitsBtn = $('phase1-measure-units');
+  const weightBtn = $('phase1-measure-weight');
+  const help = $('phase1-qty-help');
+  const actionLabel = taken ? 'TAKEN' : returned ? 'RETURNED' : '';
+  if (measureBlock) {
+    measureBlock.dataset.action = action || '';
+    measureBlock.dataset.measure = phase1MeasureUnit;
+    measureBlock.classList.toggle('phase1-action-taken', taken);
+    measureBlock.classList.toggle('phase1-action-returned', returned);
+  }
+  if (label) label.textContent = weight
+    ? (actionLabel ? actionLabel + ' WEIGHT (GRAMS)' : 'WEIGHT / GRAMS')
+    : (taken ? 'BOTTLE / ITEM QUANTITY' : returned ? 'RETURNED UNITS' : 'UNITS (choose TAKE or RETURN)');
+  if (unitsBtn) { unitsBtn.classList.toggle('selected', !weight); unitsBtn.setAttribute('aria-pressed', String(!weight)); }
+  if (weightBtn) { weightBtn.classList.toggle('selected', weight); weightBtn.setAttribute('aria-pressed', String(weight)); }
+  if (help) help.textContent = weight ? 'Enter grams in this value field' : 'Default: 1 unit · whole units for unit mode';
+  $$('.phase1-units-only').forEach(btn => { btn.style.display = !weight && (taken || returned) ? '' : 'none'; });
+  if (gramControls) gramControls.style.display = weight && (taken || returned) ? 'flex' : 'none';
+  syncPhase1WeightVisibility();
+}
+function syncPhase1WeightVisibility() {
+  const options = $('phase1-weight-options');
+  if (!options) return;
+  const bottleState = $('bottle-state-select')?.value;
+  const profile = $('weight-profile-section');
+  const profileVisible = !!(profile && profile.style.display !== 'none');
+  const weightValue = !!(($('weight-g-input')?.value || '').trim());
+  const scaleAction = $('weight-use-scale')?.style.display !== 'none';
+  const moreOpen = !!$('phase1-more-options')?.open;
+  options.style.display = bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen ? '' : 'none';
+}
+function initPhase1MeasureControls() {
+  $('phase1-measure-units')?.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
+  $('phase1-measure-weight')?.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; applyActionTint(); });
+  $('phase1-taken-minus')?.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
+  $('phase1-taken-plus')?.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
+  $$('[data-phase1-gram-step]').forEach(btn => {
+    btn.addEventListener('click', () => phase1AdjustMeasure(Number(btn.dataset.phase1GramStep), 0));
+  });
+  $('bottle-state-select')?.addEventListener('change', () => {
+    const more = $('phase1-more-options');
+    if ($('bottle-state-select').value === 'PARTIAL' && more) more.open = true;
+    syncPhase1WeightVisibility();
+  });
+  renderPhase1MeasureControls();
+}
+function initPhase1BlockPresentation() {
+  const addSlot = $('phase1-sticky-add-slot');
+  const addButton = $('save-btn');
+  if (addSlot && addButton) addSlot.appendChild(addButton);
+  const more = $('phase1-more-options');
+  $('phase1-more-options-back')?.addEventListener('click', () => { if (more) more.open = false; });
+  more?.addEventListener('toggle', syncPhase1WeightVisibility);
+  const lastAdded = $('phase1-last-added-card');
+  const scaleRow = $('main-scale-row');
+  const moreInner = $('phase1-more-options-inner');
+  if (more && lastAdded) lastAdded.insertAdjacentElement('afterend', more);
+  if (scaleRow && moreInner) moreInner.appendChild(scaleRow);
+  const openReview = () => { if (lastAdded && lastAdded.classList.contains('active')) showReview(); };
+  lastAdded?.addEventListener('click', openReview);
+  lastAdded?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReview(); } });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2485,14 +2707,48 @@ function applyActionTint() {
   $$('.action').forEach(b => {
     b.classList.toggle('selected', b.dataset.action === state.selectedAction);
   });
+  renderPhase1MeasureControls();
   // SCALE_BLE — RETURN-form scale row: capability-gated, RETURN only. Hidden on
   // iPhone (no Web Bluetooth) and for TAKEN. typeof guard: bleScale may not be
   // assigned yet on the very first init call (var-hoisted as undefined).
   var _rfRet = (state.selectedAction === 'RETURNED');
+  var _rfWeight = (typeof phase1MeasureUnit !== 'undefined' && phase1MeasureUnit === 'WEIGHT');
   var _rfSup = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode));
-  var _rfBle = $('rf-ble'); if (_rfBle) _rfBle.style.display = (_rfRet && _rfSup) ? '' : 'none';                // connect widget (Android/desktop Chrome)
-  var _rfHint = $('rf-ble-hint'); if (_rfHint) _rfHint.style.display = (_rfRet && !_rfSup) ? '' : 'none';       // manual hint (iPhone)
+  var _rfBle = $('rf-ble'); if (_rfBle) _rfBle.style.display = (_rfRet && _rfWeight && _rfSup) ? '' : 'none'; // connect widget (Android/desktop Chrome)
+  var _rfHint = $('rf-ble-hint'); if (_rfHint) _rfHint.style.display = (_rfRet && _rfWeight && !_rfSup) ? '' : 'none'; // manual hint (iPhone)
 }
+
+function phase1ScaleShouldStartCollapsed() {
+  const ua = String((navigator && navigator.userAgent) || '');
+  const platform = String((navigator && navigator.platform) || '');
+  const iphone = /iPhone|iPad|iPod/i.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return iphone || !('bluetooth' in navigator);
+}
+function setPhase1ScaleCollapsed(collapsed) {
+  const row = $('main-scale-row'), btn = $('main-scale-toggle');
+  if (!row || !btn) return;
+  row.classList.toggle('phase1-scale-collapsed', !!collapsed);
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const stateEl = btn.querySelector('.phase1-scale-state');
+  if (stateEl) stateEl.textContent = 'manual grams available';
+}
+function initPhase1ScaleDisclosure() {
+  const btn = $('main-scale-toggle');
+  if (!btn) return;
+  const host = $('phase1-scale-details-host');
+  ['main-ble', 'main-ble-hint', 'main-bridge'].forEach(id => {
+    const el = $(id);
+    if (host && el) host.appendChild(el);
+  });
+  const openDetails = () => showScreen('phase1-scale-details');
+  btn.addEventListener('click', openDetails);
+  $('phase1-scale-back')?.addEventListener('click', () => showScreen('screen-main'));
+  $('phase1-scale-back-bottom')?.addEventListener('click', () => showScreen('screen-main'));
+  setPhase1ScaleCollapsed(phase1ScaleShouldStartCollapsed());
+}
+initPhase1ScaleDisclosure();
+initPhase1MeasureControls();
+initPhase1BlockPresentation();
 
 // ════════════════════════════════════════════════════════════════════
 //  Action buttons
@@ -2504,7 +2760,11 @@ $$('.action').forEach(btn => {
       return;
     }
     state.selectedAction = btn.dataset.action;
+    // Phase 1I — choosing an action starts from the safe, shared unit mode.
+    // WEIGHT / GRAMS must be an explicit follow-up choice for that action.
+    phase1MeasureUnit = 'UNITS';
     applyActionTint();
+    renderPhase1StickySummary();
     Feedback.scan();
   });
 });
@@ -5509,6 +5769,7 @@ function refreshWeightProfileUI() {
     sec.style.display = 'none';
     if ($('profile-status')) $('profile-status').textContent = '';
     updateRemainingDisplay();
+    try { syncPhase1WeightVisibility(); } catch (_) {}
     return;
   }
   sec.style.display = '';
@@ -5520,6 +5781,7 @@ function refreshWeightProfileUI() {
     $('profile-status').style.color = prof ? '#4ade80' : '#fbbf24';
   }
   updateRemainingDisplay();
+  try { syncPhase1WeightVisibility(); } catch (_) {}
 }
 function saveWeightProfileFromInputs() {
   const item = _selectedItemObj();
@@ -6692,6 +6954,7 @@ $('ok-overlay').addEventListener('click', () => $('ok-overlay').classList.remove
 function renderRecentMini() {
   const arr = Recent.load().slice(0, 8);
   const el = $('recent');
+  renderPhase1LastAdded();
   const openingParAudit = openingParAuditLogHTML({ compact: true });
   if (!arr.length) {
     el.innerHTML = openingParAudit ||
@@ -6902,6 +7165,8 @@ function refreshQueueCount() {
     btn.classList.toggle('green', n === 0);
     btn.classList.toggle('footer-status', n > 0);
   }
+  renderPhase1StickySummary();
+  renderPhase1LastAdded();
   renderBarbackScopeBanner();
 }
 
@@ -8047,6 +8312,8 @@ function refreshDraftCount() {
     }
   } catch (_) {}
   const btn = $('review-submit-all');
+  renderPhase1StickySummary();
+  renderPhase1LastAdded();
   renderBarbackScopeBanner();
   if (!btn) return;
   if (n > 0) {
@@ -8058,6 +8325,8 @@ function refreshDraftCount() {
   }
 }
 $('review-submit-all').addEventListener('click', submitAllDraftsToBarinv);
+$('phase1-review-btn')?.addEventListener('click', () => showReview());
+$('review-back-top')?.addEventListener('click', () => $('review-back').click());
 
 $('review-back').addEventListener('click', () => {
   if (state.tokenPayload && (!OPENING_PAR_V1_ENABLED || state.openingParClassicUnlocked)) showScreen('screen-main');
