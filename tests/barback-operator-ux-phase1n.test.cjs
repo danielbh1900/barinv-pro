@@ -18,10 +18,10 @@ test('Phase 1N keeps item names off by default and preserves generic phrases', (
   assert.match(html, /speakItemNames: false/);
   assert.match(html, /if \(!this\.speakItemNames\) return this\.speak\(generic, options\)/);
   assert.match(html, /VoiceGuide\.testVoice\(\)/);
-  assert.match(html, /VoiceGuide\.speakState\('Scanned, not added\.'/);
-  assert.match(html, /VoiceGuide\.speakState\('Added to draft\.'/);
-  assert.match(html, /VoiceGuide\.speakState\('Not added\.'/);
-  assert.match(html, /VoiceGuide\.speak\('Previous item was not added\.'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('scanned'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('added'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('failed'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('blocked'/);
 });
 
 test('Phase 1N sanitizes and truncates spoken item names', () => {
@@ -38,10 +38,10 @@ test('Phase 1N sanitizes and truncates spoken item names', () => {
 });
 
 test('Phase 1N speaks names only at confirmed UI events and preserves Phase 1M', () => {
-  assert.match(html, /phase1MarkPendingSelection\(it\)/);
-  assert.match(html, /VoiceGuide\.speakState\('Scanned, not added\.', phase1PendingItemName/);
-  assert.match(html, /VoiceGuide\.speakState\('Added to draft\.', savedItemName/);
-  assert.match(html, /VoiceGuide\.speakState\('Not added\.', savedItemName/);
+  assert.match(html, /phase1MarkPendingSelection\(it, source\)/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('scanned'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('added'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('failed'/);
   for (const marker of ['VOICE GUIDE', 'TEST VOICE', 'barbackVoiceGuideEnabled', 'speechSynthesis', 'SpeechSynthesisUtterance', 'SCANNED — NOT ADDED YET', 'ADDED TO DRAFT', 'ACCESSORY / TARE', 'NET SAVED WEIGHT']) {
     assert.match(html, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }

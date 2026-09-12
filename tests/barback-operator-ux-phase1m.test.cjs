@@ -31,10 +31,10 @@ test('Phase 1M keeps voice announcements short, deduplicated, and user-enabled',
   assert.match(html, /if \(!this\.enabled \|\| !this\.supported \|\| !message\) return false/);
   assert.match(html, /lastMessage === message && now - this\.lastSpokenAt < wait/);
   assert.match(html, /if \(opts\.urgent\) window\.speechSynthesis\.cancel\(\)/);
-  assert.match(html, /VoiceGuide\.speakState\('Scanned, not added\.'/);
-  assert.match(html, /VoiceGuide\.speak\('Previous item was not added\.'/);
-  assert.match(html, /VoiceGuide\.speakState\('Added to draft\.'/);
-  assert.match(html, /VoiceGuide\.speakState\('Not added\.'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('scanned'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('blocked'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('added'/);
+  assert.match(html, /VoiceGuide\.announceOperationalState\('failed'/);
 });
 
 test('Phase 1M preserves Phase 1J/1K/1L surfaces and adds no persistence path', () => {

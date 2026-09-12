@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8')
 test('Phase 1L distinguishes selected items from actual Drafts', () => {
   assert.match(html, /SCANNED — NOT ADDED YET/);
   assert.match(html, /Press ADD TO REVIEW to create the Draft/);
-  assert.match(html, /phase1MarkPendingSelection\(it\)/);
+  assert.match(html, /phase1MarkPendingSelection\(it, source\)/);
   assert.match(html, /ADDED TO DRAFT/);
   assert.match(html, /const draftCountBefore = Drafts\.count\(\)/);
   assert.match(html, /draftCountAfter <= draftCountBefore/);

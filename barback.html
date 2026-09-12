@@ -942,7 +942,10 @@
           <span id="phase1-voice-status" class="phase1-voice-status">Voice Guide: Off</span>
           <div id="phase1-voice-diagnostics" class="phase1-voice-status" aria-live="polite">
             Speech API: <span id="phase1-voice-speech-api">—</span> · Utterance API: <span id="phase1-voice-utterance-api">—</span><br>
-            Voices loaded: <span id="phase1-voice-voices">—</span> · Last voice test: <span id="phase1-voice-last-test">not tested</span>
+            Voices loaded: <span id="phase1-voice-voices">—</span> · Last voice test: <span id="phase1-voice-last-test">not tested</span><br>
+            Last operational voice: <span id="phase1-voice-operational">none</span><br>
+            Last operational type: <span id="phase1-voice-operational-type">none</span> · Last operational source: <span id="phase1-voice-operational-source">unknown</span><br>
+            Last operational engine: <span id="phase1-voice-operational-engine">unavailable</span>
           </div>
         </div>
         <!-- Manual Scale MVP — optional weight + bottle state. Stored as the
@@ -1595,6 +1598,11 @@ const VoiceGuide = {
   lastMessage: '',
   lastSpokenAt: 0,
   lastVoiceTest: 'not tested',
+  lastOperationalVoice: 'none',
+  lastOperationalType: 'none',
+  lastOperationalSource: 'unknown',
+  lastOperationalEngine: 'unavailable',
+  lastOperationalKey: '',
   voices: [],
   voicesListenerBound: false,
   init() {
@@ -1629,6 +1637,10 @@ const VoiceGuide = {
     const utteranceApi = $('phase1-voice-utterance-api');
     const voices = $('phase1-voice-voices');
     const lastTest = $('phase1-voice-last-test');
+    const operational = $('phase1-voice-operational');
+    const operationalType = $('phase1-voice-operational-type');
+    const operationalSource = $('phase1-voice-operational-source');
+    const operationalEngine = $('phase1-voice-operational-engine');
     const text = message || (this.supported ? (this.enabled ? 'Voice Guide: On' : 'Voice Guide: Off') : 'Voice unavailable on this browser');
     if (summary) {
       summary.textContent = this.supported
@@ -1641,6 +1653,10 @@ const VoiceGuide = {
     if (utteranceApi) utteranceApi.textContent = typeof window !== 'undefined' && typeof window.SpeechSynthesisUtterance === 'function' ? 'available' : 'unavailable';
     if (voices) voices.textContent = this.supported ? (this.voices.length ? String(this.voices.length) : 'loading') : 'unavailable';
     if (lastTest) lastTest.textContent = this.lastVoiceTest;
+    if (operational) operational.textContent = this.lastOperationalVoice;
+    if (operationalType) operationalType.textContent = this.lastOperationalType;
+    if (operationalSource) operationalSource.textContent = this.lastOperationalSource;
+    if (operationalEngine) operationalEngine.textContent = this.lastOperationalEngine;
     if (toggle) {
       toggle.disabled = !this.supported;
       toggle.textContent = this.enabled ? 'TURN OFF' : 'TURN ON';
@@ -1686,6 +1702,42 @@ const VoiceGuide = {
       return false;
     }
   },
+  announceOperationalState(type, details) {
+    const info = details || {};
+    const source = String(info.source || 'unknown');
+    const safe = this.safeItemName(info.itemName);
+    const generic = type === 'scanned' ? 'Scanned, not added.'
+      : type === 'added' ? 'Added to draft.'
+      : type === 'blocked' ? 'Previous item was not added.'
+      : 'Not added.';
+    const message = (this.speakItemNames && safe && type !== 'blocked')
+      ? generic.replace(/\.$/, '') + ': ' + safe + '.' : generic;
+    const key = String(type) + '|' + String(info.itemId || safe || '') + '|' + source;
+    this.lastOperationalType = type;
+    this.lastOperationalSource = source;
+    this.lastOperationalEngine = this.supported ? 'browser voice' : 'unavailable';
+    if (type === 'scanned' && this.lastOperationalKey === key) {
+      this.lastOperationalVoice = 'suppressed';
+      this.updateUI();
+      return false;
+    }
+    this.lastOperationalKey = key;
+    this.lastOperationalVoice = 'attempted';
+    this.updateUI();
+    if (!this.enabled || !this.supported) {
+      this.lastOperationalVoice = 'suppressed';
+      this.updateUI();
+      return false;
+    }
+    const sent = this.speak(message, {
+      urgent: type !== 'scanned',
+      onstart: () => { this.lastOperationalVoice = 'success'; this.updateUI(); },
+      onerror: () => { this.lastOperationalVoice = 'blocked'; this.updateUI('Voice blocked by this browser. Try Test Voice again or use Safari for voice.'); },
+    });
+    this.lastOperationalVoice = sent ? 'sent' : 'error';
+    this.updateUI();
+    return sent;
+  },
   setSpeakItemNames(value) {
     this.speakItemNames = !!value;
     try { localStorage.setItem(BARBACK_VOICE_ITEM_NAMES_KEY, this.speakItemNames ? '1' : '0'); } catch (_) {}
@@ -1715,7 +1767,11 @@ const VoiceGuide = {
       utterance.rate = 1;
       utterance.pitch = 1;
       utterance.volume = 1;
-      utterance.onerror = () => this.updateUI('Tap Test Voice to enable audio');
+      utterance.onstart = () => { if (typeof opts.onstart === 'function') opts.onstart(); };
+      utterance.onerror = (event) => {
+        if (typeof opts.onerror === 'function') opts.onerror(event);
+        else this.updateUI('Voice blocked by this browser. Try Test Voice again or use Safari for voice.');
+      };
       this.lastMessage = message;
       this.lastSpokenAt = now;
       window.speechSynthesis.speak(utterance);
@@ -1759,13 +1815,13 @@ function phase1HideDraftSuccess() {
   const card = $('phase1-draft-success');
   if (card) { card.classList.remove('active'); card.innerHTML = ''; }
 }
-function phase1MarkPendingSelection(it) {
+function phase1MarkPendingSelection(it, source) {
   phase1PendingItemId = it && it.id ? it.id : null;
   phase1PendingItemName = (it && it.name) || 'Selected item';
   phase1ReplacementArmed = false;
   phase1HideDraftSuccess();
   phase1RenderPendingSelection();
-  VoiceGuide.speakState('Scanned, not added.', phase1PendingItemName, { key: 'pending-selection' });
+  VoiceGuide.announceOperationalState('scanned', { itemId: phase1PendingItemId, itemName: phase1PendingItemName, source: source || 'unknown' });
 }
 function phase1AllowItemReplacement(it) {
   if (!phase1PendingItemId || !state.selectedItemId || state.selectedItemId === (it && it.id)) return true;
@@ -1780,7 +1836,7 @@ function phase1AllowItemReplacement(it) {
   const replace = window.confirm('Previous scanned item was not added. Press OK to REPLACE it with ' + target + ', or Cancel to keep the current item.');
   if (!replace) {
     statusOn('save-status', 'Previous scanned item was not added — current item kept.', 'warn');
-    VoiceGuide.speak('Previous item was not added.', { urgent: true });
+    VoiceGuide.announceOperationalState('blocked', { itemName: target, source: 'replacement' });
     return false;
   }
   phase1PendingItemId = null;
@@ -3199,14 +3255,14 @@ function lookupByBarcode(raw) {
     return cands.includes(target);
   }) || null;
 }
-function setPickedItem(it) {
-  if (!phase1AllowItemReplacement(it)) return;
+function setPickedItem(it, source) {
+  if (!phase1AllowItemReplacement(it)) return false;
   // Role/scope SAFETY backstop — vip_only stock is never selectable in
   // barback mode. Lists/search/scan are already pre-filtered; this guard
   // catches any remaining path so a VIP-only item can never be picked.
   if (!isBarbackVisibleItem(it)) {
     try { statusOn('save-status', scopeBlockReason(it), 'err'); } catch (_) {}
-    return;
+    return false;
   }
   state.selectedItemId = it.id;
   state.selectedItemName = it.name;
@@ -3227,7 +3283,8 @@ function setPickedItem(it) {
   $('search-input').value = '';
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
-  phase1MarkPendingSelection(it);
+  phase1MarkPendingSelection(it, source);
+  return true;
 }
 // ════════════════════════════════════════════════════════════════════
 //  Role / scope item visibility — SINGLE SOURCE OF TRUTH (hardened)
@@ -3486,7 +3543,7 @@ function searchItems(q) {
   q = String(q || '').trim().toLowerCase();
   if (!q) { showBrowseList(); return; }   // browse fallback: empty query = browsable list
   const exact = lookupByBarcode(q);
-  if (exact && isBarbackVisibleItem(exact)) { setPickedItem(exact); return; }   // never select vip_only by typed code
+  if (exact && isBarbackVisibleItem(exact)) { setPickedItem(exact, 'search'); return; }   // never select vip_only by typed code
   const matches = barbackVisibleItems().filter(it => {
     const n = String(it.name || '').toLowerCase();
     const s = String(it.sku || '').toLowerCase();
@@ -3516,12 +3573,12 @@ $('search-input').addEventListener('keydown', (e) => {
     const v = $('search-input').value.trim();
     if (!v) return;
     const it = lookupByBarcode(v);
-    if (it && isBarbackVisibleItem(it)) { setPickedItem(it); }
+    if (it && isBarbackVisibleItem(it)) { setPickedItem(it, 'search'); }
     else {
       const matches = barbackVisibleItems().filter(x =>
         String(x.name || '').toLowerCase().indexOf(v.toLowerCase()) >= 0
       );
-      if (matches.length === 1) setPickedItem(matches[0]);
+      if (matches.length === 1) setPickedItem(matches[0], 'search');
       else statusOn('save-status', matches.length ? 'Tap an item below to choose it' : 'No matching item — refine the search or browse items', 'warn');
     }
   }
@@ -3606,7 +3663,7 @@ function closeBrowseModal() {
   if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
 }
 function pickFromBrowse(it) {
-  setPickedItem(it);          // canonical select path (also blurs #search-input)
+  setPickedItem(it, 'browse');  // canonical select path (also blurs #search-input)
   closeBrowseModal();         // keyboard stays closed (bm-search was never focused unless user typed)
   // Bring QTY / Add-to-Review into view; do NOT focus (would re-open keyboard).
   try { $('qty-input').scrollIntoView({ block: 'center' }); } catch (_) {}
@@ -4037,7 +4094,7 @@ async function onBarcodeScanned(code, controls) {
       if (blockMsg) {
         try { statusOn('save-status', blockMsg, 'err'); } catch (_) {}
       } else if (requireWeight) {
-        try { setPickedItem(it); } catch (_) {}
+        try { setPickedItem(it, 'scan'); } catch (_) {}
         try { statusOn('save-status', '✓ Scanned: ' + it.name + ' — enter weight, then ADD TO REVIEW', 'ok'); } catch (_) {}
       } else {
         try { openQtyModal(it); } catch (_) {}
@@ -4249,6 +4306,7 @@ function _qmResetProfile() {
 }
 function openQtyModal(it) {
   if (!it) return;
+  if (state.selectedItemId !== it.id && !setPickedItem(it, 'scan')) return;
   state.qtyModalItem = it;
   const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
   if ($('qm-item')) $('qm-item').innerHTML =
@@ -4303,15 +4361,18 @@ function qtyModalAdd() {
     }
     weightOverride = wraw;
   }
+  const draftCountBefore = Drafts.count();
   const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty, bottleStateOverride: bs, weightOverride: weightOverride });
   if (!res || !res.ok) {
     Feedback.warn();
+    VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan' });
     showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
     closeQtyModal();
     return;
   }
   Feedback.ok();
   const n = Drafts.count();
+  VoiceGuide.announceOperationalState(n > draftCountBefore ? 'added' : 'failed', { itemId: it.id, itemName: it.name, source: 'add' });
   showOverlay('✓ ADDED TO REVIEW',
     it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
   statusOn('save-status',
@@ -5582,16 +5643,18 @@ function installHidListener() {
             // PLAN-2026-06-13 — HID continuous-speed path now goes through the
             // SHARED core (qty=1), so it matches the touch SAVE button and the
             // camera scanner (Multi-Bar fan-out + draft refresh inside).
+            const draftCountBefore = Drafts.count();
             let r; try { r = addCurrentSelectionToReview({ item: it, qtyOverride: 1 }); }
             catch (e) { r = { ok:false, error:(e && e.message) || 'add failed' }; }
             const n = Drafts.count();
+            VoiceGuide.announceOperationalState(r && r.ok && n > draftCountBefore ? 'added' : 'failed', { itemId: it.id, itemName: it.name, source: 'scan' });
             statusOn('save-status',
               (r && r.ok)
                 ? ('✓ HID added: ' + it.name + ' · qty 1' + (r.multi ? (' × ' + r.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''))
                 : ('⚠ HID add failed: ' + ((r && r.error) || 'unknown') + ' — ' + it.name),
               (r && r.ok) ? 'ok' : 'warn');
           } else {
-            setPickedItem(it);
+            setPickedItem(it, 'scan');
             statusOn('save-status', '✓ HID scan: ' + it.name + ' — pick TAKEN / RETURN to add to Review', 'info');
           }
         } else {
@@ -7285,7 +7348,7 @@ $('save-btn').addEventListener('click', async () => {
 
   if (!res.ok) {
     Feedback.warn();
-    VoiceGuide.speakState('Not added.', savedItemName, { urgent: true });
+    VoiceGuide.announceOperationalState('failed', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
     statusOn('save-status', res.storage_error ? 'Could not save locally — keep this page open and retry' : 'Not added — ' + (res.error || 'check the item and try again'), 'err');
     showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
     return;   // keep the operator's entry so they can fix and retry
@@ -7293,13 +7356,13 @@ $('save-btn').addEventListener('click', async () => {
   const draftCountAfter = Drafts.count();
   if (draftCountAfter <= draftCountBefore) {
     Feedback.warn();
-    VoiceGuide.speakState('Not added.', savedItemName, { urgent: true });
+    VoiceGuide.announceOperationalState('failed', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
     statusOn('save-status', 'FAILED / BLOCKED — Add reported success, but Draft count did not change. Nothing was confirmed.', 'err');
     showOverlay('⚠ ADD NOT CONFIRMED', 'Draft count did not change — keep the item and retry.', 'err');
     return;
   }
   Feedback.ok();
-  VoiceGuide.speakState('Added to draft.', savedItemName, { urgent: true });
+  VoiceGuide.announceOperationalState('added', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
   const n = draftCountAfter;
   phase1ShowDraftSuccess(savedAction, savedItemName, n, savedCalculation);
   phase1PendingItemId = null;
@@ -9318,7 +9381,7 @@ function renderRecentItemChips() {
   host.querySelectorAll('.chip').forEach(btn => {
     btn.addEventListener('click', () => {
       const it = (cache.items || []).find(x => x.id === btn.dataset.itemId);
-      if (it) { setPickedItem(it); Feedback.scan(); }
+      if (it) { setPickedItem(it, 'chip'); Feedback.scan(); }
     });
   });
 }
