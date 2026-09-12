@@ -926,6 +926,10 @@
             <button type="button" id="phase1-voice-toggle" aria-pressed="false">TURN ON</button>
           </div>
           <button type="button" id="phase1-voice-test" class="phase1-voice-test">TEST VOICE</button>
+          <div class="phase1-voice-row" style="margin-top:8px;">
+            <span class="phase1-voice-label">SPEAK ITEM NAMES</span>
+            <button type="button" id="phase1-voice-item-toggle" aria-pressed="false">OFF</button>
+          </div>
           <span id="phase1-voice-status" class="phase1-voice-status">Voice Guide: Off</span>
         </div>
         <!-- Manual Scale MVP — optional weight + bottle state. Stored as the
@@ -1570,20 +1574,26 @@ function fmtTime(d) {
 // Phase 1E keeps ACTION and MEASURE as separate axes. Future TRANSFER can use
 // the same action axis without adding a transfer path in this patch.
 const BARBACK_VOICE_GUIDE_KEY = 'barbackVoiceGuideEnabled';
+const BARBACK_VOICE_ITEM_NAMES_KEY = 'barbackVoiceGuideSpeakItemNames';
 const VoiceGuide = {
   enabled: false,
+  speakItemNames: false,
   supported: false,
   lastMessage: '',
   lastSpokenAt: 0,
   init() {
     this.supported = !!(window && window.speechSynthesis && window.SpeechSynthesisUtterance);
-    try { this.enabled = this.supported && localStorage.getItem(BARBACK_VOICE_GUIDE_KEY) === '1'; } catch (_) { this.enabled = false; }
+    try {
+      this.enabled = this.supported && localStorage.getItem(BARBACK_VOICE_GUIDE_KEY) === '1';
+      this.speakItemNames = localStorage.getItem(BARBACK_VOICE_ITEM_NAMES_KEY) === '1';
+    } catch (_) { this.enabled = false; this.speakItemNames = false; }
     this.updateUI();
   },
   updateUI(message) {
     const summary = $('phase1-voice-summary');
     const status = $('phase1-voice-status');
     const toggle = $('phase1-voice-toggle');
+    const itemToggle = $('phase1-voice-item-toggle');
     const test = $('phase1-voice-test');
     const text = message || (this.supported ? (this.enabled ? 'Voice Guide: On' : 'Voice Guide: Off') : 'Voice unavailable on this browser');
     if (summary) {
@@ -1599,6 +1609,10 @@ const VoiceGuide = {
       toggle.setAttribute('aria-pressed', String(this.enabled));
     }
     if (test) test.disabled = !this.supported;
+    if (itemToggle) {
+      itemToggle.textContent = this.speakItemNames ? 'ON' : 'OFF';
+      itemToggle.setAttribute('aria-pressed', String(this.speakItemNames));
+    }
   },
   setEnabled(value) {
     if (!this.supported) { this.enabled = false; this.updateUI('Voice unavailable on this browser'); return false; }
@@ -1607,6 +1621,23 @@ const VoiceGuide = {
     this.updateUI(this.enabled ? 'Voice Guide: On' : 'Voice Guide: Off');
     if (!this.enabled) { try { window.speechSynthesis.cancel(); } catch (_) {} }
     return this.enabled;
+  },
+  setSpeakItemNames(value) {
+    this.speakItemNames = !!value;
+    try { localStorage.setItem(BARBACK_VOICE_ITEM_NAMES_KEY, this.speakItemNames ? '1' : '0'); } catch (_) {}
+    this.updateUI(this.speakItemNames ? 'Speak Item Names: On' : 'Speak Item Names: Off');
+    return this.speakItemNames;
+  },
+  safeItemName(value) {
+    const name = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!name || /^(?:https?:\/\/|www\.)/i.test(name)) return '';
+    if (/^(?:\d{8,}|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f-]{13,})$/i.test(name)) return '';
+    return name.length > 40 ? name.slice(0, 39).trimEnd() + '…' : name;
+  },
+  speakState(generic, itemName, options) {
+    if (!this.speakItemNames) return this.speak(generic, options);
+    const safe = this.safeItemName(itemName);
+    return this.speak(safe ? generic.replace(/\.$/, '') + ': ' + safe + '.' : generic, options);
   },
   speak(message, options) {
     if (!this.enabled || !this.supported || !message) return false;
@@ -1641,6 +1672,9 @@ function initPhase1VoiceControl() {
     if (!VoiceGuide.enabled) VoiceGuide.setEnabled(true);
     VoiceGuide.speak('Voice Guide is on.', { urgent: true });
   });
+  $('phase1-voice-item-toggle')?.addEventListener('click', () => {
+    VoiceGuide.setSpeakItemNames(!VoiceGuide.speakItemNames);
+  });
 }
 let phase1MeasureUnit = 'UNITS';
 let phase1TareGrams = 0;
@@ -1667,7 +1701,7 @@ function phase1MarkPendingSelection(it) {
   phase1ReplacementArmed = false;
   phase1HideDraftSuccess();
   phase1RenderPendingSelection();
-  VoiceGuide.speak('Scanned, not added.', { key: 'pending-selection' });
+  VoiceGuide.speakState('Scanned, not added.', phase1PendingItemName, { key: 'pending-selection' });
 }
 function phase1AllowItemReplacement(it) {
   if (!phase1PendingItemId || !state.selectedItemId || state.selectedItemId === (it && it.id)) return true;
@@ -7165,7 +7199,7 @@ $('save-btn').addEventListener('click', async () => {
 
   if (!res.ok) {
     Feedback.warn();
-    VoiceGuide.speak('Not added.', { urgent: true });
+    VoiceGuide.speakState('Not added.', savedItemName, { urgent: true });
     statusOn('save-status', res.storage_error ? 'Could not save locally — keep this page open and retry' : 'Not added — ' + (res.error || 'check the item and try again'), 'err');
     showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
     return;   // keep the operator's entry so they can fix and retry
@@ -7173,13 +7207,13 @@ $('save-btn').addEventListener('click', async () => {
   const draftCountAfter = Drafts.count();
   if (draftCountAfter <= draftCountBefore) {
     Feedback.warn();
-    VoiceGuide.speak('Not added.', { urgent: true });
+    VoiceGuide.speakState('Not added.', savedItemName, { urgent: true });
     statusOn('save-status', 'FAILED / BLOCKED — Add reported success, but Draft count did not change. Nothing was confirmed.', 'err');
     showOverlay('⚠ ADD NOT CONFIRMED', 'Draft count did not change — keep the item and retry.', 'err');
     return;
   }
   Feedback.ok();
-  VoiceGuide.speak('Added to draft.', { urgent: true });
+  VoiceGuide.speakState('Added to draft.', savedItemName, { urgent: true });
   const n = draftCountAfter;
   phase1ShowDraftSuccess(savedAction, savedItemName, n, savedCalculation);
   phase1PendingItemId = null;
