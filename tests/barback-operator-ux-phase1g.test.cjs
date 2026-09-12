@@ -29,8 +29,8 @@ test('Phase 1G keeps secondary fields out of the default work console', () => {
 
 test('Phase 1G preserves RETURN units and weight-only grams controls', () => {
   assert.doesNotMatch(html, /RETURN GRAMS/);
-  assert.match(html, /weight && \(taken \|\| returned\) \? 'flex' : 'none'/);
-  assert.match(html, /id="phase1-return-gram-controls" class="phase1-gram-controls" style="display:none;"/);
+  assert.match(html, /weightUI\.style\.display = weight && \(taken \|\| returned\) \? '' : 'none'/);
+  assert.match(html, /id="phase1-weight-ui" class="phase1-weight-ui" style="display:none;"/);
   assert.match(html, /var _rfBle = \$\('rf-ble'\); if \(_rfBle\) _rfBle\.style\.display = \(_rfRet && _rfWeight && _rfSup\)/);
 });
 

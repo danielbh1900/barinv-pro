@@ -18,17 +18,17 @@ test('TAKE and RETURN share one action-independent Measure structure', () => {
 
 test('RETURN units stays unit-based and hides gram/scale warning surfaces', () => {
   assert.match(html, /returned \? 'RETURNED UNITS'/);
-  assert.match(html, /gramControls\.style\.display = weight && \(taken \|\| returned\) \? 'flex' : 'none'/);
+  assert.match(html, /weightUI\.style\.display = weight && \(taken \|\| returned\) \? '' : 'none'/);
   assert.match(html, /_rfBle\.style\.display = \(_rfRet && _rfWeight && _rfSup\)/);
   assert.match(html, /_rfHint\.style\.display = \(_rfRet && _rfWeight && !_rfSup\)/);
   assert.doesNotMatch(html, /RETURN GRAMS/);
 });
 
 test('TAKE and RETURN weight mode use the same explicit grams presentation', () => {
-  assert.match(html, /actionLabel \+ ' WEIGHT \(GRAMS\)'/);
+  assert.match(html, /actionLabel \+ ' WEIGHT \/ GRAMS'/);
   assert.match(html, /phase1MeasureUnit = 'WEIGHT'/);
-  assert.match(html, /data-phase1-gram-step="-50"/);
-  assert.match(html, /data-phase1-gram-step="50"/);
+  assert.match(html, /data-phase1-tare="0"/);
+  assert.match(html, /data-phase1-tare="16"/);
 });
 
 test('Add/View/Last Added placement is shared and numeric source remains singular', () => {

@@ -106,11 +106,44 @@
     .phase1-last-added .phase1-last-added-main { margin-top:5px; font-size:20px; font-weight:900; line-height:1.2; }
     .phase1-last-added .phase1-last-added-meta { margin-top:5px; color:#d1fae5; font-size:12px; line-height:1.4; }
     .phase1-last-added .phase1-last-added-view { margin-top:10px; color:#bbf7d0; font-size:13px; font-weight:900; letter-spacing:.04em; }
+    .phase1-last-added.phase1-last-added-taken { border-color:#fb923c; background:linear-gradient(135deg,rgba(124,45,18,.95),rgba(31,23,12,.96)); }
+    .phase1-last-added.phase1-last-added-taken .phase1-last-added-label,
+    .phase1-last-added.phase1-last-added-taken .phase1-last-added-view { color:#fed7aa; }
+    .phase1-last-added.phase1-last-added-return { border-color:#34d399; box-shadow:0 0 0 1px rgba(52,211,153,.15); }
+    .phase1-pending-selection { display:none; margin:10px 0 0; padding:14px; border:2px solid #f59e0b; border-radius:10px; background:linear-gradient(135deg,rgba(120,53,15,.96),rgba(31,23,12,.96)); color:#fff; }
+    .phase1-pending-selection.active { display:block; }
+    .phase1-pending-selection .phase1-pending-label { color:#fde68a; font-size:13px; font-weight:900; letter-spacing:.08em; }
+    .phase1-pending-selection .phase1-pending-item { margin-top:5px; font-size:20px; font-weight:900; }
+    .phase1-pending-selection .phase1-pending-help { margin-top:5px; color:#fef3c7; font-size:13px; font-weight:800; }
+    .phase1-pending-selection .phase1-pending-replace { margin-top:10px; min-height:42px; padding:9px 12px; border:1px solid #fbbf24; border-radius:7px; background:#451a03; color:#fef3c7; font-size:12px; font-weight:900; cursor:pointer; }
+    #save-btn.phase1-add-needed { box-shadow:0 0 0 3px rgba(245,158,11,.35); }
+    .phase1-draft-success { display:none; margin:10px 0 0; padding:14px; border:2px solid #22c55e; border-radius:10px; background:linear-gradient(135deg,rgba(6,78,59,.95),rgba(15,23,42,.96)); color:#fff; }
+    .phase1-draft-success.active { display:block; }
+    .phase1-draft-success .phase1-draft-success-label { color:#a7f3d0; font-size:13px; font-weight:900; letter-spacing:.08em; }
+    .phase1-draft-success .phase1-draft-success-main { margin-top:5px; font-size:19px; font-weight:900; }
+    .phase1-draft-success .phase1-draft-success-meta { margin-top:5px; color:#d1fae5; font-size:13px; line-height:1.4; }
     .phase1-measure-input-line { display:flex; align-items:stretch; gap:6px; }
     .phase1-measure-input-line input { min-width:0; flex:1 1 auto; text-align:center; font-size:26px !important; font-weight:900; }
     .phase1-measure-unit-row { display:flex; gap:6px; margin-bottom:8px; }
     .phase1-measure-unit-row button { flex:1 1 0; min-height:44px; border:1px solid #374151; border-radius:7px; background:#111827; color:#cbd5e1; font-size:13px; font-weight:900; cursor:pointer; }
-    .phase1-measure-unit-row button.selected { background:#7c2d12; border-color:#fb923c; color:#fff; }
+    .phase1-measure-unit-row button.selected { background:#374151; border-color:#6b7280; color:#fff; }
+    #phase1-measure-block.phase1-action-taken .phase1-measure-unit-row button.selected { background:#7c2d12; border-color:#fb923c; color:#fff; }
+    #phase1-measure-block.phase1-action-returned .phase1-measure-unit-row button.selected { background:#065f46; border-color:#34d399; color:#fff; }
+    #phase1-measure-block.phase1-action-taken .phase1-measure-input-line input { border-color:#fb923c; box-shadow:0 0 0 1px rgba(251,146,60,.18); }
+    #phase1-measure-block.phase1-action-returned .phase1-measure-input-line input { border-color:#34d399; box-shadow:0 0 0 1px rgba(52,211,153,.18); }
+    .phase1-weight-ui { margin:8px 0 10px; padding:10px; border:1px solid #374151; border-radius:8px; background:#111827; }
+    .phase1-weight-ui input { margin-bottom:8px; }
+    .phase1-tare-controls { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .phase1-tare-controls button { min-height:44px; border:1px solid #374151; border-radius:7px; background:#1f2937; color:#cbd5e1; font-size:12px; font-weight:900; cursor:pointer; }
+    .phase1-tare-controls button.selected { background:#374151; border-color:#6b7280; color:#fff; }
+    #phase1-measure-block.phase1-action-taken .phase1-tare-controls button.selected { background:#7c2d12; border-color:#fb923c; }
+    #phase1-measure-block.phase1-action-returned .phase1-tare-controls button.selected { background:#065f46; border-color:#34d399; }
+    #phase1-measure-block.phase1-action-taken .phase1-weight-ui { border-color:#9a3412; }
+    #phase1-measure-block.phase1-action-returned .phase1-weight-ui { border-color:#047857; }
+    .phase1-net-weight { margin-top:9px; padding:9px; border:1px solid #374151; border-radius:7px; background:#0b1220; color:#cbd5e1; font-size:11px; font-weight:900; letter-spacing:.06em; }
+    .phase1-net-weight strong { display:block; margin-top:3px; color:#fff; font-size:18px; letter-spacing:0; }
+    #phase1-measure-block.phase1-action-taken .phase1-net-weight strong { color:#fed7aa; }
+    #phase1-measure-block.phase1-action-returned .phase1-net-weight strong { color:#bbf7d0; }
     .phase1-stepper-btn { flex:0 0 54px; border:1px solid #4b5563; border-radius:8px; background:#1f2937; color:#fff; font-size:28px; font-weight:900; cursor:pointer; }
     .phase1-gram-controls { display:flex; gap:6px; margin-top:7px; }
     .phase1-gram-controls button { flex:1 1 0; min-height:42px; border:1px solid #374151; border-radius:7px; background:#111827; color:#d1fae5; font-size:12px; font-weight:900; cursor:pointer; }
@@ -824,6 +857,12 @@
       <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
       <div id="search-results" class="item-results" style="display:none;"></div>
       <div id="picked-item" class="selected-item" style="display:none;"></div>
+      <div id="phase1-pending-selection" class="phase1-pending-selection" role="status" aria-live="polite">
+        <div class="phase1-pending-label">SCANNED — NOT ADDED YET</div>
+        <div id="phase1-pending-item" class="phase1-pending-item"></div>
+        <div class="phase1-pending-help">Press ADD TO REVIEW to create the Draft.</div>
+        <button type="button" id="phase1-pending-replace" class="phase1-pending-replace">REPLACE WITH A DIFFERENT ITEM</button>
+      </div>
     </div>
 
     <div class="row phase1-block" id="phase1-measure-block">
@@ -839,11 +878,18 @@
         <button type="button" class="phase1-stepper-btn phase1-units-only" id="phase1-taken-plus" aria-label="Increase unit quantity">＋</button>
       </div>
       <div id="phase1-qty-help" class="muted small" style="margin-top:5px;">Default: 1 unit</div>
-      <div id="phase1-return-gram-controls" class="phase1-gram-controls" style="display:none;" aria-label="Adjust return grams">
-        <button type="button" data-phase1-gram-step="-50">−50g</button>
-        <button type="button" data-phase1-gram-step="-10">−10g</button>
-        <button type="button" data-phase1-gram-step="10">＋10g</button>
-        <button type="button" data-phase1-gram-step="50">＋50g</button>
+      <div id="phase1-weight-ui" class="phase1-weight-ui" style="display:none;">
+        <label for="phase1-gross-weight">MEASURED WEIGHT ON SCALE</label>
+        <input id="phase1-gross-weight" type="number" inputmode="decimal" step="1" min="0" placeholder="e.g. 800" autocomplete="off">
+        <label>ACCESSORY / TARE</label>
+        <div id="phase1-tare-controls" class="phase1-tare-controls" role="group" aria-label="Accessory tare">
+          <button type="button" data-phase1-tare="0" class="selected">NO CAP / 0g</button>
+          <button type="button" data-phase1-tare="4">BOTTLE CAP / −4g</button>
+          <button type="button" data-phase1-tare="16">POUR SPOUT / −16g</button>
+          <button type="button" data-phase1-tare="custom">CUSTOM TARE</button>
+        </div>
+        <input id="phase1-custom-tare" type="number" inputmode="decimal" step="1" min="0" placeholder="Custom tare (g)" autocomplete="off" style="display:none;">
+        <div id="phase1-net-weight" class="phase1-net-weight">NET SAVED WEIGHT<strong>Enter measured gross weight</strong></div>
       </div>
       <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support (hidden on iPhone). Fills QTY (grams); never submits. -->
       <div id="rf-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
@@ -914,6 +960,7 @@
       Items pile up in the Review list. Tap <b>VIEW ALL</b> to inspect, edit, and finally <b>SUBMIT ALL TO BARINV</b>.
     </div>
     <div id="save-status"></div>
+    <div id="phase1-draft-success" class="phase1-draft-success" role="status" aria-live="polite"></div>
 
     <div id="phase1-sticky-summary" class="phase1-sticky-summary" role="status" aria-live="polite">
       <div id="phase1-current-action" class="phase1-current-action">Choose TAKE or RETURN · Review: 0 drafts</div>
@@ -1467,7 +1514,7 @@ function renderPhase1LastAdded() {
   const dAt = draft ? Number(draft.drafted_at || 0) : 0;
   const rAt = recent ? Number(recent.at || 0) : 0;
   const row = dAt >= rAt ? draft : recent;
-  if (!row) { card.classList.remove('active'); card.innerHTML = ''; return; }
+  if (!row) { card.classList.remove('active', 'phase1-last-added-taken', 'phase1-last-added-return'); card.innerHTML = ''; return; }
   const stateLabel = draft && row === draft ? 'DRAFT · local Review' : (row.status || 'RECENT');
   const action = row.action === 'TAKEN' ? 'TAKEN' : 'RETURN';
   const item = row.item_name || row.item_id || 'Item';
@@ -1479,6 +1526,8 @@ function renderPhase1LastAdded() {
     '<div class="phase1-last-added-meta">Qty/grams ' + esc(String(row.qty)) + ' · ' + esc(bar) + ' · ' + esc(staff) +
     ' · ' + esc(stateLabel) + ' · ' + esc(fmtTime(when)) + '</div>' +
     '<div class="phase1-last-added-view">VIEW REVIEW →</div>';
+  card.classList.toggle('phase1-last-added-taken', action === 'TAKEN');
+  card.classList.toggle('phase1-last-added-return', action === 'RETURN');
   card.classList.add('active');
 }
 function renderPhase1StickySummary() {
@@ -1503,6 +1552,86 @@ function fmtTime(d) {
 // Phase 1E keeps ACTION and MEASURE as separate axes. Future TRANSFER can use
 // the same action axis without adding a transfer path in this patch.
 let phase1MeasureUnit = 'UNITS';
+let phase1TareGrams = 0;
+let phase1PendingItemId = null;
+let phase1PendingItemName = '';
+let phase1ReplacementArmed = false;
+
+function phase1RenderPendingSelection() {
+  const card = $('phase1-pending-selection');
+  const item = $('phase1-pending-item');
+  const add = $('save-btn');
+  const pending = !!(phase1PendingItemId && state.selectedItemId === phase1PendingItemId);
+  if (card) card.classList.toggle('active', pending);
+  if (item) item.textContent = pending ? phase1PendingItemName : '';
+  if (add) add.classList.toggle('phase1-add-needed', pending);
+}
+function phase1HideDraftSuccess() {
+  const card = $('phase1-draft-success');
+  if (card) { card.classList.remove('active'); card.innerHTML = ''; }
+}
+function phase1MarkPendingSelection(it) {
+  phase1PendingItemId = it && it.id ? it.id : null;
+  phase1PendingItemName = (it && it.name) || 'Selected item';
+  phase1ReplacementArmed = false;
+  phase1HideDraftSuccess();
+  phase1RenderPendingSelection();
+}
+function phase1AllowItemReplacement(it) {
+  if (!phase1PendingItemId || !state.selectedItemId || state.selectedItemId === (it && it.id)) return true;
+  if (phase1ReplacementArmed) {
+    phase1ReplacementArmed = false;
+    phase1PendingItemId = null;
+    phase1PendingItemName = '';
+    phase1RenderPendingSelection();
+    return true;
+  }
+  const target = (it && it.name) || 'the new item';
+  const replace = window.confirm('Previous scanned item was not added. Press OK to REPLACE it with ' + target + ', or Cancel to keep the current item.');
+  if (!replace) {
+    statusOn('save-status', 'Previous scanned item was not added — current item kept.', 'warn');
+    return false;
+  }
+  phase1PendingItemId = null;
+  phase1PendingItemName = '';
+  phase1RenderPendingSelection();
+  return true;
+}
+function phase1WeightCalculationText() {
+  if (phase1MeasureUnit !== 'WEIGHT') return '';
+  const grossRaw = String(($('phase1-gross-weight') && $('phase1-gross-weight').value) || '').trim();
+  const gross = Number(grossRaw);
+  if (grossRaw === '' || !Number.isFinite(gross)) return '';
+  const custom = phase1TareGrams === 'custom';
+  const customTare = Number($('phase1-custom-tare') && $('phase1-custom-tare').value);
+  const tare = custom ? (Number.isFinite(customTare) ? Math.max(0, customTare) : 0) : phase1TareGrams;
+  const net = Math.max(0, gross - tare);
+  const fmt = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+  const accessory = custom ? 'Custom tare' : (tare === 16 ? 'Pour spout' : tare === 4 ? 'Bottle cap' : 'No cap');
+  return 'Saved net: ' + fmt(net) + 'g · Calculation: ' + fmt(gross) + 'g − ' + accessory + ' ' + fmt(tare) + 'g = ' + fmt(net) + 'g';
+}
+function phase1ResetTareAfterAdd() {
+  const gross = $('phase1-gross-weight');
+  const custom = $('phase1-custom-tare');
+  if (gross) gross.value = '';
+  if (custom) custom.value = '';
+  phase1TareGrams = 0;
+  phase1RenderWeightTare();
+}
+function phase1EnsureUnitsDefault() {
+  const qty = $('qty-input');
+  if (!qty) return;
+  const raw = String(qty.value || '').trim();
+  if (raw === '' || Number(raw) <= 0) qty.value = '1';
+}
+function phase1ShowDraftSuccess(action, itemName, count, calculation) {
+  const card = $('phase1-draft-success');
+  if (!card) return;
+  card.innerHTML = '<div class="phase1-draft-success-label">ADDED TO DRAFT</div>' +
+    '<div class="phase1-draft-success-main">' + esc(action === 'TAKEN' ? 'TAKEN' : 'RETURN') + ' · ' + esc(itemName || 'Item') + '</div>' +
+    '<div class="phase1-draft-success-meta">Draft count: ' + esc(String(count)) + (calculation ? '<br>' + esc(calculation) : '') + '</div>';
+  card.classList.add('active');
+}
 function phase1AdjustMeasure(delta, minimum) {
   const input = $('qty-input');
   if (!input) return;
@@ -1512,6 +1641,37 @@ function phase1AdjustMeasure(delta, minimum) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
+function phase1RenderWeightTare() {
+  const grossInput = $('phase1-gross-weight');
+  const customInput = $('phase1-custom-tare');
+  const netEl = $('phase1-net-weight');
+  const weightUI = $('phase1-weight-ui');
+  const active = phase1MeasureUnit === 'WEIGHT' && !!state.selectedAction;
+  if (weightUI) weightUI.style.display = active ? '' : 'none';
+  if (!active) return;
+  const custom = phase1TareGrams === 'custom';
+  if (customInput) customInput.style.display = custom ? '' : 'none';
+  $$('[data-phase1-tare]').forEach(btn => {
+    btn.classList.toggle('selected', custom ? btn.dataset.phase1Tare === 'custom' : Number(btn.dataset.phase1Tare) === phase1TareGrams);
+  });
+  const grossRaw = String((grossInput && grossInput.value) || '').trim();
+  const gross = Number(grossRaw);
+  if (grossRaw === '' || !Number.isFinite(gross)) {
+    if (netEl) netEl.innerHTML = 'NET SAVED WEIGHT<strong>Enter measured gross weight</strong>';
+    return;
+  }
+  const customTare = Number(customInput && customInput.value);
+  const tare = custom ? (Number.isFinite(customTare) ? Math.max(0, customTare) : 0) : phase1TareGrams;
+  const net = Math.max(0, gross - tare);
+  const fmt = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+  if (netEl) netEl.innerHTML = 'NET SAVED WEIGHT<strong>' + fmt(gross) + 'g − ' + fmt(tare) + 'g = ' + fmt(net) + 'g saved</strong>';
+  const qty = $('qty-input');
+  if (qty) {
+    qty.value = String(net);
+    qty.dispatchEvent(new Event('input', { bubbles: true }));
+    qty.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
 function renderPhase1MeasureControls() {
   const action = state.selectedAction;
   const taken = action === 'TAKEN';
@@ -1519,7 +1679,7 @@ function renderPhase1MeasureControls() {
   const weight = phase1MeasureUnit === 'WEIGHT';
   const measureBlock = $('phase1-measure-block');
   const label = $('phase1-qty-label');
-  const gramControls = $('phase1-return-gram-controls');
+  const weightUI = $('phase1-weight-ui');
   const unitsBtn = $('phase1-measure-units');
   const weightBtn = $('phase1-measure-weight');
   const help = $('phase1-qty-help');
@@ -1531,13 +1691,15 @@ function renderPhase1MeasureControls() {
     measureBlock.classList.toggle('phase1-action-returned', returned);
   }
   if (label) label.textContent = weight
-    ? (actionLabel ? actionLabel + ' WEIGHT (GRAMS)' : 'WEIGHT / GRAMS')
+    ? (actionLabel ? actionLabel + ' WEIGHT / GRAMS' : 'WEIGHT / GRAMS')
     : (taken ? 'BOTTLE / ITEM QUANTITY' : returned ? 'RETURNED UNITS' : 'UNITS (choose TAKE or RETURN)');
   if (unitsBtn) { unitsBtn.classList.toggle('selected', !weight); unitsBtn.setAttribute('aria-pressed', String(!weight)); }
   if (weightBtn) { weightBtn.classList.toggle('selected', weight); weightBtn.setAttribute('aria-pressed', String(weight)); }
-  if (help) help.textContent = weight ? 'Enter grams in this value field' : 'Default: 1 unit · whole units for unit mode';
+  if (help) help.textContent = weight ? 'Manual net override · saved value' : 'Default: 1 unit · whole units for unit mode';
+  if (!weight) phase1EnsureUnitsDefault();
   $$('.phase1-units-only').forEach(btn => { btn.style.display = !weight && (taken || returned) ? '' : 'none'; });
-  if (gramControls) gramControls.style.display = weight && (taken || returned) ? 'flex' : 'none';
+  if (weightUI) weightUI.style.display = weight && (taken || returned) ? '' : 'none';
+  phase1RenderWeightTare();
   syncPhase1WeightVisibility();
 }
 function syncPhase1WeightVisibility() {
@@ -1549,15 +1711,21 @@ function syncPhase1WeightVisibility() {
   const weightValue = !!(($('weight-g-input')?.value || '').trim());
   const scaleAction = $('weight-use-scale')?.style.display !== 'none';
   const moreOpen = !!$('phase1-more-options')?.open;
-  options.style.display = bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen ? '' : 'none';
+  const measureWeight = phase1MeasureUnit === 'WEIGHT';
+  options.style.display = bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen || measureWeight ? '' : 'none';
 }
 function initPhase1MeasureControls() {
   $('phase1-measure-units')?.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
   $('phase1-measure-weight')?.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; applyActionTint(); });
   $('phase1-taken-minus')?.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
   $('phase1-taken-plus')?.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
-  $$('[data-phase1-gram-step]').forEach(btn => {
-    btn.addEventListener('click', () => phase1AdjustMeasure(Number(btn.dataset.phase1GramStep), 0));
+  $('phase1-gross-weight')?.addEventListener('input', phase1RenderWeightTare);
+  $('phase1-custom-tare')?.addEventListener('input', phase1RenderWeightTare);
+  $$('[data-phase1-tare]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      phase1TareGrams = btn.dataset.phase1Tare === 'custom' ? 'custom' : Number(btn.dataset.phase1Tare);
+      phase1RenderWeightTare();
+    });
   });
   $('bottle-state-select')?.addEventListener('change', () => {
     const more = $('phase1-more-options');
@@ -1576,6 +1744,10 @@ function initPhase1BlockPresentation() {
   const lastAdded = $('phase1-last-added-card');
   const scaleRow = $('main-scale-row');
   const moreInner = $('phase1-more-options-inner');
+  $('phase1-pending-replace')?.addEventListener('click', () => {
+    phase1ReplacementArmed = true;
+    statusOn('save-status', 'Replacement armed — choose the new item. The current scanned item will not be added.', 'warn');
+  });
   if (more && lastAdded) lastAdded.insertAdjacentElement('afterend', more);
   if (scaleRow && moreInner) moreInner.appendChild(scaleRow);
   const openReview = () => { if (lastAdded && lastAdded.classList.contains('active')) showReview(); };
@@ -2820,6 +2992,7 @@ function lookupByBarcode(raw) {
   }) || null;
 }
 function setPickedItem(it) {
+  if (!phase1AllowItemReplacement(it)) return;
   // Role/scope SAFETY backstop — vip_only stock is never selectable in
   // barback mode. Lists/search/scan are already pre-filtered; this guard
   // catches any remaining path so a VIP-only item can never be picked.
@@ -2846,6 +3019,7 @@ function setPickedItem(it) {
   $('search-input').value = '';
   try { $('search-input').blur(); } catch (_) {}   // iPhone: dismiss soft keyboard so Qty/Weight/Add-to-Review are visible
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — show/prefill profile for this item
+  phase1MarkPendingSelection(it);
 }
 // ════════════════════════════════════════════════════════════════════
 //  Role / scope item visibility — SINGLE SOURCE OF TRUTH (hardened)
@@ -6886,6 +7060,10 @@ $('save-btn').addEventListener('click', async () => {
   $('save-btn').disabled = true;
   $('save-btn').textContent = '… SAVING';
   statusOn('save-status', 'Saving locally to Review…', 'info');
+  const draftCountBefore = Drafts.count();
+  const savedCalculation = phase1WeightCalculationText();
+  const savedAction = state.selectedAction;
+  const savedItemName = state.selectedItemName;
   const res = addCurrentSelectionToReview({});
   $('save-btn').dataset.busy = '';
   $('save-btn').disabled = false;
@@ -6897,8 +7075,21 @@ $('save-btn').addEventListener('click', async () => {
     showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
     return;   // keep the operator's entry so they can fix and retry
   }
+  const draftCountAfter = Drafts.count();
+  if (draftCountAfter <= draftCountBefore) {
+    Feedback.warn();
+    statusOn('save-status', 'FAILED / BLOCKED — Add reported success, but Draft count did not change. Nothing was confirmed.', 'err');
+    showOverlay('⚠ ADD NOT CONFIRMED', 'Draft count did not change — keep the item and retry.', 'err');
+    return;
+  }
   Feedback.ok();
-  const n = Drafts.count();
+  const n = draftCountAfter;
+  phase1ShowDraftSuccess(savedAction, savedItemName, n, savedCalculation);
+  phase1PendingItemId = null;
+  phase1PendingItemName = '';
+  phase1ReplacementArmed = false;
+  phase1RenderPendingSelection();
+  if (phase1MeasureUnit === 'WEIGHT') phase1ResetTareAfterAdd();
   if (res.multi) {
     showOverlay('✓ ADDED FOR ' + res.added + ' BAR' + (res.added !== 1 ? 'S' : ''),
       state.selectedAction + ' · ' + state.selectedItemName + ' · qty ' + res.qty +

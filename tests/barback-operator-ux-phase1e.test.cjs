@@ -25,12 +25,12 @@ test('TAKEN and RETURN units share the existing unit stepper', () => {
 });
 
 test('TAKEN and RETURN weight use grams helpers only in weight mode', () => {
-  assert.match(html, /id="phase1-return-gram-controls"[^>]*style="display:none;"/);
+  assert.match(html, /id="phase1-weight-ui"[^>]*style="display:none;"/);
   assert.match(html, /TAKEN' : returned \? 'RETURNED' : ''/);
-  assert.match(html, /actionLabel \+ ' WEIGHT \(GRAMS\)'/);
-  assert.match(html, /weight && \(taken \|\| returned\) \? 'flex' : 'none'/);
-  assert.match(html, /data-phase1-gram-step="-50"/);
-  assert.match(html, /data-phase1-gram-step="50"/);
+  assert.match(html, /actionLabel \+ ' WEIGHT \/ GRAMS'/);
+  assert.match(html, /weightUI\.style\.display = weight && \(taken \|\| returned\) \? '' : 'none'/);
+  assert.match(html, /data-phase1-tare="0"/);
+  assert.match(html, /data-phase1-tare="16"/);
   assert.match(html, /phase1MeasureUnit = 'WEIGHT'/);
 });
 

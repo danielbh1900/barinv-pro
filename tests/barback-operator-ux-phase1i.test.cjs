@@ -18,7 +18,7 @@ test('RETURN defaults to the same unit console as TAKE', () => {
   assert.match(html, /let phase1MeasureUnit = 'UNITS'/);
   assert.match(html, /taken \? 'BOTTLE \/ ITEM QUANTITY' : returned \? 'RETURNED UNITS'/);
   assert.match(html, /!weight && \(taken \|\| returned\)/);
-  assert.match(html, /gramControls\.style\.display = weight && \(taken \|\| returned\) \? 'flex' : 'none'/);
+  assert.match(html, /weightUI\.style\.display = weight && \(taken \|\| returned\) \? '' : 'none'/);
   assert.doesNotMatch(html, /RETURN GRAMS/);
 });
 
@@ -26,7 +26,7 @@ test('RETURN scale warning/widget requires explicit WEIGHT / GRAMS mode', () => 
   assert.match(html, /var _rfWeight = \(typeof phase1MeasureUnit !== 'undefined' && phase1MeasureUnit === 'WEIGHT'\)/);
   assert.match(html, /_rfBle\.style\.display = \(_rfRet && _rfWeight && _rfSup\)/);
   assert.match(html, /_rfHint\.style\.display = \(_rfRet && _rfWeight && !_rfSup\)/);
-  assert.match(html, /id="phase1-return-gram-controls" class="phase1-gram-controls" style="display:none;"/);
+  assert.match(html, /id="phase1-weight-ui" class="phase1-weight-ui" style="display:none;"/);
 });
 
 test('Phase 1I keeps one numeric source and no new save path', () => {
