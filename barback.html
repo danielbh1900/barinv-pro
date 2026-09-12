@@ -96,6 +96,10 @@
       padding:8px 10px; margin:0 0 8px; border:1px solid #374151; border-radius:7px; background:#111827;
       color:#cbd5e1; font-size:12px; font-weight:800; cursor:pointer; text-align:left; }
     .phase1-scale-toggle .phase1-scale-state { color:#7dd3fc; font-weight:600; }
+    .phase1-scale-access { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0; padding:10px 12px; border:1px solid #374151; border-radius:8px; background:#111827; }
+    .phase1-scale-access .phase1-scale-access-status { min-width:0; color:#cbd5e1; font-size:12px; font-weight:900; }
+    .phase1-scale-access .phase1-scale-access-status.unavailable { color:#fbbf24; }
+    .phase1-scale-access button { flex:0 0 auto; min-height:42px; padding:8px 11px; border:1px solid #4b5563; border-radius:7px; background:#1f2937; color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
     #main-scale-row.phase1-scale-collapsed #main-ble,
     #main-scale-row.phase1-scale-collapsed #main-ble-hint,
     #main-scale-row.phase1-scale-collapsed #main-bridge { display:none !important; }
@@ -914,6 +918,11 @@
       </div>
       <!-- SCALE_BLE — iPhone/unsupported-browser manual hint (RETURN). Shown when Web Bluetooth is unavailable. -->
       <div id="rf-ble-hint" style="display:none;margin-top:8px;font-size:11px;color:#9ca3af;line-height:1.4;">📱 Scale connection is available on Android Chrome. On iPhone, enter return grams in QTY manually.</div>
+    </div>
+
+    <div id="phase1-scale-access" class="phase1-scale-access" role="status" aria-live="polite">
+      <span id="phase1-scale-access-status" class="phase1-scale-access-status">SCALE: Not connected</span>
+      <button type="button" id="phase1-scale-access-open">CONNECT / DETAILS</button>
     </div>
 
     <details class="phase1-block phase1-more-options" id="phase1-more-options">
@@ -3032,6 +3041,18 @@ function setPhase1ScaleCollapsed(collapsed) {
   const stateEl = btn.querySelector('.phase1-scale-state');
   if (stateEl) stateEl.textContent = 'manual grams available';
 }
+function phase1RenderScaleAccess() {
+  const status = $('phase1-scale-access-status');
+  const button = $('phase1-scale-access-open');
+  if (!status || !button) return;
+  const scale = (typeof bleScale !== 'undefined' && bleScale) || {};
+  const available = !!(scale.supported || scale.nativeMode);
+  const connected = !!scale.connected;
+  status.classList.toggle('unavailable', !available);
+  status.textContent = connected ? 'SCALE: Connected' : available ? 'SCALE: Not connected' : 'SCALE: unavailable on this browser';
+  button.textContent = available ? (connected ? 'RECONNECT / DETAILS' : 'CONNECT / DETAILS') : 'SCALE DETAILS';
+  button.setAttribute('aria-label', available ? 'Connect or open scale details' : 'Open scale details and browser support information');
+}
 function initPhase1ScaleDisclosure() {
   const btn = $('main-scale-toggle');
   if (!btn) return;
@@ -3044,6 +3065,8 @@ function initPhase1ScaleDisclosure() {
   btn.addEventListener('click', openDetails);
   $('phase1-scale-back')?.addEventListener('click', () => showScreen('screen-main'));
   $('phase1-scale-back-bottom')?.addEventListener('click', () => showScreen('screen-main'));
+  $('phase1-scale-access-open')?.addEventListener('click', () => showScreen('phase1-scale-details'));
+  phase1RenderScaleAccess();
   setPhase1ScaleCollapsed(phase1ScaleShouldStartCollapsed());
 }
 initPhase1ScaleDisclosure();
@@ -4465,6 +4488,7 @@ function _bleStatus(msg) {
     var el = $(_BLE_SURFACES[i] + '-status');
     if (el) el.textContent = (_BLE_SURFACES[i] === 'rf-ble' ? 'Scale return weight: ' : 'Scale: ') + msg;
   }
+  try { phase1RenderScaleAccess(); } catch (_) {}
 }
 // Compact debug line on BOTH surfaces — connection stage / device / hex / decode status.
 function _bleDbg(msg) {
@@ -4506,6 +4530,7 @@ function _bleSetDisconnected() {
   }
   _bleResetButtons();
   _bleSetMode('not connected');
+  try { phase1RenderScaleAccess(); } catch (_) {}
   try { _weightUseScaleSync(); } catch (_) {}
 }
 function _bleOnFrame(ev) {
@@ -4904,6 +4929,7 @@ async function _nativeScaleDisconnect() {
       try { _bleSetMode('iOS native BLE available'); } catch (_) {}
     }
     try { _bleApplyDiag(); } catch (_) {}   // fill Browser BLE / Secure / Device in both panels
+    try { phase1RenderScaleAccess(); } catch (_) {}
     try { applyActionTint(); } catch (_) {}   // re-evaluate the in-flow RETURN row + hint
     try { _scaleSyncCertificationGateUI(); } catch (_) {}
     // Soft, NON-hiding availability hint — keep the Connect button visible regardless.
