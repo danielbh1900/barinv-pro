@@ -31,12 +31,16 @@ test('Phase 1Q requires callable speech APIs and tracks loaded voices', () => {
 test('Phase 1Q Test Voice is direct, uncoupled from message throttle, and safe when blocked', () => {
   assert.match(voice, /testVoice\(\)/);
   assert.match(voice, /synth\.cancel\(\)/);
-  assert.match(voice, /new window\.SpeechSynthesisUtterance\('Voice Guide is on\.'\)/);
+  assert.match(voice, /const phrase = phraseOverride \|\| \(this\.enabled \? 'Voice Guide is on\.' : 'Voice test\. Guide is off\.'\);/);
+  assert.match(voice, /new window\.SpeechSynthesisUtterance\(phrase\)/);
   assert.match(voice, /synth\.speak\(utterance\)/);
-  assert.match(voice, /Voice test sent\. If you heard nothing, this browser may block speech/);
   assert.match(voice, /Voice blocked by this browser\. Try Test Voice again or use Safari for voice/);
+  assert.match(voice, /this\.lastVoiceTest = 'sent'/);
   assert.match(voice, /lastVoiceTest = 'unavailable'/);
-  assert.doesNotMatch(voice.slice(voice.indexOf('testVoice()'), voice.indexOf('testVoice()') + 1800), /lastMessage === message/);
+  const testVoiceStart = voice.indexOf('testVoice(');
+  const testVoiceEnd = voice.indexOf('announceOperationalState(', testVoiceStart);
+  assert.ok(testVoiceStart >= 0 && testVoiceEnd > testVoiceStart);
+  assert.doesNotMatch(voice.slice(testVoiceStart, testVoiceEnd), /lastMessage === message/);
 });
 
 test('Phase 1Q preserves opt-in item names, local settings, scale, tare, and scan markers', () => {

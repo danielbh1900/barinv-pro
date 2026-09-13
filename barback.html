@@ -1676,7 +1676,7 @@ const VoiceGuide = {
     if (!this.enabled) { try { window.speechSynthesis.cancel(); } catch (_) {} }
     return this.enabled;
   },
-  testVoice() {
+  testVoice(phraseOverride) {
     if (!this.supported) {
       this.lastVoiceTest = 'unavailable';
       this.updateUI('Voice unavailable in this browser.');
@@ -1684,16 +1684,17 @@ const VoiceGuide = {
     }
     try {
       const synth = window.speechSynthesis;
+      const phrase = phraseOverride || (this.enabled ? 'Voice Guide is on.' : 'Voice test. Guide is off.');
       this.refreshVoices();
       synth.cancel();
-      const utterance = new window.SpeechSynthesisUtterance('Voice Guide is on.');
+      const utterance = new window.SpeechSynthesisUtterance(phrase);
       utterance.rate = 1;
       utterance.pitch = 1;
       utterance.volume = 1;
-      utterance.onstart = () => { this.lastVoiceTest = 'success'; this.updateUI('Voice Guide is on.'); };
-      utterance.onerror = () => { this.lastVoiceTest = 'blocked'; this.updateUI('Voice blocked by this browser. Try Test Voice again or use Safari for voice.'); };
+      utterance.onstart = () => { this.lastVoiceTest = 'success'; this.updateUI(); };
+      utterance.onerror = () => { this.lastVoiceTest = 'blocked'; this.updateUI(); };
       this.lastVoiceTest = 'sent';
-      this.updateUI('Voice test sent. If you heard nothing, this browser may block speech.');
+      this.updateUI();
       synth.speak(utterance);
       return true;
     } catch (_) {
@@ -1785,11 +1786,11 @@ const VoiceGuide = {
 function initPhase1VoiceControl() {
   VoiceGuide.init();
   $('phase1-voice-toggle')?.addEventListener('click', () => {
-    const on = VoiceGuide.setEnabled(!VoiceGuide.enabled);
-    if (on) VoiceGuide.testVoice();
+    const wasEnabled = VoiceGuide.enabled;
+    const enabled = VoiceGuide.setEnabled(!wasEnabled);
+    VoiceGuide.testVoice(enabled ? 'Voice Guide is on.' : 'Voice Guide is off.');
   });
   $('phase1-voice-test')?.addEventListener('click', () => {
-    if (!VoiceGuide.enabled) VoiceGuide.setEnabled(true);
     VoiceGuide.testVoice();
   });
   $('phase1-voice-item-toggle')?.addEventListener('click', () => {
