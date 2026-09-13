@@ -43,7 +43,7 @@ test('Phase 1L preserves Phase 1K tare controls and UNITS behavior', () => {
   assert.match(html, /CUSTOM TARE/);
   assert.match(html, /const net = Math\.max\(0, gross - tare\)/);
   assert.match(html, /let phase1MeasureUnit = 'UNITS'/);
-  assert.match(html, /qty\.value = String\(net\)/);
+  assert.match(html, /weight\.value = String\(net\)/);
   assert.doesNotMatch(html, /phase1MeasureUnit = 'TRANSFER'/);
 });
 

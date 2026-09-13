@@ -189,7 +189,7 @@ test('6. confirmed direct reading supports TAKEN bottle weight without submissio
 
   h.context._bleUseLatestMain();
 
-  assert.equal(h.element('weight-g-input').value, '731');
+  assert.equal(h.element('phase1-gross-weight').value, '731');
   assert.equal(h.context.remainingUpdates, 1);
   assert.match(h.confirmations[0], /TAKEN bottle weight/);
 });
@@ -204,8 +204,9 @@ test('7. confirmed native reading supports RETURN grams', () => {
 
   h.context._bleUseLatestMain();
 
-  assert.equal(h.element('qty-input').value, '845');
-  assert.match(h.confirmations[0], /RETURN quantity/);
+  assert.equal(h.element('phase1-gross-weight').value, '845');
+  assert.equal(h.element('qty-input').value, '1');
+  assert.match(h.confirmations[0], /RETURN weight/);
 });
 
 test('8. manual grams inputs remain available and outside the scale gate', () => {

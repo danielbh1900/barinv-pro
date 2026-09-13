@@ -218,11 +218,11 @@ test('5. trusted direct Web Bluetooth reading still fills partial and TAKEN weig
 
   h.context.state.selectedAction = 'TAKEN';
   h.context._bleUseLatestMain();
-  assert.equal(h.element('weight-g-input').value, '618');
+  assert.equal(h.element('phase1-gross-weight').value, '618');
   assert.equal(h.context.remainingUpdates, 1);
 
   h.context._weightUseScaleFill();
-  assert.equal(h.element('weight-g-input').value, '618');
+  assert.equal(h.element('phase1-gross-weight').value, '618');
   assert.equal(h.context.remainingUpdates, 2);
   assert.equal(h.context.feedbackCount, 1);
 });
@@ -240,11 +240,13 @@ test('6. trusted direct native BLE reading still fills RETURN grams', () => {
 
   h.context.state.selectedAction = 'RETURNED';
   h.context._bleUseLatestMain();
-  assert.equal(h.element('qty-input').value, '731');
+  assert.equal(h.element('phase1-gross-weight').value, '731');
+  assert.equal(h.element('qty-input').value, '1');
 
   h.element('qty-input').value = '';
   h.context._bleUseLatestReturn();
-  assert.equal(h.element('qty-input').value, '731');
+  assert.equal(h.element('phase1-gross-weight').value, '731');
+  assert.equal(h.element('qty-input').value, '1');
 });
 
 test('7. unstable or spoofed-local readings cannot fill inventory inputs', () => {

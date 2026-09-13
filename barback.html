@@ -747,7 +747,7 @@
     <!-- SCALE_BLE — visible, direction-neutral main Scale panel. Shown whenever
          navigator.bluetooth exists (NOT gated on getAvailability). iPhone/iOS shows
          the manual note. "Use latest stable weight" fills the context-appropriate
-         field (RETURN → QTY grams; otherwise Weight (g)); never submits. -->
+         field (TAKEN/RETURN → Weight (g)); never submits. -->
     <div class="row phase1-block" id="main-scale-row">
       <label>SCALE</label>
       <button type="button" id="main-scale-toggle" class="phase1-scale-toggle" aria-expanded="true">
@@ -885,11 +885,12 @@
         <button type="button" id="phase1-measure-weight" aria-pressed="false">WEIGHT / GRAMS</button>
       </div>
       <label id="phase1-qty-label">UNITS (choose TAKE or RETURN)</label>
-      <div class="phase1-measure-input-line">
+      <div class="phase1-measure-input-line" id="phase1-qty-input-line">
         <button type="button" class="phase1-stepper-btn phase1-units-only" id="phase1-taken-minus" aria-label="Decrease unit quantity">−</button>
         <input id="qty-input" type="number" inputmode="decimal" step="0.1" value="1">
         <button type="button" class="phase1-stepper-btn phase1-units-only" id="phase1-taken-plus" aria-label="Increase unit quantity">＋</button>
       </div>
+      <div id="phase1-weight-qty-fixed" class="muted small" style="display:none;margin-top:5px;">Qty fixed: 1 for weighted entry</div>
       <div id="phase1-qty-help" class="muted small" style="margin-top:5px;">Default: 1 unit</div>
       <div id="phase1-weight-ui" class="phase1-weight-ui" style="display:none;">
         <label for="phase1-gross-weight">MEASURED WEIGHT ON SCALE</label>
@@ -904,7 +905,7 @@
         <input id="phase1-custom-tare" type="number" inputmode="decimal" step="1" min="0" placeholder="Custom tare (g)" autocomplete="off" style="display:none;">
         <div id="phase1-net-weight" class="phase1-net-weight">NET SAVED WEIGHT<strong>Enter measured gross weight</strong></div>
       </div>
-      <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support (hidden on iPhone). Fills QTY (grams); never submits. -->
+      <!-- SCALE_BLE return — capability-gated Web Bluetooth. Visible only for RETURN + Web BT support. Fills the gross weight field; never submits. -->
       <div id="rf-ble" style="display:none;margin-top:8px;padding:8px;border:1px solid #374151;border-radius:6px;background:#0f1620;">
         <div class="scale-certification-warning" style="margin-bottom:7px;color:#fcd34d;font-size:11px;line-height:1.35;">Beta estimate only. Not certified/legal-for-trade. Enable it in the SCALE panel and confirm before filling RETURN grams.</div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -1559,9 +1560,12 @@ function renderPhase1LastAdded() {
   const bar = row.bar_id ? reviewBarLabel(row.bar_id) : 'Any bar';
   const staff = row.staff_name || state.staffName || 'Current operator';
   const when = row.drafted_at || row.at || Date.now();
+  const measure = row.weight_g != null
+    ? ('Weight (g) ' + String(row.weight_g))
+    : ('Qty ' + String(row.qty));
   card.innerHTML = '<div class="phase1-last-added-label">LAST ADDED</div>' +
     '<div class="phase1-last-added-main">' + esc(action) + ' · ' + esc(item) + '</div>' +
-    '<div class="phase1-last-added-meta">Qty/grams ' + esc(String(row.qty)) + ' · ' + esc(bar) + ' · ' + esc(staff) +
+    '<div class="phase1-last-added-meta">' + esc(measure) + ' · ' + esc(bar) + ' · ' + esc(staff) +
     ' · ' + esc(stateLabel) + ' · ' + esc(fmtTime(when)) + '</div>' +
     '<div class="phase1-last-added-view">VIEW REVIEW →</div>';
   card.classList.toggle('phase1-last-added-taken', action === 'TAKEN');
@@ -1872,6 +1876,47 @@ function phase1EnsureUnitsDefault() {
   const raw = String(qty.value || '').trim();
   if (raw === '' || Number(raw) <= 0) qty.value = '1';
 }
+function phase1EnsureWeightQuantityDefault() {
+  const qty = $('qty-input');
+  if (qty) qty.value = '1';
+}
+// SOURCE_SEMANTICS — resolve the meaning of values before the existing Add
+// path reads them. Scale/gross/tare evidence is authoritative for weight;
+// without that evidence, Qty remains quantity even when it is large.
+function resolveQuantityAndWeightSemantics(input) {
+  input = input || {};
+  const qtyRaw = String(input.qtyValue == null ? '' : input.qtyValue).trim();
+  const weightRaw = String(input.weightValue == null ? '' : input.weightValue).trim();
+  const grossRaw = String(input.grossValue == null ? '' : input.grossValue).trim();
+  const qty = Number(qtyRaw);
+  const weight = Number(weightRaw);
+  const gross = Number(grossRaw);
+  const scaleUsed = !!input.scaleUsed;
+  const tareUsed = !!input.tareUsed;
+  const hasWeight = weightRaw !== '' && Number.isFinite(weight) && weight >= 0;
+  const hasGross = grossRaw !== '' && Number.isFinite(gross) && gross >= 0;
+  if ((scaleUsed || hasGross || tareUsed) && hasWeight) {
+    return { finalQty: 1, finalWeightG: weightRaw, reason: scaleUsed ? 'scale' : 'gross/tare' };
+  }
+  if (hasWeight) {
+    return { finalQty: 1, finalWeightG: weightRaw, reason: 'manual Weight (g)' };
+  }
+  return { finalQty: Number.isFinite(qty) && qty > 0 ? qty : 1, finalWeightG: '', reason: 'quantity-only' };
+}
+function prepareQuantityAndWeightSemantics(input) {
+  const result = resolveQuantityAndWeightSemantics({
+    qtyValue: input && input.qtyValue != null ? input.qtyValue : ($('qty-input') && $('qty-input').value),
+    weightValue: input && input.weightValue != null ? input.weightValue : ($('weight-g-input') && $('weight-g-input').value),
+    grossValue: input && input.grossValue != null ? input.grossValue : ($('phase1-gross-weight') && $('phase1-gross-weight').value),
+    scaleUsed: !!(input && input.scaleUsed) || !!state.weightSource?.scaleUsed,
+    tareUsed: !!(input && input.tareUsed) || !!(typeof phase1TareGrams !== 'undefined' && phase1TareGrams !== 0),
+  });
+  const qty = $('qty-input');
+  const weight = $('weight-g-input');
+  if (qty) qty.value = String(result.finalQty);
+  if (weight) weight.value = result.finalWeightG;
+  return result;
+}
 function phase1ShowDraftSuccess(action, itemName, count, calculation) {
   const card = $('phase1-draft-success');
   if (!card) return;
@@ -1913,11 +1958,11 @@ function phase1RenderWeightTare() {
   const net = Math.max(0, gross - tare);
   const fmt = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
   if (netEl) netEl.innerHTML = 'NET SAVED WEIGHT<strong>' + fmt(gross) + 'g − ' + fmt(tare) + 'g = ' + fmt(net) + 'g saved</strong>';
-  const qty = $('qty-input');
-  if (qty) {
-    qty.value = String(net);
-    qty.dispatchEvent(new Event('input', { bubbles: true }));
-    qty.dispatchEvent(new Event('change', { bubbles: true }));
+  const weight = $('weight-g-input');
+  if (weight) {
+    weight.value = String(net);
+    weight.dispatchEvent(new Event('input', { bubbles: true }));
+    weight.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 function renderPhase1MeasureControls() {
@@ -1931,6 +1976,8 @@ function renderPhase1MeasureControls() {
   const unitsBtn = $('phase1-measure-units');
   const weightBtn = $('phase1-measure-weight');
   const help = $('phase1-qty-help');
+  const qtyLine = $('phase1-qty-input-line');
+  const fixedQty = $('phase1-weight-qty-fixed');
   const actionLabel = taken ? 'TAKEN' : returned ? 'RETURNED' : '';
   if (measureBlock) {
     measureBlock.dataset.action = action || '';
@@ -1943,8 +1990,10 @@ function renderPhase1MeasureControls() {
     : (taken ? 'BOTTLE / ITEM QUANTITY' : returned ? 'RETURNED UNITS' : 'UNITS (choose TAKE or RETURN)');
   if (unitsBtn) { unitsBtn.classList.toggle('selected', !weight); unitsBtn.setAttribute('aria-pressed', String(!weight)); }
   if (weightBtn) { weightBtn.classList.toggle('selected', weight); weightBtn.setAttribute('aria-pressed', String(weight)); }
-  if (help) help.textContent = weight ? 'Manual net override · saved value' : 'Default: 1 unit · whole units for unit mode';
+  if (help) help.textContent = weight ? 'Net grams saved as Weight (g) · Qty stays 1' : 'Default: 1 unit · whole units for unit mode';
   if (!weight) phase1EnsureUnitsDefault();
+  if (qtyLine) qtyLine.style.display = weight ? 'none' : '';
+  if (fixedQty) fixedQty.style.display = weight ? '' : 'none';
   $$('.phase1-units-only').forEach(btn => { btn.style.display = !weight && (taken || returned) ? '' : 'none'; });
   if (weightUI) weightUI.style.display = weight && (taken || returned) ? '' : 'none';
   phase1RenderWeightTare();
@@ -1960,11 +2009,11 @@ function syncPhase1WeightVisibility() {
   const scaleAction = $('weight-use-scale')?.style.display !== 'none';
   const moreOpen = !!$('phase1-more-options')?.open;
   const measureWeight = phase1MeasureUnit === 'WEIGHT';
-  options.style.display = bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen || measureWeight ? '' : 'none';
+  options.style.display = !measureWeight && (bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen) ? '' : 'none';
 }
 function initPhase1MeasureControls() {
   $('phase1-measure-units')?.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
-  $('phase1-measure-weight')?.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; applyActionTint(); });
+  $('phase1-measure-weight')?.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; phase1EnsureWeightQuantityDefault(); applyActionTint(); });
   $('phase1-taken-minus')?.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
   $('phase1-taken-plus')?.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
   $('phase1-gross-weight')?.addEventListener('input', phase1RenderWeightTare);
@@ -2649,6 +2698,8 @@ const state = {
   scannerContinuous: false,
   scannerClosing: false,   // single-scan: true during the brief success-toast→close window
   scannerCooldown: {},  // code → lastScannedAt
+  rapidScanBusy: false,    // rapid decode lock: one accepted barcode at a time
+  rapidScanResetTimer: null,
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
   roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
@@ -2667,6 +2718,7 @@ const state = {
   openingParSession: null, // authenticated session snapshot; never sourced from live Master PAR
   authPath: null,         // 'phase3' or 'phase2_test'
   ble: { available:false, deviceId:null, connected:false, lastWeight:null, lastStable:false },
+  weightSource: { scaleUsed:false },
 };
 
 function normalizeAllowedMovements(raw) {
@@ -3225,36 +3277,54 @@ $('rapid-mode').addEventListener('change', (e) => {
 // ("652341401024") with NO leading zero — so the prior exact-string
 // match failed on every Casamigos-style row.
 //
-// normalizeBarcodeLike: strip non-alphanumeric, lowercase, and strip
-// the leading-zero run for purely-numeric values. UPC-A vs EAN-13
-// zero-padding now collide into the same canonical key. Non-numeric
-// codes (alphanumeric SKUs / supplier serials) keep their leading
-// characters — only the digit-only form is leading-zero-stripped.
-//
-// Safe by construction:
-//   normalize("652341401024")   -> "652341401024"
-//   normalize("0652341401024")  -> "652341401024"   (strips one leading 0)
-//   normalize("00080480981082") -> "80480981082"    (strips both leading 0s)
-//   normalize("CAB-12-345")     -> "cab12345"       (mixed → keep all chars)
-//   normalize("")               -> ""               (empty → no match)
-function normalizeBarcodeLike(value) {
-  const s = String(value || '').trim().toLowerCase().replace(/[^0-9a-z]/g, '');
-  if (!s) return '';
-  if (/^[0-9]+$/.test(s)) return s.replace(/^0+/, '');
-  return s;
+// barcodeLookupVariants preserves the exact input first, strips formatting
+// for matching, and adds only the safe UPC-A/EAN-13 leading-zero pair:
+//   652341401024 ↔ 0652341401024
+// It does not strip arbitrary leading zeros or mutate stored item values.
+// PHASE1U — safe UPC-A/EAN-13 alias matching. Stored barcode data is never
+// rewritten; only a 12-digit code and its leading-zero 13-digit variant alias.
+function barcodeDigitsOnly(raw) {
+  return String(raw == null ? '' : raw).trim().replace(/[^0-9]/g, '');
 }
-
+function barcodeLookupVariants(raw) {
+  const source = String(raw == null ? '' : raw).trim();
+  const digits = barcodeDigitsOnly(source);
+  const variants = [];
+  const add = value => { if (value && !variants.includes(value)) variants.push(value); };
+  add(source); add(digits);
+  if (digits.length === 12) add('0' + digits);
+  if (digits.length === 13 && digits[0] === '0') add(digits.slice(1));
+  return variants;
+}
+function barcodeCandidates(item) {
+  return [item && item.barcode, item && item.code, item && item.sku].filter(Boolean);
+}
+function lookupBarcodeResult(raw) {
+  const source = String(raw == null ? '' : raw).trim();
+  const digits = barcodeDigitsOnly(source);
+  if (!source && !digits) return { item: null, ambiguous: false, aliasUsed: false, matches: [] };
+  const items = cache.items || [];
+  const rawExact = items.filter(it => barcodeCandidates(it).some(value => String(value).trim() === source));
+  const rawExactIds = [...new Set(rawExact.map(it => String(it.id)))];
+  if (rawExactIds.length === 1) return { item: rawExact[0], ambiguous: false, aliasUsed: false, matches: rawExact };
+  if (rawExactIds.length > 1) return { item: null, ambiguous: true, aliasUsed: false, matches: rawExact };
+  const exact = items.filter(it => barcodeCandidates(it).some(value => {
+    const candidate = String(value).trim();
+    return digits && barcodeDigitsOnly(candidate) === digits;
+  }));
+  const exactIds = [...new Set(exact.map(it => String(it.id)))];
+  if (exactIds.length === 1) return { item: exact[0], ambiguous: false, aliasUsed: false, matches: exact };
+  if (exactIds.length > 1) return { item: null, ambiguous: true, aliasUsed: false, matches: exact };
+  const variants = barcodeLookupVariants(source);
+  const aliases = items.filter(it => barcodeCandidates(it).some(value =>
+    barcodeLookupVariants(value).some(candidate => variants.includes(candidate))));
+  const aliasIds = [...new Set(aliases.map(it => String(it.id)))];
+  if (aliasIds.length === 1) return { item: aliases[0], ambiguous: false, aliasUsed: true, matches: aliases };
+  return { item: null, ambiguous: aliasIds.length > 1, aliasUsed: false, matches: aliases };
+}
 function lookupByBarcode(raw) {
-  const target = normalizeBarcodeLike(raw);
-  if (!target) return null;
-  return (cache.items || []).find(it => {
-    // it.barcode / it.code are kept in the candidate list for forward
-    // compatibility — public.items may grow real barcode columns later
-    // (and an item_aliases table is on the roadmap). Today only
-    // it.sku is populated by the bundle.
-    const cands = [it.barcode, it.code, it.sku].filter(Boolean).map(normalizeBarcodeLike);
-    return cands.includes(target);
-  }) || null;
+  const result = lookupBarcodeResult(raw);
+  return result.ambiguous ? null : result.item;
 }
 function setPickedItem(it, source) {
   if (!phase1AllowItemReplacement(it)) return false;
@@ -3543,7 +3613,13 @@ function showBrowseList() {
 function searchItems(q) {
   q = String(q || '').trim().toLowerCase();
   if (!q) { showBrowseList(); return; }   // browse fallback: empty query = browsable list
-  const exact = lookupByBarcode(q);
+  const barcodeResult = lookupBarcodeResult(q);
+  if (barcodeResult.ambiguous) {
+    $('search-results').innerHTML = '<div class="item-row" style="color:#fbbf24">Barcode matched multiple items. Please select item manually.</div>';
+    $('search-results').style.display = 'block';
+    return;
+  }
+  const exact = barcodeResult.item;
   if (exact && isBarbackVisibleItem(exact)) { setPickedItem(exact, 'search'); return; }   // never select vip_only by typed code
   const matches = barbackVisibleItems().filter(it => {
     const n = String(it.name || '').toLowerCase();
@@ -3573,8 +3649,9 @@ $('search-input').addEventListener('keydown', (e) => {
     // Treat Enter in search box as "pick first match"
     const v = $('search-input').value.trim();
     if (!v) return;
-    const it = lookupByBarcode(v);
-    if (it && isBarbackVisibleItem(it)) { setPickedItem(it, 'search'); }
+    const barcodeResult = lookupBarcodeResult(v);
+    if (barcodeResult.ambiguous) statusOn('save-status', 'Barcode matched multiple items. Please select item manually.', 'warn');
+    else if (barcodeResult.item && isBarbackVisibleItem(barcodeResult.item)) { setPickedItem(barcodeResult.item, 'search'); }
     else {
       const matches = barbackVisibleItems().filter(x =>
         String(x.name || '').toLowerCase().indexOf(v.toLowerCase()) >= 0
@@ -3713,18 +3790,31 @@ function acceptDecodedCode(code, controls) {
   // item (continuous mode), PAUSE the decode loop so the live camera can stay on
   // without stacking scans behind the sheet. closeQtyModal() nulls qtyModalItem,
   // which clears this gate → scanning resumes automatically (Add or Cancel).
-  if (state.qtyModalItem) return;
+  if (state.qtyModalItem || state.rapidScanBusy) return;
   const now = Date.now();
   const last = state.scannerCooldown[code] || 0;
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
   state.scannerCooldown[code] = now;
   Feedback.scan();
+  if (state.scannerContinuous) {
+    state.rapidScanBusy = true;
+    if (state.rapidScanResetTimer) { try { clearTimeout(state.rapidScanResetTimer); } catch (_) {} }
+    state.rapidScanResetTimer = setTimeout(() => {
+      state.rapidScanBusy = false;
+      state.rapidScanResetTimer = null;
+    }, 8000);
+  }
   // PLAN-2026-06-09 hotfix — NEVER let a success-handler exception bubble into the
   // ZXing decode callback / ROI tick; an uncaught throw there halts the continuous
   // decode and freezes the camera ("stuck/doing nothing after first scan"). Both
   // decode routes stay alive.
   try { onBarcodeScanned(code, controls); }
-  catch (e) { try { console.warn('[scanner] onBarcodeScanned threw — decode loop kept alive', (e && e.message) || e); } catch (_) {} }
+  catch (e) {
+    state.rapidScanBusy = false;
+    try { if (state.rapidScanResetTimer) clearTimeout(state.rapidScanResetTimer); } catch (_) {}
+    state.rapidScanResetTimer = null;
+    try { console.warn('[scanner] onBarcodeScanned threw — decode loop kept alive', (e && e.message) || e); } catch (_) {}
+  }
 }
 
 // Returns true when a full-frame detection sits inside the central scan band,
@@ -3825,6 +3915,9 @@ function stopRoiDecodeLoop() {
 }
 
 async function openScanner() {
+  // SCANNER_FREEZE_HOTFIX — clear any abandoned quantity-sheet/rapid lock
+  // before a new scanner session begins.
+  closeQtyModal();
   // PLAN-2026-06-04 — safe diagnostic so iPhone Web Inspector can
   // tell whether the scanner actually opened. Logs ZERO secrets — only
   // the continuous flag, the action-gate boolean, and the cached item
@@ -3991,8 +4084,9 @@ function shouldRequireWeightBeforeAdd() {
   return false;
 }
 
-async function onBarcodeScanned(code, controls) {
-  const it = lookupByBarcode(code);
+function onBarcodeScanned(code, controls) {
+  const barcodeResult = lookupBarcodeResult(code);
+  const it = barcodeResult.item;
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
   // distinguish "ZXing decoded but no item match" from "ZXing never
   // decoded anything". No secret content — just lookup result + cache
@@ -4007,6 +4101,16 @@ async function onBarcodeScanned(code, controls) {
       cache_items_count: (cache.items || []).length,
     });
   } catch (_) { /* console may be unavailable */ }
+  if (barcodeResult.ambiguous) {
+    try { showScannerToast('Barcode matched multiple items — select item manually', 'warn'); } catch (_) {}
+    try { $('search-input').value = code; } catch (_) {}
+    if (!state.scannerContinuous) {
+      if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
+      try { closeScanner(); } catch (_) {}
+      searchItems(code);
+    } else releaseRapidScanLock();
+    return;
+  }
   if (!it) {
     // Surface the decoded code in BOTH modes (rapid + one-shot) so the
     // operator can see exactly what ZXing read. Previously the rapid-
@@ -4025,6 +4129,7 @@ async function onBarcodeScanned(code, controls) {
       try { closeScanner(); } catch (_) {}
       searchItems(code);
     }
+    else releaseRapidScanLock();
     // Rapid mode: stay in scanner so the next bottle can be scanned;
     // the unmatched code is now in the search field for review when
     // the operator closes the scanner.
@@ -4045,6 +4150,7 @@ async function onBarcodeScanned(code, controls) {
       try { closeScanner(); } catch (_) {}
       try { statusOn('save-status', scopeBlockReason(it), 'err'); } catch (_) {}
     }
+    else releaseRapidScanLock();
     return;   // rapid mode: stays open for the next bottle; out-of-scope simply ignored
   }
 
@@ -4064,10 +4170,14 @@ async function onBarcodeScanned(code, controls) {
       blockMsg = 'Select at least one bar first';
     if (blockMsg) {
       try { showScannerToast('⚠ ' + blockMsg, 'warn'); } catch (_) {}
+      releaseRapidScanLock();
       return;   // stay open; nothing added, sheet not opened
     }
-    try { showScannerToast('✓ ' + it.name + ' · set quantity…', 'ok'); } catch (_) {}
-    try { openQtyModal(it); } catch (_) {}   // gate pauses decodes; closeQtyModal resumes
+    try { showScannerToast('✓ ' + (barcodeResult.aliasUsed ? 'Matched UPC/EAN variant · ' : '') + it.name + ' · set quantity…', 'ok'); } catch (_) {}
+    if (!openQtyModal(it)) {
+      try { showScannerToast('⚠ Quantity sheet could not open — scan again', 'warn'); } catch (_) {}
+      releaseRapidScanLock();
+    }
     return;
   } else {
     // SINGLE-SCAN — guard against a second decode firing during the close window.
@@ -4082,8 +4192,8 @@ async function onBarcodeScanned(code, controls) {
     try {
       showScannerToast(
         blockMsg ? ('⚠ ' + blockMsg)
-          : requireWeight ? ('✓ ' + it.name + ' · Scanned — weigh, then ADD')
-          : ('✓ ' + it.name + ' · set quantity…'),
+          : requireWeight ? ('✓ ' + (barcodeResult.aliasUsed ? 'Matched UPC/EAN variant · ' : '') + it.name + ' · Scanned — weigh, then ADD')
+          : ('✓ ' + (barcodeResult.aliasUsed ? 'Matched UPC/EAN variant · ' : '') + it.name + ' · set quantity…'),
         blockMsg ? 'warn' : 'ok'
       );
     } catch (_) {}
@@ -4306,43 +4416,60 @@ function _qmResetProfile() {
   _qmUpdateRemaining();
 }
 function openQtyModal(it) {
-  if (!it) return;
-  if (state.selectedItemId !== it.id && !setPickedItem(it, 'scan')) return;
-  state.qtyModalItem = it;
-  const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
-  if ($('qm-item')) $('qm-item').innerHTML =
-    '<span class="qm-item-with-thumb">' +
-      itemThumbHTML(it, 'qm-thumb') +
-      '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
-    '</span>';
-  const act = state.selectedAction || '(pick action)';
-  let barCtx;
-  if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
-    const nb = state.multiBars.length;
-    barCtx = 'Will add to ' + nb + ' bar' + (nb !== 1 ? 's' : '');
-  } else {
-    const b = (cache.bars || []).find(x => x.id === state.selectedBarId);
-    barCtx = b ? ('Bar: ' + (b.name || '?')) : 'Bar: (any)';
+  // SCANNER_FREEZE_HOTFIX — reset stale state and make modal setup transactional.
+  closeQtyModal();
+  if (!it) return false;
+  try {
+    if (state.selectedItemId !== it.id && !setPickedItem(it, 'scan')) return false;
+    state.qtyModalItem = it;
+    const sz = (typeof itemSizeLabel === 'function') ? itemSizeLabel(it) : (it.size || '');
+    if ($('qm-item')) $('qm-item').innerHTML =
+      '<span class="qm-item-with-thumb">' +
+        itemThumbHTML(it, 'qm-thumb') +
+        '<span class="qm-item-title">✓ ' + esc(it.name || '?') + (sz ? ' · ' + esc(sz) : '') + '</span>' +
+      '</span>';
+    const act = state.selectedAction || '(pick action)';
+    let barCtx;
+    if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length > 0) {
+      const nb = state.multiBars.length;
+      barCtx = 'Will add to ' + nb + ' bar' + (nb !== 1 ? 's' : '');
+    } else {
+      const b = (cache.bars || []).find(x => x.id === state.selectedBarId);
+      barCtx = b ? ('Bar: ' + (b.name || '?')) : 'Bar: (any)';
+    }
+    if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
+    _qmSetQty(1);   // default qty 1
+    state.qmBottleState = 'NOT_WEIGHED';
+    const _qmMulti = multiBarDestCount() > 1;
+    const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
+    if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
+    const _qmMsg = $('qm-partial-msg');
+    if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
+    if ($('qm-weight')) $('qm-weight').value = '';
+    if ($('qm-tare')) $('qm-tare').value = '';
+    if ($('qm-full')) $('qm-full').value = '';
+    state.qmProfileEditing = false;
+    _qmSetState('NOT_WEIGHED');
+    const ov = $('qty-modal');
+    if (!ov) throw new Error('quantity modal unavailable');
+    ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false');
+    return true;
+  } catch (e) {
+    closeQtyModal();
+    try { console.warn('[scanner] quantity sheet failed to open — pause gate cleared', (e && e.message) || e); } catch (_) {}
+    return false;
   }
-  if ($('qm-meta')) $('qm-meta').textContent = act + ' · ' + barCtx + (it.sku ? ' · ' + it.sku : '');
-  _qmSetQty(1);   // default qty 1
-  // SCAN_SHEET_WEIGHT (PLAN-2026-06-17) — reset bottle-state/weight section.
-  state.qmBottleState = 'NOT_WEIGHED';
-  const _qmMulti = multiBarDestCount() > 1;   // disable PARTIAL only when >1 destination, not on the checkbox alone
-  const _qmPart = document.querySelector('#qm-state-row .qm-state-btn[data-state="PARTIAL"]');
-  if (_qmPart) { _qmPart.disabled = _qmMulti; _qmPart.style.opacity = _qmMulti ? '0.45' : '1'; _qmPart.title = _qmMulti ? 'Partial bottles must be added one bar at a time' : ''; }
-  const _qmMsg = $('qm-partial-msg');
-  if (_qmMsg) { if (_qmMulti) { _qmMsg.textContent = 'Partial bottles must be added one bar at a time.'; _qmMsg.style.display = ''; } else { _qmMsg.style.display = 'none'; } }
-  if ($('qm-weight')) $('qm-weight').value = '';
-  if ($('qm-tare')) $('qm-tare').value = '';
-  if ($('qm-full')) $('qm-full').value = '';
-  state.qmProfileEditing = false;   // SCALE_PROFILE_EDIT — start in summary/create view
-  _qmSetState('NOT_WEIGHED');
-  const ov = $('qty-modal'); if (ov) { ov.classList.add('open'); ov.setAttribute('aria-hidden', 'false'); }
 }
 function closeQtyModal() {
   state.qtyModalItem = null;
-  const ov = $('qty-modal'); if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+  releaseRapidScanLock();
+  try {
+    const ov = $('qty-modal'); if (ov) { ov.classList.remove('open'); ov.setAttribute('aria-hidden', 'true'); }
+  } catch (_) {}
+}
+function releaseRapidScanLock() {
+  state.rapidScanBusy = false;
+  if (state.rapidScanResetTimer) { try { clearTimeout(state.rapidScanResetTimer); } catch (_) {} state.rapidScanResetTimer = null; }
 }
 function qtyModalAdd() {
   const it = state.qtyModalItem;
@@ -4363,21 +4490,35 @@ function qtyModalAdd() {
     weightOverride = wraw;
   }
   const draftCountBefore = Drafts.count();
-  const res = addCurrentSelectionToReview({ item: it, qtyOverride: qty, bottleStateOverride: bs, weightOverride: weightOverride });
-  if (!res || !res.ok) {
-    Feedback.warn();
-    VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan' });
-    showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
+  try {
+    const semantic = resolveQuantityAndWeightSemantics({
+      qtyValue: qty,
+      weightValue: weightOverride,
+      grossValue: '',
+      scaleUsed: !!state.weightSource?.scaleUsed,
+      tareUsed: false,
+    });
+    const res = addCurrentSelectionToReview({ item: it, qtyOverride: semantic.finalQty, bottleStateOverride: bs, weightOverride: semantic.finalWeightG });
+    if (!res || !res.ok) {
+      Feedback.warn();
+      VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan' });
+      showOverlay(res && res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', (res && res.error) || 'unknown error', 'err');
+      return;
+    }
+    Feedback.ok();
+    const n = Drafts.count();
+    VoiceGuide.announceOperationalState(n > draftCountBefore ? 'added' : 'failed', { itemId: it.id, itemName: it.name, source: 'add' });
+    showOverlay('✓ ADDED TO REVIEW',
+      it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
+    statusOn('save-status',
+      'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
+  } catch (e) {
+    try { Feedback.warn(); } catch (_) {}
+    try { VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan' }); } catch (_) {}
+    try { showOverlay('⚠ NOT ADDED', 'Scanner recovered — please scan again', 'err'); } catch (_) {}
+  } finally {
     closeQtyModal();
-    return;
   }
-  Feedback.ok();
-  const n = Drafts.count();
-  VoiceGuide.announceOperationalState(n > draftCountBefore ? 'added' : 'failed', { itemId: it.id, itemName: it.name, source: 'add' });
-  showOverlay('✓ ADDED TO REVIEW',
-    it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' · ' + n + ' draft' + (n !== 1 ? 's' : ''), 'ok');
-  statusOn('save-status',
-    'Added: ' + it.name + ' · qty ' + res.qty + (res.multi ? (' × ' + res.added + ' bars') : '') + ' — tap VIEW REVIEW', 'ok');
   closeQtyModal();
 }
 // ════════════════════════════════════════════════════════════════════
@@ -4781,30 +4922,31 @@ function _bleUseLatest() {
   try { _qmUpdateRemaining(); } catch (_) {}
   try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
 }
-// Main RETURN form — RETURN quantity IS grams, so fill the QTY input.
+// Main RETURN form — scale readings feed the single gross-weight field.
 function _bleUseLatestReturn() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, 'RETURN quantity')) return;
-  var q = $('qty-input'); if (!q) return;
-  q.value = String(reading.grams);
-  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
+  if (!_scaleConfirmEstimateUse(reading, 'RETURN weight')) return;
+  var gross = $('phase1-gross-weight'); if (gross) gross.value = String(reading.grams);
+  var q = $('qty-input'); if (q) q.value = '1';
+  if (state.weightSource) state.weightSource.scaleUsed = true;
+  try { phase1RenderWeightTare(); } catch (_) {}
+  try { updateRemainingDisplay(); } catch (_) {}
+  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into Weight (g) — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
 }
-// Main panel — direction-neutral. RETURN → fill QTY grams; otherwise (TAKEN,
-// incl. used/partial bottles sent TO a bar) → fill the main Weight (g) field and
+// Main panel — direction-neutral. Both actions fill the single gross-weight
+// field and keep Qty as the unit count (default 1);
 // recalc remaining % from the DB/local profile. Operator still sets bottle state
 // and taps ADD TO REVIEW. Never submits, never writes DB.
 function _bleUseLatestMain() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
-  if (!_scaleConfirmEstimateUse(reading, state.selectedAction === 'RETURNED' ? 'RETURN quantity' : 'TAKEN bottle weight')) return;
+  if (!_scaleConfirmEstimateUse(reading, state.selectedAction === 'RETURNED' ? 'RETURN weight' : 'TAKEN bottle weight')) return;
   var g = String(reading.grams);
-  if (state.selectedAction === 'RETURNED') {
-    var q = $('qty-input'); if (q) q.value = g;
-    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into RETURN QTY — verify and tap ADD TO REVIEW', 'warn'); } catch (_) {}
-  } else {
-    var w = $('weight-g-input'); if (w) w.value = g;
-    try { updateRemainingDisplay(); } catch (_) {}
-    try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into Weight (g) — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
-  }
+  var gross = $('phase1-gross-weight'); if (gross) gross.value = g;
+  var q = $('qty-input'); if (q) q.value = '1';
+  if (state.weightSource) state.weightSource.scaleUsed = true;
+  try { phase1RenderWeightTare(); } catch (_) {}
+  try { updateRemainingDisplay(); } catch (_) {}
+  try { statusOn('save-status', 'Uncertified scale estimate ' + reading.grams + ' g filled into Weight (g) — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
 }
 // PARTIAL UX — keep the in-flow "Use current scale weight" button (next to the
 // WEIGHT field) in sync: visible when a station scale is connected here, enabled
@@ -4827,7 +4969,8 @@ function _weightUseScaleFill() {
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
   if (!_scaleConfirmEstimateUse(reading, 'TAKEN bottle weight')) return;
   var w = $('weight-g-input'); if (!w) return;
-  w.value = String(reading.grams);   // corrected grams
+  w.value = String(reading.grams);   // partial-bottle weight path
+  if (state.weightSource) state.weightSource.scaleUsed = true;
   try { updateRemainingDisplay(); } catch (_) {}
   try { statusOn('save-status', 'Filled WEIGHT with uncertified estimate ' + reading.grams + ' g — verify, set bottle state, and tap ADD TO REVIEW', 'warn'); } catch (_) {}
   try { Feedback.ok(); } catch (_) {}
@@ -5607,6 +5750,7 @@ function applyScannerTrackTuning() {
 }
 
 function closeScanner() {
+  closeQtyModal();
   $('scanner-box').classList.remove('active');
   stopRoiDecodeLoop();
   if (state.scannerFallbackTimer) { try { clearTimeout(state.scannerFallbackTimer); } catch (_) {} state.scannerFallbackTimer = null; }
@@ -5638,14 +5782,20 @@ function installHidListener() {
         state.hidBuf = '';
         e.preventDefault();
         // Synthesise a barcode scan
-        const it = lookupByBarcode(code);
+        const barcodeResult = lookupBarcodeResult(code);
+        const it = barcodeResult.item;
+        if (barcodeResult.ambiguous) {
+          statusOn('save-status', '⚠ HID barcode matched multiple items — select item manually', 'warn');
+          return;
+        }
         if (it) {
           if (state.selectedAction) {
             // PLAN-2026-06-13 — HID continuous-speed path now goes through the
             // SHARED core (qty=1), so it matches the touch SAVE button and the
             // camera scanner (Multi-Bar fan-out + draft refresh inside).
             const draftCountBefore = Drafts.count();
-            let r; try { r = addCurrentSelectionToReview({ item: it, qtyOverride: 1 }); }
+            const semantic = prepareQuantityAndWeightSemantics({ qtyValue: 1 });
+            let r; try { r = addCurrentSelectionToReview({ item: it, qtyOverride: semantic.finalQty, weightOverride: semantic.finalWeightG }); }
             catch (e) { r = { ok:false, error:(e && e.message) || 'add failed' }; }
             const n = Drafts.count();
             VoiceGuide.announceOperationalState(r && r.ok && n > draftCountBefore ? 'added' : 'failed', { itemId: it.id, itemName: it.name, source: 'scan' });
@@ -7325,7 +7475,8 @@ $('save-btn').addEventListener('click', async () => {
   }
 
   // Double-tap guard (manual): same (item, action, qty) within 1.5 s.
-  const qtyToSave = parseFloat($('qty-input').value);
+  const semantic = prepareQuantityAndWeightSemantics({});
+  const qtyToSave = semantic.finalQty;
   if (isFinite(qtyToSave) && isDuplicateSave(state.selectedAction, state.selectedItemId, qtyToSave)) {
     Feedback.warn();
     statusOn('save-status', '⚠ Duplicate suppressed (same item + qty within 1.5 s)', 'warn');
@@ -7395,6 +7546,7 @@ $('save-btn').addEventListener('click', async () => {
   $('qty-input').value = '1';
   $('notes-input').value = '';
   $('weight-g-input').value = '';
+  if (state.weightSource) state.weightSource.scaleUsed = false;
   $('bottle-state-select').value = 'UNOPENED';   // default for opening workflow
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — hide/reset profile (item cleared)
   try { syncAddButtonLabel(); } catch (_) {}
@@ -7806,9 +7958,12 @@ function onBleNotify(ev) {
   const w = $('ble-weight');
   w.textContent = grams.toFixed(1) + ' g' + (state.ble.lastStable ? ' ✓' : ' …');
   w.classList.toggle('unstable', !state.ble.lastStable);
-  // Auto-suggest qty when RETURN is selected and weight is stable
-  if (state.selectedAction === 'RETURNED' && state.ble.lastStable && state.selectedItemId) {
-    $('qty-input').value = grams.toFixed(1);
+  // Auto-suggest the single gross Weight field when WEIGHT mode is selected.
+  if (state.selectedAction && phase1MeasureUnit === 'WEIGHT' && state.ble.lastStable && state.selectedItemId) {
+    $('phase1-gross-weight').value = grams.toFixed(1);
+    $('qty-input').value = '1';
+    if (state.weightSource) state.weightSource.scaleUsed = true;
+    try { phase1RenderWeightTare(); } catch (_) {}
   }
 }
 
@@ -8123,6 +8278,10 @@ function renderReview() {
       ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ ' + esc(staleText) +
         ' — delete and re-enter</div>'
       : '';
+    const suspiciousQty = Number(d.qty) > 10 && normalizeWeightG(d.weight_g) == null;
+    const suspiciousHint = suspiciousQty
+      ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ Large Qty with no Weight(g). Review before submitting.</div>'
+      : '';
     return '<div class="row-r" data-q-ce="' + esc(q.client_event_id) + '">' +
       '<span class="ts">' + fmtTime(q.queued_at) + '</span>' +
       '<span class="badge queued">QUEUED</span>' +
@@ -8184,6 +8343,7 @@ function renderReview() {
             { liquid_weight_g: d.liquid_weight_g, remaining_ml: d.remaining_ml,
               reviewRequired: (d.weight_profile_source === 'profile_needed') });
           return wl ? '<div class="small" style="color:#7dd3fc;margin-top:2px;">⚖️ ' + esc(wl) + '</div>' : ''; })() +
+        suspiciousHint +
         (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
         staleHint +
         '<div style="margin-top:6px;">' +

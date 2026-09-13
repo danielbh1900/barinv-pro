@@ -28,7 +28,7 @@ test('Phase 1F makes RETURN units explicit and gates grams on weight selection',
 
 test('Phase 1F keeps bottle weight secondary and reuses the existing numeric source', () => {
   assert.match(html, /id="phase1-weight-options"[^>]*style="display:none;"/);
-  assert.match(html, /options\.style\.display = bottleState === 'PARTIAL'/);
+  assert.match(html, /options\.style\.display = !measureWeight && \(bottleState === 'PARTIAL'/);
   assert.match(html, /id="weight-g-input"/);
   assert.match(html, /const input = \$\('qty-input'\)/);
   assert.doesNotMatch(html, /phase1AdjustMeasure[\s\S]{0,900}(eventsInsert|saveCore|addToReview|syncOutbox|fetch\(|\.from\()/);

@@ -24,7 +24,7 @@ test('Phase 1G keeps secondary fields out of the default work console', () => {
   assert.match(html, /const moreInner = \$\('phase1-more-options-inner'\)/);
   assert.match(html, /moreInner\.appendChild\(scaleRow\)/);
   assert.match(html, /const moreOpen = !!\$\('phase1-more-options'\)\?\.open/);
-  assert.match(html, /options\.style\.display = bottleState === 'PARTIAL'/);
+  assert.match(html, /options\.style\.display = !measureWeight && \(bottleState === 'PARTIAL'/);
 });
 
 test('Phase 1G preserves RETURN units and weight-only grams controls', () => {

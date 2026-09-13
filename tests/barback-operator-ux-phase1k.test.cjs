@@ -22,7 +22,7 @@ test('Phase 1K calculates net grams from one gross reading without double subtra
   assert.match(html, /const tare = custom \? \(Number\.isFinite\(customTare\) \? Math\.max\(0, customTare\) : 0\) : phase1TareGrams/);
   assert.match(html, /\$\('phase1-gross-weight'\)\?\.addEventListener\('input', phase1RenderWeightTare\)/);
   assert.match(html, /phase1TareGrams = btn\.dataset\.phase1Tare === 'custom' \? 'custom' : Number\(btn\.dataset\.phase1Tare\)/);
-  assert.match(html, /qty\.value = String\(net\)/);
+  assert.match(html, /weight\.value = String\(net\)/);
 });
 
 test('Phase 1K uses the same tare UI for TAKE and RETURN weight modes', () => {
@@ -38,6 +38,6 @@ test('Phase 1K preserves unit mode and adds no persistence path', () => {
   const start = html.indexOf('function phase1RenderWeightTare');
   const end = html.indexOf('function renderPhase1MeasureControls');
   assert.ok(start >= 0 && end > start);
-  assert.match(html.slice(start, end), /\$\('qty-input'\)/);
+  assert.match(html.slice(start, end), /\$\('weight-g-input'\)/);
   assert.doesNotMatch(html.slice(start, end), /eventsInsert|saveCore|addToReview|syncOutbox|fetch\(|\.from\(/);
 });
