@@ -8284,7 +8284,7 @@ function renderReview() {
       ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ ' + esc(staleText) +
         ' — delete and re-enter</div>'
       : '';
-    const suspiciousQty = Number(d.qty) > 10 && normalizeWeightG(d.weight_g) == null;
+    const suspiciousQty = Number(q.qty) > 10 && normalizeWeightG(q.weight_g) == null;
     const suspiciousHint = suspiciousQty
       ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ Large Qty with no Weight(g). Review before submitting.</div>'
       : '';
@@ -8328,9 +8328,10 @@ function renderReview() {
   // created under a session/night that's no longer the operator's
   // current session — these drafts will be rejected by RLS on submit.
   function buildDraftRowHTML(d) {
-    const it    = (cache.items || []).find(x => x.id === d.item_id);
-    const name  = (it && it.name) || d.item_name || d.item_id.slice(0,8);
-    const stale = reviewQueueStaleFlags(d);
+    const itemId = d && d.item_id ? String(d.item_id) : '';
+    const it    = (cache.items || []).find(x => x.id === itemId);
+    const name  = (it && it.name) || (d && d.item_name) || (itemId ? itemId.slice(0,8) : 'Unknown item');
+    const stale = reviewQueueStaleFlags(d || {});
     const staleText = stale.session && stale.night ? 'older session/night'
                    : stale.session                  ? 'older session'
                    : stale.night                    ? 'older night'
@@ -8339,12 +8340,18 @@ function renderReview() {
       ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ ' + esc(staleText) +
         ' — delete and re-enter</div>'
       : '';
-    return '<div class="row-r" data-d-ce="' + esc(d.client_event_id) + '">' +
+    const weightG = normalizeWeightG(d.weight_g);
+    const suspiciousQty = Number(d.qty) > 10 && weightG == null;
+    const suspiciousHint = suspiciousQty
+      ? '<div class="small" style="color:#fbbf24;margin-top:2px;">⚠ Large Qty with no Weight(g). Review before submitting.</div>'
+      : '';
+    return '<div class="row-r" data-d-ce="' + esc(d.client_event_id || '') + '">' +
       '<span class="ts">' + fmtTime(d.drafted_at || Date.now()) + '</span>' +
       '<span class="badge queued" style="background:#7c3aed;">DRAFT</span>' +
       '<span class="body">' +
         '<span class="' + (d.action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(d.action) + '</span> · ' +
-        esc(name) + ' · ' + esc(String(d.qty)) +
+        esc(name) + '<div class="small">Qty: ' + esc(String(d.qty == null ? '—' : d.qty)) +
+          ' · Weight (g): ' + esc(weightG == null ? '—' : String(weightG)) + '</div>' +
         (function(){ const wl = weightStateLabel(d.weight_g, d.bottle_state, d.remaining_percent,
             { liquid_weight_g: d.liquid_weight_g, remaining_ml: d.remaining_ml,
               reviewRequired: (d.weight_profile_source === 'profile_needed') });
@@ -8353,13 +8360,41 @@ function renderReview() {
         (d.notes ? '<div class="muted small">' + esc(d.notes) + '</div>' : '') +
         staleHint +
         '<div style="margin-top:6px;">' +
-          '<button class="d-edit" data-d-ce="' + esc(d.client_event_id) + '" ' +
+          '<button class="d-edit" data-d-ce="' + esc(d.client_event_id || '') + '" ' +
             'style="padding:4px 14px;font-size:11px;font-weight:700;letter-spacing:0.04em;' +
             'background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;">EDIT</button>' +
         '</div>' +
-        '<div class="d-edit-form" data-d-ce="' + esc(d.client_event_id) + '" ' +
+        '<div class="d-edit-form" data-d-ce="' + esc(d.client_event_id || '') + '" ' +
           'style="display:none;margin-top:8px;padding:10px;background:#0f172a;border-radius:6px;"></div>' +
       '</span></div>';
+  }
+
+  // A malformed local row must not blank the whole Review list. This is a
+  // display-only fallback; it never changes Drafts, Outbox, or Submit All.
+  function buildDegradedReviewRow(row, kind) {
+    const r = row || {};
+    const ce = r.client_event_id ? String(r.client_event_id) : '';
+    const action = r.action ? String(r.action) : 'UNKNOWN ACTION';
+    const item = r.item_name || r.item_id || 'Unknown item';
+    const qty = r.qty == null ? '—' : String(r.qty);
+    const weight = normalizeWeightG(r.weight_g);
+    const badge = kind === 'draft' ? 'DRAFT' : 'QUEUED';
+    const edit = ce
+      ? '<div style="margin-top:6px;"><button class="' + (kind === 'draft' ? 'd-edit' : 'q-edit') +
+        '" data-' + (kind === 'draft' ? 'd' : 'q') + '-ce="' + esc(ce) +
+        '" style="padding:4px 14px;font-size:11px;font-weight:700;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;cursor:pointer;">EDIT</button></div>'
+      : '';
+    return '<div class="row-r" data-' + (kind === 'draft' ? 'd' : 'q') + '-ce="' + esc(ce) + '">' +
+      '<span class="badge queued" style="background:#7c3aed;">' + badge + '</span>' +
+      '<span class="body"><span class="' + (action === 'TAKEN' ? 'act-T' : 'act-R') + '">' + esc(action) +
+      '</span> · ' + esc(String(item)) + '<div class="small">Qty: ' + esc(qty) +
+      ' · Weight (g): ' + esc(weight == null ? '—' : String(weight)) +
+      ' · Review row needs attention</div>' + edit + '</span></div>';
+  }
+
+  function safeReviewRowHTML(builder, row, kind) {
+    try { return builder(row); }
+    catch (_) { return buildDegradedReviewRow(row, kind); }
   }
 
   // Group rows by bar_id into sorted [{label, key, rows}] panels.
@@ -8392,7 +8427,7 @@ function renderReview() {
           'BAR: ' + esc(g.label) +
           ' <span style="color:#888;font-weight:500;letter-spacing:0;">· Review: ' + g.rows.length + '</span>' +
         '</div>' +
-        g.rows.map(buildDraftRowHTML).join('') +
+        g.rows.map(d => safeReviewRowHTML(buildDraftRowHTML, d, 'draft')).join('') +
       '</div>';
     }).join('');
   }
@@ -8411,7 +8446,7 @@ function renderReview() {
           (errCount > 0 ? ' · Errors: ' + errCount : '') +
           '</span>' +
         '</div>' +
-        g.rows.map(buildQueuedRowHTML).join('') +
+        g.rows.map(q => safeReviewRowHTML(buildQueuedRowHTML, q, 'queued')).join('') +
       '</div>';
     }).join('');
   }
