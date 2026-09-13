@@ -7971,9 +7971,15 @@ function onBleNotify(ev) {
 //  REVIEW screen — last 20 + queue
 // ════════════════════════════════════════════════════════════════════
 function showReview() {
-  loadProductionCache();
-  renderReview();
+  // Navigate first so a Review-rendering issue cannot make VIEW REVIEW
+  // appear inert on mobile. The existing renderer remains authoritative;
+  // failures are surfaced inside Review instead of blocking the route.
   showScreen('screen-review');
+  try { loadProductionCache(); } catch (_) {}
+  try { renderReview(); }
+  catch (e) {
+    statusOn('review-status', 'Review could not fully render — drafts remain safe on this device. Refresh and try again.', 'err');
+  }
 }
 // ════════════════════════════════════════════════════════════════════
 //  PLAN-2026-06-05 — Transaction Review enhancements
