@@ -20,7 +20,7 @@ test('Phase 1K calculates net grams from one gross reading without double subtra
   assert.match(html, /id="phase1-net-weight"[^>]*>NET SAVED WEIGHT/);
   assert.match(html, /const net = Math\.max\(0, gross - tare\)/);
   assert.match(html, /const tare = custom \? \(Number\.isFinite\(customTare\) \? Math\.max\(0, customTare\) : 0\) : phase1TareGrams/);
-  assert.match(html, /\$\('phase1-gross-weight'\)\?\.addEventListener\('input', phase1RenderWeightTare\)/);
+  assert.match(html, /var grossWeight = \$\('phase1-gross-weight'\); if \(grossWeight\) grossWeight\.addEventListener\('input', phase1RenderWeightTare\)/);
   assert.match(html, /phase1TareGrams = btn\.dataset\.phase1Tare === 'custom' \? 'custom' : Number\(btn\.dataset\.phase1Tare\)/);
   assert.match(html, /weight\.value = String\(net\)/);
 });

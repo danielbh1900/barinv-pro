@@ -20,7 +20,7 @@ test('Phase 1X opens Review before rendering so a render exception cannot make t
   assert.ok(source.indexOf("showScreen('screen-review')") < source.indexOf('renderReview()'));
   assert.match(source, /try \{ renderReview\(\); \}/);
   assert.match(source, /Review could not fully render/);
-  assert.match(html, /\$\('phase1-review-btn'\)\?\.addEventListener\('click', \(\) => showReview\(\)\)/);
+  assert.match(html, /var phase1ReviewBtn = \$\('phase1-review-btn'\); if \(phase1ReviewBtn\) phase1ReviewBtn\.addEventListener\('click', \(\) => showReview\(\)\)/);
 });
 
 test('Phase 1X preserves current feature markers and does not add a save path', () => {

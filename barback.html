@@ -633,6 +633,14 @@
 </head>
 <body>
 
+<!-- PHASE2E_BLUEFY_BOOT_GUARD: static and JS-independent. Keep this visible
+     until the app reports readiness; ?bluefyBootDebug=1 keeps diagnostics open. -->
+<div id="bluefy-boot-check" role="status" style="display:block;position:relative;z-index:1000;margin:0;padding:10px 12px;background:#172554;color:#bfdbfe;border-bottom:2px solid #60a5fa;font:900 12px/1.35 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;letter-spacing:.04em;">
+  <div>BLUEFY BOOT CHECK</div>
+  <div style="font-size:11px;margin-top:3px;">PHASE2E_BLUEFY_BOOT_GUARD · Boot stage: html-loaded</div>
+  <div id="bluefy-boot-debug-panel" style="display:none;margin-top:6px;font:600 11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;">Boot stage: html-loaded</div>
+</div>
+
 <!-- ============================ STICKY STRIPS ============================ -->
 <div class="test-warn" id="test-warn">⚠ TEST MODE — NO SECURITY ⚠</div>
 <div id="net-banner" style="display:none;position:sticky;top:0;z-index:101;
@@ -656,7 +664,7 @@
 <div class="expiration-strip" id="expiration-strip" style="display:none;">—</div>
 
 <!-- ============================ SCREEN 1: TOKEN ENTRY ============================ -->
-<div class="screen" id="screen-token">
+<div class="screen active" id="screen-token">
   <div class="wrap">
     <h1>BARINV Barback</h1>
     <h2>Enter or paste your access link</h2>
@@ -864,7 +872,7 @@
       <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
       <div class="checkbox-row">
         <input type="checkbox" id="rapid-mode">
-        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">Rapid mode — continuous scan, ask quantity after each scan</label>
+        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">RAPID: each scan adds Qty 1 to Review. No quantity popup.</label>
       </div>
       <input id="search-input" type="text" aria-label="Search item by name or barcode" placeholder="Search item name or scan barcode…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
@@ -1299,6 +1307,61 @@
 <script>
 'use strict';
 
+// PHASE2C — fail-visible startup guard. The token screen is active in the
+// static markup, so a runtime exception can never leave every screen hidden.
+// Keep diagnostics deliberately non-sensitive: error class + line only.
+let barbackBootComplete = false;
+function bluefyBootStage(stage, detail) {
+  try {
+    var check = document.getElementById('bluefy-boot-check');
+    var panel = document.getElementById('bluefy-boot-debug-panel');
+    var text = 'Boot stage: ' + String(stage || 'unknown');
+    if (detail) text += '\n' + String(detail).slice(0, 700);
+    if (panel) panel.textContent = text;
+    var debug = String(window.location && window.location.search || '').indexOf('bluefyBootDebug=1') >= 0;
+    if (panel) panel.style.display = debug ? 'block' : 'none';
+    if (check && stage === 'app-ready' && !debug) check.style.display = 'none';
+  } catch (_) {}
+}
+function renderBluefyBootDiagnostics() {
+  var nav = typeof navigator !== 'undefined' ? navigator : {};
+  var bluetooth = !!nav.bluetooth;
+  var requestDevice = !!(bluetooth && typeof nav.bluetooth.requestDevice === 'function');
+  var camera = !!(nav.mediaDevices && typeof nav.mediaDevices.getUserMedia === 'function');
+  var secure = !!(window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+  var ua = String(nav.userAgent || 'unknown').replace(/\s+/g, ' ').slice(0, 110);
+  bluefyBootStage('boot-start', 'Bluetooth API: ' + (bluetooth ? 'available' : 'unavailable') +
+    '\nrequestDevice: ' + (requestDevice ? 'available' : 'unavailable') +
+    '\nCamera API: ' + (camera ? 'available' : 'unavailable') +
+    '\nSecure context: ' + (secure ? 'yes' : 'no') + '\nUser agent: ' + ua);
+}
+function renderSafeBootError(errorLike) {
+  if (barbackBootComplete) return;
+  try {
+    const error = errorLike && (errorLike.error || errorLike.reason || errorLike);
+    const name = error && error.name ? String(error.name).slice(0, 40) : 'RuntimeError';
+    const line = Number(errorLike && errorLike.lineno) || 0;
+    let panel = document.getElementById('barback-boot-error');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'barback-boot-error';
+      panel.setAttribute('role', 'alert');
+      panel.style.cssText = 'margin:12px;padding:14px;border:2px solid #ef4444;border-radius:8px;' +
+        'background:#450a0a;color:#fff;font:700 14px/1.45 -apple-system,system-ui,sans-serif;';
+      document.body.insertBefore(panel, document.body.firstChild);
+    }
+    panel.textContent = 'App startup error. Please reload or report this screen. ' + name + (line ? ' · line ' + line : '');
+    if (typeof bluefyBootStage === 'function') bluefyBootStage('boot-error', panel.textContent);
+    document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
+    const tokenScreen = document.getElementById('screen-token');
+    if (tokenScreen) tokenScreen.classList.add('active');
+  } catch (_) {
+    try { document.body.style.display = 'block'; } catch (_) {}
+  }
+}
+window.addEventListener('error', renderSafeBootError);
+window.addEventListener('unhandledrejection', renderSafeBootError);
+
 // ════════════════════════════════════════════════════════════════════
 //  PHASE 2 — TEST-MODE GATE
 // ════════════════════════════════════════════════════════════════════
@@ -1339,6 +1402,13 @@ if (!TEST_MODE_BARBACK) {
 // sessionStorage / IndexedDB.
 (function barbackKillStaleSW() {
   try {
+    var host = String(window.location && window.location.hostname || '').toLowerCase();
+    var localPreview = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' ||
+      /^10\./.test(host) || /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host);
+    // Never touch production GitHub Pages registrations/caches. Local/private
+    // previews may remove only their own stale registration/cache entries.
+    if (!localPreview) return;
     if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
       navigator.serviceWorker.getRegistrations().then(rs => {
         rs.forEach(r => { try { r.unregister(); } catch (_) {} });
@@ -1457,7 +1527,7 @@ const HID_INTER_KEY_MS = 80;       // chars closer than this = HID scanner
 // 'phase3'      — require Phase 3; refuse Phase 2 test tokens.
 // 'phase2_test' — never call the Edge Function (legacy test-only mode).
 const AUTH_MODE = 'phase3';
-const PHASE3_SESSION_KEEPALIVE_MS = 60_000;
+const PHASE3_SESSION_KEEPALIVE_MS = 60000;
 
 // BARBACK_OPENING_PAR_V1 — compile-time safety gate. Runtime enforcement also
 // requires venues.barback_opening_par_enabled=true. Keep this OFF until an
@@ -1467,7 +1537,7 @@ const OPENING_PAR_V1_ENABLED = true;
 // ════════════════════════════════════════════════════════════════════
 //  PHASE 5 CONFIG
 // ════════════════════════════════════════════════════════════════════
-const TELEMETRY_HEARTBEAT_MS = 60_000;   // post barback_telemetry every minute
+const TELEMETRY_HEARTBEAT_MS = 60000;   // post barback_telemetry every minute
 const STALE_OUTBOX_AGE_MS    = 7 * 24 * 60 * 60 * 1000;   // 7 days
 const RECENT_ITEM_BUTTONS    = 5;        // quick-pick chips above scan
 const PAGE_VERSION           = 'phase-5-2026-05-15';
@@ -1482,7 +1552,7 @@ function esc(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 function uuidv4() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  if (window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random()*16)|0;
     return (c === 'x' ? r : (r&0x3)|0x8).toString(16);
@@ -1789,15 +1859,15 @@ const VoiceGuide = {
 };
 function initPhase1VoiceControl() {
   VoiceGuide.init();
-  $('phase1-voice-toggle')?.addEventListener('click', () => {
+  var voiceToggle = $('phase1-voice-toggle'); if (voiceToggle) voiceToggle.addEventListener('click', () => {
     const wasEnabled = VoiceGuide.enabled;
     const enabled = VoiceGuide.setEnabled(!wasEnabled);
     VoiceGuide.testVoice(enabled ? 'Voice Guide is on.' : 'Voice Guide is off.');
   });
-  $('phase1-voice-test')?.addEventListener('click', () => {
+  var voiceTest = $('phase1-voice-test'); if (voiceTest) voiceTest.addEventListener('click', () => {
     VoiceGuide.testVoice();
   });
-  $('phase1-voice-item-toggle')?.addEventListener('click', () => {
+  var voiceItemToggle = $('phase1-voice-item-toggle'); if (voiceItemToggle) voiceItemToggle.addEventListener('click', () => {
     VoiceGuide.setSpeakItemNames(!VoiceGuide.speakItemNames);
   });
 }
@@ -1908,7 +1978,7 @@ function prepareQuantityAndWeightSemantics(input) {
     qtyValue: input && input.qtyValue != null ? input.qtyValue : ($('qty-input') && $('qty-input').value),
     weightValue: input && input.weightValue != null ? input.weightValue : ($('weight-g-input') && $('weight-g-input').value),
     grossValue: input && input.grossValue != null ? input.grossValue : ($('phase1-gross-weight') && $('phase1-gross-weight').value),
-    scaleUsed: !!(input && input.scaleUsed) || !!state.weightSource?.scaleUsed,
+    scaleUsed: !!(input && input.scaleUsed) || !!(state.weightSource && state.weightSource.scaleUsed),
     tareUsed: !!(input && input.tareUsed) || !!(typeof phase1TareGrams !== 'undefined' && phase1TareGrams !== 0),
   });
   const qty = $('qty-input');
@@ -2002,29 +2072,29 @@ function renderPhase1MeasureControls() {
 function syncPhase1WeightVisibility() {
   const options = $('phase1-weight-options');
   if (!options) return;
-  const bottleState = $('bottle-state-select')?.value;
+  const bottleStateEl = $('bottle-state-select'); const bottleState = bottleStateEl ? bottleStateEl.value : '';
   const profile = $('weight-profile-section');
   const profileVisible = !!(profile && profile.style.display !== 'none');
-  const weightValue = !!(($('weight-g-input')?.value || '').trim());
-  const scaleAction = $('weight-use-scale')?.style.display !== 'none';
-  const moreOpen = !!$('phase1-more-options')?.open;
+  const weightValueEl = $('weight-g-input'); const weightValue = !!(((weightValueEl && weightValueEl.value) || '').trim());
+  const scaleActionEl = $('weight-use-scale'); const scaleAction = !!scaleActionEl && scaleActionEl.style.display !== 'none';
+  const moreEl = $('phase1-more-options'); const moreOpen = !!(moreEl && moreEl.open);
   const measureWeight = phase1MeasureUnit === 'WEIGHT';
   options.style.display = !measureWeight && (bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen) ? '' : 'none';
 }
 function initPhase1MeasureControls() {
-  $('phase1-measure-units')?.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
-  $('phase1-measure-weight')?.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; phase1EnsureWeightQuantityDefault(); applyActionTint(); });
-  $('phase1-taken-minus')?.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
-  $('phase1-taken-plus')?.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
-  $('phase1-gross-weight')?.addEventListener('input', phase1RenderWeightTare);
-  $('phase1-custom-tare')?.addEventListener('input', phase1RenderWeightTare);
+  var measureUnits = $('phase1-measure-units'); if (measureUnits) measureUnits.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
+  var measureWeight = $('phase1-measure-weight'); if (measureWeight) measureWeight.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; phase1EnsureWeightQuantityDefault(); applyActionTint(); });
+  var measureMinus = $('phase1-taken-minus'); if (measureMinus) measureMinus.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
+  var measurePlus = $('phase1-taken-plus'); if (measurePlus) measurePlus.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
+  var grossWeight = $('phase1-gross-weight'); if (grossWeight) grossWeight.addEventListener('input', phase1RenderWeightTare);
+  var customTare = $('phase1-custom-tare'); if (customTare) customTare.addEventListener('input', phase1RenderWeightTare);
   $$('[data-phase1-tare]').forEach(btn => {
     btn.addEventListener('click', () => {
       phase1TareGrams = btn.dataset.phase1Tare === 'custom' ? 'custom' : Number(btn.dataset.phase1Tare);
       phase1RenderWeightTare();
     });
   });
-  $('bottle-state-select')?.addEventListener('change', () => {
+  var bottleStateSelect = $('bottle-state-select'); if (bottleStateSelect) bottleStateSelect.addEventListener('change', () => {
     const more = $('phase1-more-options');
     if ($('bottle-state-select').value === 'PARTIAL' && more) more.open = true;
     syncPhase1WeightVisibility();
@@ -2037,20 +2107,20 @@ function initPhase1BlockPresentation() {
   const addButton = $('save-btn');
   if (addSlot && addButton) addSlot.appendChild(addButton);
   const more = $('phase1-more-options');
-  $('phase1-more-options-back')?.addEventListener('click', () => { if (more) more.open = false; });
-  more?.addEventListener('toggle', syncPhase1WeightVisibility);
+  var moreBack = $('phase1-more-options-back'); if (moreBack) moreBack.addEventListener('click', () => { if (more) more.open = false; });
+  if (more) more.addEventListener('toggle', syncPhase1WeightVisibility);
   const lastAdded = $('phase1-last-added-card');
   const scaleRow = $('main-scale-row');
   const moreInner = $('phase1-more-options-inner');
-  $('phase1-pending-replace')?.addEventListener('click', () => {
+  var pendingReplace = $('phase1-pending-replace'); if (pendingReplace) pendingReplace.addEventListener('click', () => {
     phase1ReplacementArmed = true;
     statusOn('save-status', 'Replacement armed — choose the new item. The current scanned item will not be added.', 'warn');
   });
   if (more && lastAdded) lastAdded.insertAdjacentElement('afterend', more);
   if (scaleRow && moreInner) moreInner.appendChild(scaleRow);
   const openReview = () => { if (lastAdded && lastAdded.classList.contains('active')) showReview(); };
-  lastAdded?.addEventListener('click', openReview);
-  lastAdded?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReview(); } });
+  if (lastAdded) lastAdded.addEventListener('click', openReview);
+  if (lastAdded) lastAdded.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openReview(); } });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2370,9 +2440,9 @@ const Auth = {
         path: 'phase3',
         session: {
           token_payload: tokenPayload,
-          staff_id: resp.staff?.id || staffId,
-          staff_name: resp.staff?.name || null,
-          staff_role: resp.staff?.role || null,   // drives barback vs VIP/Server item scope
+          staff_id: resp.staff && resp.staff.id || staffId,
+          staff_name: resp.staff && resp.staff.name || null,
+          staff_role: resp.staff && resp.staff.role || null,   // drives barback vs VIP/Server item scope
           issued_at: new Date().toISOString(),
           scoped_jwt: resp.jwt,
           jwt_expires_at: resp.expires_at || null,
@@ -2697,9 +2767,10 @@ const state = {
   selectedBarId: null,
   scannerContinuous: false,
   scannerClosing: false,   // single-scan: true during the brief success-toast→close window
-  scannerCooldown: {},  // code → lastScannedAt
+  scannerCooldown: {},  // canonical barcode identity → lastScannedAt
   rapidScanBusy: false,    // rapid decode lock: one accepted barcode at a time
   rapidScanResetTimer: null,
+  rapidScanReadyTimer: null,
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
   roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
@@ -3229,9 +3300,9 @@ function initPhase1ScaleDisclosure() {
   });
   const openDetails = () => showScreen('phase1-scale-details');
   btn.addEventListener('click', openDetails);
-  $('phase1-scale-back')?.addEventListener('click', () => showScreen('screen-main'));
-  $('phase1-scale-back-bottom')?.addEventListener('click', () => showScreen('screen-main'));
-  $('phase1-scale-access-open')?.addEventListener('click', () => showScreen('phase1-scale-details'));
+  var scaleBack = $('phase1-scale-back'); if (scaleBack) scaleBack.addEventListener('click', () => showScreen('screen-main'));
+  var scaleBackBottom = $('phase1-scale-back-bottom'); if (scaleBackBottom) scaleBackBottom.addEventListener('click', () => showScreen('screen-main'));
+  var scaleAccessOpen = $('phase1-scale-access-open'); if (scaleAccessOpen) scaleAccessOpen.addEventListener('click', () => showScreen('phase1-scale-details'));
   phase1RenderScaleAccess();
   setPhase1ScaleCollapsed(phase1ScaleShouldStartCollapsed());
 }
@@ -3295,6 +3366,26 @@ function barcodeLookupVariants(raw) {
   if (digits.length === 12) add('0' + digits);
   if (digits.length === 13 && digits[0] === '0') add(digits.slice(1));
   return variants;
+}
+function canonicalBarcodeCooldownKey(raw, barcodeResult) {
+  const source = String(raw == null ? '' : raw).trim();
+  const canonicalUpc = value => {
+    const digits = barcodeDigitsOnly(value);
+    if (digits.length === 12) return digits;
+    if (digits.length === 13 && digits[0] === '0') return digits.slice(1);
+    return '';
+  };
+  const directUpc = canonicalUpc(source);
+  if (directUpc) return 'upc:' + directUpc;
+  if (barcodeResult && barcodeResult.aliasUsed && barcodeResult.item) {
+    for (const candidate of barcodeCandidates(barcodeResult.item)) {
+      const itemUpc = canonicalUpc(candidate);
+      if (itemUpc) return 'upc:' + itemUpc;
+    }
+  }
+  const digits = barcodeDigitsOnly(source);
+  if (digits && !/[^0-9\s-]/.test(source)) return 'digits:' + digits;
+  return 'raw:' + source.toLowerCase().replace(/\s+/g, ' ');
 }
 function barcodeCandidates(item) {
   return [item && item.barcode, item && item.code, item && item.sku].filter(Boolean);
@@ -3791,10 +3882,12 @@ function acceptDecodedCode(code, controls) {
   // without stacking scans behind the sheet. closeQtyModal() nulls qtyModalItem,
   // which clears this gate → scanning resumes automatically (Add or Cancel).
   if (state.qtyModalItem || state.rapidScanBusy) return;
+  const barcodeResult = lookupBarcodeResult(code);
+  const cooldownKey = canonicalBarcodeCooldownKey(code, barcodeResult);
   const now = Date.now();
-  const last = state.scannerCooldown[code] || 0;
+  const last = state.scannerCooldown[cooldownKey] || 0;
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
-  state.scannerCooldown[code] = now;
+  state.scannerCooldown[cooldownKey] = now;
   Feedback.scan();
   if (state.scannerContinuous) {
     state.rapidScanBusy = true;
@@ -3808,7 +3901,7 @@ function acceptDecodedCode(code, controls) {
   // ZXing decode callback / ROI tick; an uncaught throw there halts the continuous
   // decode and freezes the camera ("stuck/doing nothing after first scan"). Both
   // decode routes stay alive.
-  try { onBarcodeScanned(code, controls); }
+  try { onBarcodeScanned(code, controls, barcodeResult); }
   catch (e) {
     state.rapidScanBusy = false;
     try { if (state.rapidScanResetTimer) clearTimeout(state.rapidScanResetTimer); } catch (_) {}
@@ -4075,17 +4168,89 @@ async function openScanner() {
 // no weight, which would bypass Scale V3).
 function shouldRequireWeightBeforeAdd() {
   try {
-    if (state.selectedAction === 'RETURNED') return true;
     const bs = $('bottle-state-select') && $('bottle-state-select').value;
     if (bs === 'PARTIAL') return true;
+    if (phase1MeasureUnit === 'WEIGHT') return true;
     const w = $('weight-g-input') && ($('weight-g-input').value || '').trim();
     if (w) return true;
   } catch (_) {}
   return false;
 }
 
-function onBarcodeScanned(code, controls) {
-  const barcodeResult = lookupBarcodeResult(code);
+function scheduleRapidScanReady() {
+  if (state.rapidScanReadyTimer) { try { clearTimeout(state.rapidScanReadyTimer); } catch (_) {} }
+  state.rapidScanReadyTimer = setTimeout(() => {
+    state.rapidScanReadyTimer = null;
+    if (!state.scannerContinuous) return;
+    const scanner = $('scanner-box');
+    if (!scanner || !scanner.classList.contains('active')) return;
+    try { showScannerToast('Ready for next scan', 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'Ready for next scan', 'info'); } catch (_) {}
+  }, 900);
+}
+
+function rapidScanAddItem(it, barcodeResult) {
+  // PHASE2A — rapid mode is a direct unit-to-draft path. It deliberately
+  // bypasses the quantity sheet so the camera can remain ready for the next
+  // bottle. Weight is explicitly blank: a barcode-only rapid scan is never a
+  // grams entry, even if a stale weight field exists on the work screen.
+  const draftCountBefore = Drafts.count();
+  const intendedDestinations = multiBarActive() ? multiBarDestCount() : 1;
+  const notesInput = $('notes-input');
+  const previousNotes = notesInput ? notesInput.value : '';
+  let res = null;
+  try {
+    // The shared core intentionally reads notes from the visible form. Isolate
+    // this synchronous rapid adapter so hidden/manual state cannot leak into a
+    // barcode-only unit Draft; restore the operator's form immediately after.
+    if (notesInput) notesInput.value = '';
+    res = addCurrentSelectionToReview({
+      item: it,
+      qtyOverride: 1,
+      weightOverride: '',
+      bottleStateOverride: 'UNOPENED',
+    });
+  } catch (e) {
+    res = { ok:false, error:(e && e.message) || 'rapid add failed' };
+  } finally {
+    if (notesInput) notesInput.value = previousNotes;
+  }
+  try {
+    const draftCountAfter = Drafts.count();
+    const added = res && Number.isFinite(Number(res.added)) ? Number(res.added) : Math.max(0, draftCountAfter - draftCountBefore);
+    const failed = res && Number.isFinite(Number(res.fail)) ? Number(res.fail) : 0;
+    const confirmed = Math.max(0, draftCountAfter - draftCountBefore);
+    if (!res || !res.ok || confirmed === 0 || added === 0) {
+      Feedback.warn();
+      try { VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan' }); } catch (_) {}
+      showScannerToast('⚠ Scan failed — try again', 'warn');
+      try { statusOn('save-status', 'Scan failed — try again', 'err'); } catch (_) {}
+      return false;
+    }
+    if (failed > 0 || added < intendedDestinations || confirmed < intendedDestinations) {
+      Feedback.warn();
+      showScannerToast('⚠ Partially added. Review before submitting.', 'warn');
+      try { statusOn('save-status', 'Partially added. Review before submitting.', 'warn'); } catch (_) {}
+      scheduleRapidScanReady();
+      return false;
+    }
+    Feedback.ok();
+    try { VoiceGuide.announceOperationalState('added', { itemId: it.id, itemName: it.name, source: 'scan' }); } catch (_) {}
+    showScannerToast('✓ Added to Review: ' + (it.name || 'item') + (barcodeResult && barcodeResult.aliasUsed ? ' · Matched UPC/EAN variant' : ''), 'ok');
+    try { statusOn('save-status', 'Added — move to next bottle · ' + it.name, 'ok'); } catch (_) {}
+    scheduleRapidScanReady();
+    return true;
+  } catch (_) {
+    try { showScannerToast('⚠ Scan failed — try again', 'warn'); } catch (_) {}
+    return false;
+  } finally {
+    // Voice is best-effort and must never hold the scanner processing gate.
+    releaseRapidScanLock();
+  }
+}
+
+function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
+  const barcodeResult = acceptedBarcodeResult || lookupBarcodeResult(code);
   const it = barcodeResult.item;
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
   // distinguish "ZXing decoded but no item match" from "ZXing never
@@ -4155,15 +4320,10 @@ function onBarcodeScanned(code, controls) {
   }
 
   if (state.scannerContinuous) {
-    // SCAN_QTY (PLAN-2026-06-21) — continuous scanning now ASKS QUANTITY per scan
-    // (default 1) instead of auto-adding qty=1, then resumes. The camera stays
-    // live; the decode loop is paused via the state.qtyModalItem gate in
-    // acceptDecodedCode, and closing the sheet (Add or Cancel) clears that gate so
-    // the next bottle can be scanned immediately. Nothing is submitted here — the
-    // sheet's Add routes through the SHARED Review core (Multi-Bar fan-out + draft
-    // refresh handled inside). Pre-checks below must block BEFORE the sheet opens,
-    // mirroring the one-shot path; the per-barcode dupe lock (DUPE_SCAN_WINDOW_MS)
-    // still prevents an immediate re-scan of the same bottle. We stop NOTHING.
+    // PHASE2A — RAPID means direct qty=1 Draft creation. Never open the
+    // quantity sheet here: the camera remains open and the shared Review core
+    // remains the only Draft creation path. The existing barcode cooldown still
+    // suppresses repeated frames of the same UPC.
     let blockMsg = null;
     if (!state.selectedAction) blockMsg = 'Pick TAKEN or RETURN first';
     else if (state.multiBarMode && getCurrentUserRole() === 'barback' && (state.multiBars || []).length === 0)
@@ -4173,11 +4333,7 @@ function onBarcodeScanned(code, controls) {
       releaseRapidScanLock();
       return;   // stay open; nothing added, sheet not opened
     }
-    try { showScannerToast('✓ ' + (barcodeResult.aliasUsed ? 'Matched UPC/EAN variant · ' : '') + it.name + ' · set quantity…', 'ok'); } catch (_) {}
-    if (!openQtyModal(it)) {
-      try { showScannerToast('⚠ Quantity sheet could not open — scan again', 'warn'); } catch (_) {}
-      releaseRapidScanLock();
-    }
+    rapidScanAddItem(it, barcodeResult);
     return;
   } else {
     // SINGLE-SCAN — guard against a second decode firing during the close window.
@@ -4495,7 +4651,7 @@ function qtyModalAdd() {
       qtyValue: qty,
       weightValue: weightOverride,
       grossValue: '',
-      scaleUsed: !!state.weightSource?.scaleUsed,
+      scaleUsed: !!(state.weightSource && state.weightSource.scaleUsed),
       tareUsed: false,
     });
     const res = addCurrentSelectionToReview({ item: it, qtyOverride: semantic.finalQty, bottleStateOverride: bs, weightOverride: semantic.finalWeightG });
@@ -4653,7 +4809,15 @@ function _scaleConfirmEstimateUse(reading, destinationLabel) {
 }
 // SCALE_CERTIFICATION_RELEASE_GATE_V1_END
 
-// Faithful port of qnksDecoder.decodeFff1 (SPEC 0.3-high-range-conditional).
+// PHASE2D_RAPID_SCALE_QNKS — QN-KS high-range decoding is selected by the
+// dedicated b8=0xe8 range flag plus the grams unit and validated raw range.
+// b11 varies across notifications and is diagnostic data, not a range gate.
+function _qnksScaleDivisor(bytes, raw) {
+  var highRange = bytes && bytes[8] === 0xe8 && bytes[15] === 0x02 && raw >= 1000 && raw <= 10000;
+  return highRange ? { divisor: 1, mode: 'high-range' } : { divisor: 10, mode: 'low-range' };
+}
+
+// Faithful QN-KS FFF1 frame decoder with the high-range flag correction.
 // Never throws. Returns { confidence:'high'|'low'|'unknown', grams, raw,
 // divisor, rangeMode, stable, naiveDiv10, checksum, expected, reason }.
 function _bleDecodeFrame(bytes) {
@@ -4663,8 +4827,8 @@ function _bleDecodeFrame(bytes) {
   if (!bytes || bytes.length !== 18) { r.reason = 'length-mismatch'; return r; }
   if (!(bytes[0] === 0x10 && bytes[1] === 0x12 && bytes[2] === 0x00 && bytes[3] === 0x6c)) { r.reason = 'header-mismatch'; return r; }
   var raw = (bytes[9] << 8) | bytes[10];
-  var div = 10, mode = 'low-range';
-  if (bytes[8] === 0xe8 && bytes[11] === 0x3e && bytes[15] === 0x02 && raw >= 1000 && raw <= 10000) { div = 1; mode = 'high-range'; }
+  var scaleMode = _qnksScaleDivisor(bytes, raw);
+  var div = scaleMode.divisor, mode = scaleMode.mode;
   var sum = 0; for (var i = 0; i < 17; i++) sum = (sum + bytes[i]) & 0xff;
   r.raw = raw; r.divisor = div; r.rangeMode = mode; r.grams = raw / div; r.naiveDiv10 = raw / 10;
   // b16 is NOT a reliable hardware stable flag on QN-KS — it reads 0x00 even on
@@ -4826,7 +4990,7 @@ function _bleOnFrame(ev) {
       liveTxt = 'Live weight: ' + corrG + ' g · ' + stableTxt + (r.rangeMode === 'high-range' ? ' · hi-range' : '')
               + (off !== 0 ? (' · corrected from raw ' + rawG + 'g · offset ' + _scaleFmtOff(off)) : '');
       var b16hex = '0x' + (bytes[16] < 16 ? '0' : '') + bytes[16].toString(16);
-      dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [high]' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '')
+      dbgTxt = devPfx + _bleHex(bytes) + ' → raw ' + r.raw + ' ÷' + r.divisor + ' [' + (r.rangeMode === 'high-range' ? 'high' : 'low') + ']' + (r.rangeMode === 'high-range' ? ' (÷10 would misread ' + r.naiveDiv10 + 'g)' : '')
              + (off !== 0 ? (' · offset ' + _scaleFmtOff(off) + ' → corrected ' + corrG + 'g') : '')
              + ' · b16=' + b16hex + ' hw:' + (r.hwStable ? 'yes' : 'no') + ' sw:' + (swStable ? 'yes' : 'no') + ' → ' + (r.stable ? 'STABLE' : 'unstable');
     } else {
@@ -5751,6 +5915,7 @@ function applyScannerTrackTuning() {
 
 function closeScanner() {
   closeQtyModal();
+  if (state.rapidScanReadyTimer) { try { clearTimeout(state.rapidScanReadyTimer); } catch (_) {} state.rapidScanReadyTimer = null; }
   $('scanner-box').classList.remove('active');
   stopRoiDecodeLoop();
   if (state.scannerFallbackTimer) { try { clearTimeout(state.scannerFallbackTimer); } catch (_) {} state.scannerFallbackTimer = null; }
@@ -6753,18 +6918,24 @@ const OpeningParV1 = Object.freeze({
   },
 
   parseReceivedQuantity(raw) {
+    if (typeof BigInt !== 'function') return null;
     const text = String(raw == null ? '' : raw).trim();
     if (!/^(0|[1-9][0-9]*)$/.test(text)) return null;
     return BigInt(text).toString();
   },
 
   variance(expected, received) {
+    if (typeof BigInt !== 'function') {
+      const delta = Number(received) - Number(expected);
+      return { delta: String(delta), status: delta === 0 ? 'match' : (delta < 0 ? 'short' : 'over'), label: delta === 0 ? 'MATCH' : (delta < 0 ? ('SHORT ' + Math.abs(delta)) : ('OVER ' + delta)) };
+    }
     const delta = BigInt(String(received)) - BigInt(String(expected));
-    const magnitude = delta < 0n ? -delta : delta;
+    const zero = BigInt('0');
+    const magnitude = delta < zero ? -delta : delta;
     return {
       delta: delta.toString(),
-      status: delta === 0n ? 'match' : (delta < 0n ? 'short' : 'over'),
-      label: delta === 0n ? 'MATCH' : (delta < 0n ? ('SHORT ' + magnitude) : ('OVER ' + delta)),
+      status: delta === zero ? 'match' : (delta < zero ? 'short' : 'over'),
+      label: delta === zero ? 'MATCH' : (delta < zero ? ('SHORT ' + magnitude) : ('OVER ' + delta)),
     };
   },
 
@@ -8998,8 +9169,8 @@ function refreshDraftCount() {
   }
 }
 $('review-submit-all').addEventListener('click', submitAllDraftsToBarinv);
-$('phase1-review-btn')?.addEventListener('click', () => showReview());
-$('review-back-top')?.addEventListener('click', () => $('review-back').click());
+var phase1ReviewBtn = $('phase1-review-btn'); if (phase1ReviewBtn) phase1ReviewBtn.addEventListener('click', () => showReview());
+var reviewBackTop = $('review-back-top'); if (reviewBackTop) reviewBackTop.addEventListener('click', () => { var back = $('review-back'); if (back) back.click(); });
 
 $('review-back').addEventListener('click', () => {
   if (state.tokenPayload && (!OPENING_PAR_V1_ENABLED || state.openingParClassicUnlocked)) showScreen('screen-main');
@@ -9245,10 +9416,10 @@ const LIVE_PILOT_MODE = (() => {
 window.__BARBACK_PILOT = LIVE_PILOT_MODE;
 
 // Pilot-mode tuning knobs (only consulted when LIVE_PILOT_MODE is true).
-const PILOT_TELEMETRY_HEARTBEAT_MS  = 30_000;
+const PILOT_TELEMETRY_HEARTBEAT_MS  = 30000;
 const PILOT_STALE_OUTBOX_AGE_MS     = 30 * 24 * 60 * 60 * 1000;   // 30 days
-const PILOT_EVENT_CONTROL_POLL_MS   = 30_000;
-const PILOT_OFFLINE_WARN_AFTER_MS   = 30_000;
+const PILOT_EVENT_CONTROL_POLL_MS   = 30000;
+const PILOT_OFFLINE_WARN_AFTER_MS   = 30000;
 
 function plog(kind, ...args) {
   if (!LIVE_PILOT_MODE) return;
@@ -9724,8 +9895,8 @@ function queueHealth() {
     newest_queued_at: out.length ? Math.max(...out.map(e => e.queued_at || 0)) : null,
   };
 }
-$('review-export')?.addEventListener('click', exportQueueBackup);
-$('outbox-storage-export')?.addEventListener('click', exportQueueBackup);
+var reviewExport = $('review-export'); if (reviewExport) reviewExport.addEventListener('click', exportQueueBackup);
+var outboxStorageExport = $('outbox-storage-export'); if (outboxStorageExport) outboxStorageExport.addEventListener('click', exportQueueBackup);
 
 // 5. PWA — SW REGISTRATION DISABLED (PLAN-2026-06-04 SW-kill).
 // A prior barback_sw.js (from an earlier iteration of this PWA) was
@@ -9741,8 +9912,23 @@ $('outbox-storage-export')?.addEventListener('click', exportQueueBackup);
 // ════════════════════════════════════════════════════════════════════
 //  Boot
 // ════════════════════════════════════════════════════════════════════
-refreshNetBanner();
-boot();
+function startBarbackApp() {
+  try {
+    bluefyBootStage('script-loaded');
+    if (String(window.location && window.location.search || '').indexOf('bluefyBootDebug=1') >= 0) renderBluefyBootDiagnostics();
+    bluefyBootStage('dom-ready');
+    // Preserve a visible screen until routing chooses the authenticated view.
+    const tokenScreen = document.getElementById('screen-token');
+    if (tokenScreen) tokenScreen.classList.add('active');
+    refreshNetBanner();
+    boot();
+    barbackBootComplete = true;
+    bluefyBootStage('app-ready');
+  } catch (error) {
+    renderSafeBootError(error);
+  }
+}
+startBarbackApp();
 </script>
 
 </body>

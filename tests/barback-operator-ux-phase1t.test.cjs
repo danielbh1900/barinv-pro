@@ -15,7 +15,8 @@ test('Phase 1T restores a rapid processing lock and bounded reset', () => {
 
 test('Phase 1T preserves same-barcode cooldown and rapid modal gating', () => {
   assert.match(html, /DUPE_SCAN_WINDOW_MS/);
-  assert.match(html, /const last = state\.scannerCooldown\[code\] \|\| 0/);
+  assert.match(html, /const cooldownKey = canonicalBarcodeCooldownKey\(code, barcodeResult\)/);
+  assert.match(html, /const last = state\.scannerCooldown\[cooldownKey\] \|\| 0/);
   assert.match(html, /state\.qtyModalItem = it/);
   assert.match(html, /closeQtyModal\(\);/);
 });
