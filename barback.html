@@ -6945,6 +6945,11 @@ function multiBarDestCount() {
 function syncAddButtonLabel() {
   const btn = $('save-btn'); if (!btn) return;
   if (btn.dataset.busy === '1') return;   // don't clobber the transient "… ADDING"
+  if (!state.selectedItemId) {
+    btn.textContent = '👆 SCAN / SELECT ITEM FIRST';
+    btn.disabled = true;
+    return;
+  }
   const n = (state.multiBars || []).length;
   if (state.multiBarMode && getCurrentUserRole() === 'barback') {
     if (n > 0) { btn.textContent = '➕ ADD TO REVIEW FOR ' + n + ' BAR' + (n !== 1 ? 'S' : ''); btn.disabled = false; }
@@ -7836,7 +7841,6 @@ $('save-btn').addEventListener('click', async () => {
   phase1PendingItemId = null;
   phase1PendingItemName = '';
   phase1ReplacementArmed = false;
-  phase1RenderPendingSelection();
   clearWeighPending();
   releaseRapidScanLock();
   if (phase1MeasureUnit === 'WEIGHT') phase1ResetTareAfterAdd();
@@ -7867,6 +7871,7 @@ $('save-btn').addEventListener('click', async () => {
   if (state.weightSource) state.weightSource.scaleUsed = false;
   $('bottle-state-select').value = 'UNOPENED';   // default for opening workflow
   try { refreshWeightProfileUI(); } catch (_) {}   // Scale V2 — hide/reset profile (item cleared)
+  phase1RenderPendingSelection();
   try { syncAddButtonLabel(); } catch (_) {}
 
   // Auto-rescan if rapid-mode is on
