@@ -871,7 +871,7 @@
       <div class="recent-chips" id="recent-items-chips" style="display:none;"></div>
       <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
       <div class="checkbox-row">
-        <input type="checkbox" id="rapid-mode">
+        <input type="checkbox" id="rapid-mode" disabled aria-hidden="true" style="display:none;">
         <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">FAST 1 EACH: unopened bottles add Qty 1. No quantity popup.</label>
       </div>
       <label for="scan-workflow" style="margin-top:8px;">SCAN WORKFLOW</label>
@@ -1907,8 +1907,7 @@ function resolveScanWorkflow() {
   const selected = $('scan-workflow');
   const mode = selected ? selected.value : '';
   if (phase1MeasureUnit === 'WEIGHT' || mode === 'WEIGH_PARTIAL') return 'WEIGH_PARTIAL';
-  if (mode === 'FAST_UNOPENED_ONE_EACH' || !!($('rapid-mode') && $('rapid-mode').checked)) return 'FAST_UNOPENED_ONE_EACH';
-  return 'SET_QUANTITY_COUNT';
+  return mode === 'FAST_UNOPENED_ONE_EACH' ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
 }
 function renderScanWorkflowLabel() {
   const mode = resolveScanWorkflow();
@@ -1919,7 +1918,9 @@ function renderScanWorkflowLabel() {
   const label = document.querySelector('label[for="rapid-mode"]');
   if (label) label.textContent = mode === 'FAST_UNOPENED_ONE_EACH'
     ? 'FAST 1 EACH: unopened bottles add Qty 1. No quantity popup.'
-    : 'Legacy FAST toggle (choose a workflow above)';
+    : mode === 'WEIGH_PARTIAL'
+      ? 'WEIGH: scan item, then place bottle on scale.'
+      : 'SET QTY: scan item, then enter quantity.';
 }
 function clearWeighPending() {
   if (phase1WeighTimeoutTimer) { try { clearTimeout(phase1WeighTimeoutTimer); } catch (_) {} phase1WeighTimeoutTimer = null; }
@@ -1975,14 +1976,15 @@ function initScanWorkflowControls() {
   const select = $('scan-workflow');
   const rapid = $('rapid-mode');
   if (select) select.addEventListener('change', function () {
+    var scannerActive = $('scanner-box') && $('scanner-box').classList.contains('active');
+    if (scannerActive) { try { closeScanner(); } catch (_) {} }
+    if (phase1WeighPendingItem) clearWeighPending();
+    if (state.rapidScanBusy) releaseRapidScanLock();
     if (select.value === 'WEIGH_PARTIAL') phase1MeasureUnit = 'WEIGHT';
     if (select.value !== 'WEIGH_PARTIAL' && phase1MeasureUnit === 'WEIGHT') phase1MeasureUnit = 'UNITS';
+    try { Prefs.patch('scanWorkflow', select.value); } catch (_) {}
     renderScanWorkflowLabel();
     try { renderPhase1MeasureControls(); } catch (_) {}
-  });
-  if (rapid) rapid.addEventListener('change', function () {
-    select.value = rapid.checked ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
-    renderScanWorkflowLabel();
   });
   var add = $('phase1-weigh-add'); if (add) add.addEventListener('click', function () { var save = $('save-btn'); if (save) save.click(); });
   var cancel = $('phase1-weigh-cancel'); if (cancel) cancel.addEventListener('click', function () { clearWeighPending(); releaseRapidScanLock(); statusOn('save-status', 'Skipped item — scanner ready', 'info'); });
@@ -3319,8 +3321,12 @@ function enterMain() {
 
   // Restore rapid-mode preference
   const prefs = Prefs.get();
-  $('rapid-mode').checked = !!prefs.rapid;
-  if ($('scan-workflow')) $('scan-workflow').value = prefs.rapid ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
+  $('rapid-mode').checked = false;
+  if ($('scan-workflow')) {
+    var savedWorkflow = prefs.scanWorkflow;
+    $('scan-workflow').value = savedWorkflow === 'FAST_UNOPENED_ONE_EACH' || savedWorkflow === 'WEIGH_PARTIAL' || savedWorkflow === 'SET_QUANTITY_COUNT'
+      ? savedWorkflow : (prefs.rapid ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT');
+  }
   renderScanWorkflowLabel();
 
   // Do NOT auto-focus any field on the main screen (avoid iOS keyboard popping up).
@@ -3444,7 +3450,7 @@ $$('.action').forEach(btn => {
     // WEIGHT / GRAMS must be an explicit follow-up choice for that action.
     phase1MeasureUnit = 'UNITS';
     var workflowSelect = $('scan-workflow');
-    if (workflowSelect) workflowSelect.value = $('rapid-mode').checked ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
+    if (workflowSelect && workflowSelect.value === 'WEIGH_PARTIAL') workflowSelect.value = 'SET_QUANTITY_COUNT';
     renderScanWorkflowLabel();
     applyActionTint();
     renderPhase1StickySummary();
@@ -3453,11 +3459,8 @@ $$('.action').forEach(btn => {
 });
 
 // ════════════════════════════════════════════════════════════════════
-//  Rapid-mode toggle
+//  Legacy rapid-mode compatibility mirror (workflow select is authoritative)
 // ════════════════════════════════════════════════════════════════════
-$('rapid-mode').addEventListener('change', (e) => {
-  Prefs.patch('rapid', !!e.target.checked);
-});
 
 // ════════════════════════════════════════════════════════════════════
 //  Item search + barcode lookup
@@ -4141,7 +4144,7 @@ async function openScanner() {
   // count. NEVER prints the token, PIN, JWT, or apikey.
   try {
     console.log('[scanner] open', {
-      continuous: !!$('rapid-mode').checked,
+      continuous: resolveScanWorkflow() === 'FAST_UNOPENED_ONE_EACH',
       hasAction: !!state.selectedAction,
       cache_items_count: (cache.items || []).length,
     });
@@ -7867,7 +7870,7 @@ $('save-btn').addEventListener('click', async () => {
   try { syncAddButtonLabel(); } catch (_) {}
 
   // Auto-rescan if rapid-mode is on
-  if ($('rapid-mode').checked) {
+  if (resolveScanWorkflow() === 'FAST_UNOPENED_ONE_EACH') {
     setTimeout(() => openScanner(), 200);
   }
 });
