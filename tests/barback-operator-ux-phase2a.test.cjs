@@ -7,7 +7,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'barback.html'), 'utf8')
 const scanStart = html.indexOf('function onBarcodeScanned');
 const scanEnd = html.indexOf('function showScannerToast', scanStart);
 const scan = html.slice(scanStart, scanEnd);
-const rapidStart = scan.indexOf("if (state.scannerContinuous)");
+const rapidStart = scan.indexOf("if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH')");
 const rapidEnd = scan.indexOf("} else {", rapidStart);
 const rapid = scan.slice(rapidStart, rapidEnd);
 

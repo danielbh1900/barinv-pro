@@ -55,7 +55,7 @@ test('Phase 2D diagnostics describe the selected divisor and range truthfully', 
 test('Phase 2D keeps RAPID barcode scans isolated from modal and scale state', () => {
   const rapid = functionSource('rapidScanAddItem');
   const scanned = functionSource('onBarcodeScanned');
-  const rapidBranch = scanned.slice(scanned.indexOf('if (state.scannerContinuous)'), scanned.indexOf('} else {'));
+  const rapidBranch = scanned.slice(scanned.indexOf("if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH')"), scanned.indexOf('} else {', scanned.indexOf("if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH')")));
   assert.match(rapidBranch, /rapidScanAddItem\(it, barcodeResult\)/);
   assert.doesNotMatch(rapidBranch, /openQtyModal|qm-ble|bleScale|phase1MeasureUnit|weight-g-input/);
   assert.match(rapid, /qtyOverride: 1/);

@@ -872,8 +872,14 @@
       <button class="scan-cta" id="scan-btn">📷 SCAN BARCODE</button>
       <div class="checkbox-row">
         <input type="checkbox" id="rapid-mode">
-        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">RAPID: each scan adds Qty 1 to Review. No quantity popup.</label>
+        <label for="rapid-mode" style="margin:0;letter-spacing:normal;color:#bbb;">FAST 1 EACH: unopened bottles add Qty 1. No quantity popup.</label>
       </div>
+      <label for="scan-workflow" style="margin-top:8px;">SCAN WORKFLOW</label>
+      <select id="scan-workflow" aria-label="Scan workflow" style="width:100%;padding:10px;font-size:16px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:8px;">
+        <option value="FAST_UNOPENED_ONE_EACH">FAST 1 EACH — unopened · each scan adds Qty 1</option>
+        <option value="SET_QUANTITY_COUNT" selected>SET QTY — scan, then enter quantity</option>
+        <option value="WEIGH_PARTIAL">WEIGH — scan, then place bottle on scale</option>
+      </select>
       <input id="search-input" type="text" aria-label="Search item by name or barcode" placeholder="Search item name or scan barcode…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button type="button" class="browse-btn" id="browse-btn">📋 BROWSE ITEMS</button>
       <div id="search-results" class="item-results" style="display:none;"></div>
@@ -883,6 +889,23 @@
         <div id="phase1-pending-item" class="phase1-pending-item"></div>
         <div class="phase1-pending-help">Press ADD TO REVIEW to create the Draft.</div>
         <button type="button" id="phase1-pending-replace" class="phase1-pending-replace">REPLACE WITH A DIFFERENT ITEM</button>
+      </div>
+      <div id="phase1-weigh-pending" class="phase1-pending-selection" role="status" aria-live="polite" style="border-color:#60a5fa;background:linear-gradient(135deg,rgba(30,64,175,.96),rgba(15,23,42,.96));">
+        <div class="phase1-pending-label" style="color:#bfdbfe;">WEIGH ITEM — NOT ADDED YET</div>
+        <div id="phase1-weigh-item" class="phase1-pending-item"></div>
+        <div id="phase1-weigh-help" class="phase1-pending-help" style="color:#dbeafe;">Place bottle on scale or enter measured weight. Saved as Weight (g), Qty 1.</div>
+        <button type="button" id="phase1-weigh-add" class="btn btn-success" style="margin-top:10px;">ADD WEIGHTED TO REVIEW</button>
+        <button type="button" id="phase1-weigh-cancel" class="btn btn-secondary" style="margin-top:8px;">CANCEL / SKIP ITEM</button>
+        <div id="phase1-weigh-timeout" style="display:none;margin-top:10px;padding:9px;border:1px solid #fbbf24;border-radius:7px;color:#fde68a;font-size:12px;line-height:1.4;">
+          <b>No stable weight received.</b>
+          <div style="margin-top:7px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <button type="button" id="phase1-weigh-use-latest">USE LATEST STABLE WEIGHT</button>
+            <button type="button" id="phase1-weigh-manual">ENTER WEIGHT MANUALLY</button>
+            <button type="button" id="phase1-weigh-reconnect">RECONNECT / CHECK SCALE</button>
+            <button type="button" id="phase1-weigh-unopened">MARK AS UNOPENED UNIT</button>
+            <button type="button" id="phase1-weigh-skip" style="grid-column:1 / -1;">SKIP ITEM</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1785,8 +1808,9 @@ const VoiceGuide = {
       : type === 'added' ? 'Added to draft.'
       : type === 'blocked' ? 'Previous item was not added.'
       : 'Not added.';
-    const message = (this.speakItemNames && safe && type !== 'blocked')
-      ? generic.replace(/\.$/, '') + ': ' + safe + '.' : generic;
+    const customPhrase = typeof info.voicePhrase === 'string' && info.voicePhrase.trim() ? info.voicePhrase.trim() : '';
+    const message = customPhrase || ((this.speakItemNames && safe && type !== 'blocked')
+      ? generic.replace(/\.$/, '') + ': ' + safe + '.' : generic);
     const key = String(type) + '|' + String(info.itemId || safe || '') + '|' + source;
     this.lastOperationalType = type;
     this.lastOperationalSource = source;
@@ -1876,6 +1900,99 @@ let phase1TareGrams = 0;
 let phase1PendingItemId = null;
 let phase1PendingItemName = '';
 let phase1ReplacementArmed = false;
+let phase1WeighPendingItem = null;
+let phase1WeighTimeoutTimer = null;
+
+function resolveScanWorkflow() {
+  const selected = $('scan-workflow');
+  const mode = selected ? selected.value : '';
+  if (phase1MeasureUnit === 'WEIGHT' || mode === 'WEIGH_PARTIAL') return 'WEIGH_PARTIAL';
+  if (mode === 'FAST_UNOPENED_ONE_EACH' || !!($('rapid-mode') && $('rapid-mode').checked)) return 'FAST_UNOPENED_ONE_EACH';
+  return 'SET_QUANTITY_COUNT';
+}
+function renderScanWorkflowLabel() {
+  const mode = resolveScanWorkflow();
+  const rapid = $('rapid-mode');
+  const select = $('scan-workflow');
+  if (rapid) rapid.checked = mode === 'FAST_UNOPENED_ONE_EACH';
+  if (select && mode === 'WEIGH_PARTIAL' && phase1MeasureUnit === 'WEIGHT') select.value = 'WEIGH_PARTIAL';
+  const label = document.querySelector('label[for="rapid-mode"]');
+  if (label) label.textContent = mode === 'FAST_UNOPENED_ONE_EACH'
+    ? 'FAST 1 EACH: unopened bottles add Qty 1. No quantity popup.'
+    : 'Legacy FAST toggle (choose a workflow above)';
+}
+function clearWeighPending() {
+  if (phase1WeighTimeoutTimer) { try { clearTimeout(phase1WeighTimeoutTimer); } catch (_) {} phase1WeighTimeoutTimer = null; }
+  phase1WeighPendingItem = null;
+  const card = $('phase1-weigh-pending');
+  if (card) card.classList.remove('active');
+  const timeout = $('phase1-weigh-timeout');
+  if (timeout) timeout.style.display = 'none';
+}
+function beginWeighPending(it) {
+  phase1WeighPendingItem = it;
+  rapidScanBusy = true;
+  const card = $('phase1-weigh-pending');
+  const item = $('phase1-weigh-item');
+  const timeout = $('phase1-weigh-timeout');
+  if (item) item.textContent = it && it.name ? 'Scanned: ' + it.name : 'Scanned item';
+  if (timeout) timeout.style.display = 'none';
+  if (card) card.classList.add('active');
+  phase1MeasureUnit = 'WEIGHT';
+  phase1EnsureWeightQuantityDefault();
+  var bottleState = $('bottle-state-select');
+  if (bottleState) bottleState.value = 'PARTIAL';
+  var notes = $('notes-input');
+  if (notes) notes.value = '';
+  try { setPickedItem(it, 'scan'); } catch (_) {}
+  try { renderPhase1MeasureControls(); } catch (_) {}
+  try { statusOn('save-status', 'Scanned: ' + (it.name || 'item') + ' — place bottle on scale or enter weight', 'info'); } catch (_) {}
+  try { VoiceGuide.announceOperationalState('scanned', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'Item scanned. Place bottle on scale.' }); } catch (_) {}
+  phase1WeighTimeoutTimer = setTimeout(function () {
+    phase1WeighTimeoutTimer = null;
+    if (!phase1WeighPendingItem) return;
+    if (timeout) timeout.style.display = '';
+    try { statusOn('save-status', 'No stable weight received — choose an option', 'warn'); } catch (_) {}
+    try { VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'No stable weight received.' }); } catch (_) {}
+  }, 9000);
+}
+function weighPendingMarkUnopened() {
+  const it = phase1WeighPendingItem;
+  if (!it) return;
+  const before = Drafts.count();
+  const res = addCurrentSelectionToReview({ item: it, qtyOverride: 1, weightOverride: '', bottleStateOverride: 'UNOPENED' });
+  if (res && res.ok && Drafts.count() > before) {
+    showOverlay('✓ ADDED TO REVIEW', (it.name || 'Item') + ' · Qty 1 · UNOPENED', 'ok');
+    clearWeighPending();
+    releaseRapidScanLock();
+    scheduleRapidScanReady();
+  } else {
+    showOverlay('⚠ NOT ADDED', (res && res.error) || 'Try again', 'err');
+    releaseRapidScanLock();
+  }
+}
+function initScanWorkflowControls() {
+  const select = $('scan-workflow');
+  const rapid = $('rapid-mode');
+  if (select) select.addEventListener('change', function () {
+    if (select.value === 'WEIGH_PARTIAL') phase1MeasureUnit = 'WEIGHT';
+    if (select.value !== 'WEIGH_PARTIAL' && phase1MeasureUnit === 'WEIGHT') phase1MeasureUnit = 'UNITS';
+    renderScanWorkflowLabel();
+    try { renderPhase1MeasureControls(); } catch (_) {}
+  });
+  if (rapid) rapid.addEventListener('change', function () {
+    select.value = rapid.checked ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
+    renderScanWorkflowLabel();
+  });
+  var add = $('phase1-weigh-add'); if (add) add.addEventListener('click', function () { var save = $('save-btn'); if (save) save.click(); });
+  var cancel = $('phase1-weigh-cancel'); if (cancel) cancel.addEventListener('click', function () { clearWeighPending(); releaseRapidScanLock(); statusOn('save-status', 'Skipped item — scanner ready', 'info'); });
+  var latest = $('phase1-weigh-use-latest'); if (latest) latest.addEventListener('click', function () { _bleUseLatestMain(); });
+  var manual = $('phase1-weigh-manual'); if (manual) manual.addEventListener('click', function () { var g = $('phase1-gross-weight'); if (g) { g.focus(); g.scrollIntoView({ block: 'center' }); } });
+  var reconnect = $('phase1-weigh-reconnect'); if (reconnect) reconnect.addEventListener('click', function () { var b = $('phase1-scale-access-open'); if (b) b.click(); });
+  var unopened = $('phase1-weigh-unopened'); if (unopened) unopened.addEventListener('click', weighPendingMarkUnopened);
+  var skip = $('phase1-weigh-skip'); if (skip) skip.addEventListener('click', function () { clearWeighPending(); releaseRapidScanLock(); statusOn('save-status', 'Skipped item — scanner ready', 'info'); });
+  renderScanWorkflowLabel();
+}
 
 function phase1RenderPendingSelection() {
   const card = $('phase1-pending-selection');
@@ -2082,8 +2199,8 @@ function syncPhase1WeightVisibility() {
   options.style.display = !measureWeight && (bottleState === 'PARTIAL' || profileVisible || weightValue || scaleAction || moreOpen) ? '' : 'none';
 }
 function initPhase1MeasureControls() {
-  var measureUnits = $('phase1-measure-units'); if (measureUnits) measureUnits.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; applyActionTint(); });
-  var measureWeight = $('phase1-measure-weight'); if (measureWeight) measureWeight.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; phase1EnsureWeightQuantityDefault(); applyActionTint(); });
+  var measureUnits = $('phase1-measure-units'); if (measureUnits) measureUnits.addEventListener('click', () => { phase1MeasureUnit = 'UNITS'; var sw = $('scan-workflow'); if (sw && sw.value === 'WEIGH_PARTIAL') sw.value = 'SET_QUANTITY_COUNT'; renderScanWorkflowLabel(); applyActionTint(); });
+  var measureWeight = $('phase1-measure-weight'); if (measureWeight) measureWeight.addEventListener('click', () => { phase1MeasureUnit = 'WEIGHT'; var sw = $('scan-workflow'); if (sw) sw.value = 'WEIGH_PARTIAL'; renderScanWorkflowLabel(); phase1EnsureWeightQuantityDefault(); applyActionTint(); });
   var measureMinus = $('phase1-taken-minus'); if (measureMinus) measureMinus.addEventListener('click', () => phase1AdjustMeasure(-1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
   var measurePlus = $('phase1-taken-plus'); if (measurePlus) measurePlus.addEventListener('click', () => phase1AdjustMeasure(1, phase1MeasureUnit === 'UNITS' ? 1 : 0));
   var grossWeight = $('phase1-gross-weight'); if (grossWeight) grossWeight.addEventListener('input', phase1RenderWeightTare);
@@ -2103,6 +2220,7 @@ function initPhase1MeasureControls() {
 }
 function initPhase1BlockPresentation() {
   initPhase1VoiceControl();
+  initScanWorkflowControls();
   const addSlot = $('phase1-sticky-add-slot');
   const addButton = $('save-btn');
   if (addSlot && addButton) addSlot.appendChild(addButton);
@@ -3202,6 +3320,8 @@ function enterMain() {
   // Restore rapid-mode preference
   const prefs = Prefs.get();
   $('rapid-mode').checked = !!prefs.rapid;
+  if ($('scan-workflow')) $('scan-workflow').value = prefs.rapid ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
+  renderScanWorkflowLabel();
 
   // Do NOT auto-focus any field on the main screen (avoid iOS keyboard popping up).
   $('search-input').value = '';
@@ -3323,6 +3443,9 @@ $$('.action').forEach(btn => {
     // Phase 1I — choosing an action starts from the safe, shared unit mode.
     // WEIGHT / GRAMS must be an explicit follow-up choice for that action.
     phase1MeasureUnit = 'UNITS';
+    var workflowSelect = $('scan-workflow');
+    if (workflowSelect) workflowSelect.value = $('rapid-mode').checked ? 'FAST_UNOPENED_ONE_EACH' : 'SET_QUANTITY_COUNT';
+    renderScanWorkflowLabel();
     applyActionTint();
     renderPhase1StickySummary();
     Feedback.scan();
@@ -3889,7 +4012,8 @@ function acceptDecodedCode(code, controls) {
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
   state.scannerCooldown[cooldownKey] = now;
   Feedback.scan();
-  if (state.scannerContinuous) {
+  const scanWorkflow = resolveScanWorkflow();
+  if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH' || scanWorkflow === 'WEIGH_PARTIAL') {
     state.rapidScanBusy = true;
     if (state.rapidScanResetTimer) { try { clearTimeout(state.rapidScanResetTimer); } catch (_) {} }
     state.rapidScanResetTimer = setTimeout(() => {
@@ -4027,16 +4151,19 @@ async function openScanner() {
     alert('Pick TAKEN or RETURN first.');
     return;
   }
-  const continuous = !!$('rapid-mode').checked;
+  const workflow = resolveScanWorkflow();
+  const continuous = workflow === 'FAST_UNOPENED_ONE_EACH';
   state.scannerContinuous = continuous;
   state.scannerClosing = false;
   state.scannerCooldown = {};
   $('scanner-box').classList.add('active');
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
   $('scanner-toast').style.display = 'none';
-  $('scanner-hint').textContent = continuous
-    ? 'Continuous mode: each scan saves as qty=1. Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame.'
-    : 'Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame.';
+  $('scanner-hint').textContent = workflow === 'FAST_UNOPENED_ONE_EACH'
+    ? 'FAST 1 EACH: each scan adds Qty 1. Move bottle away to re-arm.'
+    : workflow === 'WEIGH_PARTIAL'
+      ? 'WEIGH: scan item, then place the bottle on the scale.'
+      : 'SET QTY: scan item, then enter the quantity.';
 
   let zxing;
   try { zxing = await ensureZXing(); }
@@ -4319,7 +4446,20 @@ function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
     return;   // rapid mode: stays open for the next bottle; out-of-scope simply ignored
   }
 
-  if (state.scannerContinuous) {
+  const scanWorkflow = resolveScanWorkflow();
+  if (scanWorkflow === 'WEIGH_PARTIAL') {
+    // WEIGH is a paused capture flow: close the camera, keep the item pending,
+    // and wait for stable/manual grams. It never opens the quantity sheet.
+    if (state.scannerClosing) return;
+    state.scannerClosing = true;
+    setTimeout(function () {
+      if (controls && controls.stop) { try { controls.stop(); } catch (_) {} }
+      try { closeScanner(); } catch (_) {}
+      beginWeighPending(it);
+    }, SCAN_SUCCESS_CLOSE_MS);
+    return;
+  }
+  if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH') {
     // PHASE2A — RAPID means direct qty=1 Draft creation. Never open the
     // quantity sheet here: the camera remains open and the shared Review core
     // remains the only Draft creation path. The existing barcode cooldown still
@@ -7674,6 +7814,7 @@ $('save-btn').addEventListener('click', async () => {
     VoiceGuide.announceOperationalState('failed', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
     statusOn('save-status', res.storage_error ? 'Could not save locally — keep this page open and retry' : 'Not added — ' + (res.error || 'check the item and try again'), 'err');
     showOverlay(res.partial ? 'ONE BAR FOR PARTIAL' : '⚠ NOT ADDED', res.error || 'unknown error', 'err');
+    if (phase1WeighPendingItem) releaseRapidScanLock();
     return;   // keep the operator's entry so they can fix and retry
   }
   const draftCountAfter = Drafts.count();
@@ -7682,16 +7823,19 @@ $('save-btn').addEventListener('click', async () => {
     VoiceGuide.announceOperationalState('failed', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
     statusOn('save-status', 'FAILED / BLOCKED — Add reported success, but Draft count did not change. Nothing was confirmed.', 'err');
     showOverlay('⚠ ADD NOT CONFIRMED', 'Draft count did not change — keep the item and retry.', 'err');
+    if (phase1WeighPendingItem) releaseRapidScanLock();
     return;
   }
   Feedback.ok();
-  VoiceGuide.announceOperationalState('added', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add' });
+  VoiceGuide.announceOperationalState('added', { itemId: state.selectedItemId, itemName: savedItemName, source: 'add', voicePhrase: phase1WeighPendingItem ? 'Weighted item added.' : '' });
   const n = draftCountAfter;
   phase1ShowDraftSuccess(savedAction, savedItemName, n, savedCalculation);
   phase1PendingItemId = null;
   phase1PendingItemName = '';
   phase1ReplacementArmed = false;
   phase1RenderPendingSelection();
+  clearWeighPending();
+  releaseRapidScanLock();
   if (phase1MeasureUnit === 'WEIGHT') phase1ResetTareAfterAdd();
   if (res.multi) {
     showOverlay('✓ ADDED FOR ' + res.added + ' BAR' + (res.added !== 1 ? 'S' : ''),

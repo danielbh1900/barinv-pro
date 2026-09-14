@@ -21,6 +21,7 @@ function rapidHarness(result) {
   let count = 0;
   const context = {
     state: { scannerContinuous: true, rapidScanReadyTimer: null },
+    resolveScanWorkflow: () => 'FAST_UNOPENED_ONE_EACH',
     Drafts: { count: () => count },
     multiBarActive: () => !!result.multi,
     multiBarDestCount: () => result.destinations || 0,
@@ -98,6 +99,7 @@ test('Phase 2B canonical cooldown treats UPC-A and zero-prefixed EAN-13 as one b
   const context = {
     cache: { items: [{ id: 'item-1', sku: '0652341401024' }] },
     state: { qtyModalItem: null, rapidScanBusy: false, scannerCooldown: {}, scannerContinuous: true, rapidScanResetTimer: null },
+    resolveScanWorkflow: () => 'FAST_UNOPENED_ONE_EACH',
     DUPE_SCAN_WINDOW_MS: 2000,
     Date: { now: () => now },
     Feedback: { scan() {} },
@@ -135,10 +137,10 @@ test('Phase 2B RETURN + UNITS does not require weight, while explicit weight and
 
 test('Phase 2B preserves no-modal RAPID and NORMAL modal routing', () => {
   const scanner = html.slice(html.indexOf('function onBarcodeScanned'), html.indexOf('function showScannerToast'));
-  const rapid = scanner.slice(scanner.indexOf('if (state.scannerContinuous)'), scanner.indexOf('} else {', scanner.indexOf('if (state.scannerContinuous)')));
+  const rapid = scanner.slice(scanner.indexOf("if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH')"), scanner.indexOf('} else {', scanner.indexOf("if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH')")));
   assert.doesNotMatch(rapid, /openQtyModal/);
   assert.match(scanner, /openQtyModal\(it\)/);
-  assert.match(html, /RAPID: each scan adds Qty 1 to Review\. No quantity popup\./);
+  assert.match(html, /FAST 1 EACH: unopened bottles add Qty 1\. No quantity popup\./);
 });
 
 test('Phase 2B keeps previous scanner, Review, weight, scale, and voice fixes', () => {
