@@ -491,6 +491,17 @@
     }
     .scanner-toast.warn { border-color:#f59e0b; color:#fbbf24; }
     .scanner-toast.err { border-color:#ef4444; color:#fca5a5; }
+    .rapid-next-gate {
+      position:fixed; left:18px; right:18px; bottom:calc(80px + env(safe-area-inset-bottom, 0px)); z-index:1000;
+      display:none; padding:12px; border:2px solid #fb923c; border-radius:12px;
+      background:rgba(0,0,0,0.9); color:#fff; text-align:center;
+    }
+    .rapid-next-gate button {
+      width:100%; min-height:58px; border:0; border-radius:10px;
+      background:#fb923c; color:#111; font-size:22px; font-weight:900;
+    }
+    .rapid-next-gate button:disabled { opacity:.55; }
+    .rapid-next-gate .sub { margin-top:7px; color:#fed7aa; font-size:13px; }
 
     /* ── Scanner center-ROI scan window (PLAN-2026-06-09) ────────────
        Visual guidance that also mirrors the cropped decode region used by
@@ -1230,6 +1241,11 @@
   <div class="scanner-toast" id="scanner-toast">—</div>
   <div class="hint" id="scanner-hint">Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame. Camera permission is required.</div>
 </div>
+<!-- PHASE2K4_GLOBAL_NEXT_SCAN — body-level gate survives scanner overlay rerenders. -->
+<div class="rapid-next-gate" id="rapid-next-gate" data-body-level="true" hidden aria-hidden="true" style="display:none;">
+  <button id="rapid-next-scan" type="button" hidden disabled>NEXT SCAN</button>
+  <div class="sub">Aim at the next bottle, then tap NEXT SCAN</div>
+</div>
 
 <!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
 <div class="ok-overlay" id="ok-overlay">
@@ -1521,9 +1537,11 @@ const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
 const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
 const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
-// PHASE2K — time passing alone must not re-arm a continuously visible bottle.
-// Three no-decode ROI ticks at 160 ms gives a bounded ~480 ms clear-frame gap.
-const RAPID_CLEAR_FRAMES_REQUIRED = 3;
+// PHASE2K.1 — short decode gaps are not reliable physical departure evidence.
+// Require continuous absence for 1400 ms; any detection resets this gate.
+const RAPID_CLEAR_ABSENCE_MS = 1400; // diagnostic only; never unlocks FAST
+const RAPID_DIFFERENT_CONFIRMATIONS = 2; // diagnostic only; never unlocks FAST
+const RAPID_DIFFERENT_CONFIRM_WINDOW_MS = 700; // diagnostic only; never unlocks FAST
 const SCAN_SUCCESS_CLOSE_MS = 450; // single-scan: show the success toast this long, then close
 // PLAN-2026-06-09 — Scanner center-ROI. Cropped decode region (and the visual
 // frame in CSS .scanner-roi .frame) as a fraction of the displayed video.
@@ -2902,8 +2920,13 @@ const state = {
   rapidScanResetTimer: null,
   rapidScanReadyTimer: null,
   rapidPhysicalLatchedBarcode: '', // canonical identity of the visible/accepted bottle
-  rapidPhysicalClearFrames: 0,
+  rapidPhysicalClearStartedAt: 0,
   rapidPhysicalRearmed: true,
+  rapidPhysicalDifferentCandidate: '',
+  rapidPhysicalDifferentCount: 0,
+  rapidPhysicalDifferentStartedAt: 0,
+  rapidPhysicalPendingBarcode: '',
+  rapidNextScanArming: false,
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
   roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
@@ -4024,18 +4047,12 @@ function acceptDecodedCode(code, controls) {
   const barcodeResult = lookupBarcodeResult(code);
   const cooldownKey = canonicalBarcodeCooldownKey(code, barcodeResult);
   const scanWorkflow = resolveScanWorkflow();
-  // PHASE2K — a fixed cooldown is only a debounce. In FAST mode, keep the
-  // physical barcode latched until the camera sees a clear frame (or a
-  // different canonical barcode). UPC/EAN aliases therefore share one latch.
+  // PHASE2K.2 — FAST is explicitly operator-armed. Once a barcode has been
+  // successfully added, no timer, clear frame, different barcode, or alias
+  // can unlock the camera. Only NEXT SCAN calls resetRapidPhysicalRearm().
   if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH') {
-    if (state.rapidPhysicalLatchedBarcode && cooldownKey === state.rapidPhysicalLatchedBarcode && !state.rapidPhysicalRearmed) return;
-    if (state.rapidPhysicalLatchedBarcode && cooldownKey !== state.rapidPhysicalLatchedBarcode) {
-      state.rapidPhysicalClearFrames = 0;
-      state.rapidPhysicalRearmed = true;
-    }
-    state.rapidPhysicalLatchedBarcode = cooldownKey;
-    state.rapidPhysicalClearFrames = 0;
-    state.rapidPhysicalRearmed = false;
+    if (state.rapidPhysicalRearmed === false) return;
+    state.rapidPhysicalPendingBarcode = cooldownKey;
   }
   const now = Date.now();
   const last = state.scannerCooldown[cooldownKey] || 0;
@@ -4054,7 +4071,7 @@ function acceptDecodedCode(code, controls) {
   // ZXing decode callback / ROI tick; an uncaught throw there halts the continuous
   // decode and freezes the camera ("stuck/doing nothing after first scan"). Both
   // decode routes stay alive.
-  try { onBarcodeScanned(code, controls, barcodeResult); }
+    try { onBarcodeScanned(code, controls, barcodeResult, cooldownKey); }
   catch (e) {
     state.rapidScanBusy = false;
     try { if (state.rapidScanResetTimer) clearTimeout(state.rapidScanResetTimer); } catch (_) {}
@@ -4065,23 +4082,63 @@ function acceptDecodedCode(code, controls) {
 
 function noteRapidPhysicalClearFrame() {
   if (resolveScanWorkflow() !== 'FAST_UNOPENED_ONE_EACH') return;
-  if (!state.rapidPhysicalLatchedBarcode || state.rapidPhysicalRearmed) return;
-  state.rapidPhysicalClearFrames += 1;
-  if (state.rapidPhysicalClearFrames < RAPID_CLEAR_FRAMES_REQUIRED) return;
-  const releasedBarcode = state.rapidPhysicalLatchedBarcode;
-  state.rapidPhysicalClearFrames = 0;
-  state.rapidPhysicalLatchedBarcode = '';
-  state.rapidPhysicalRearmed = true;
-  if (releasedBarcode && state.scannerCooldown) delete state.scannerCooldown[releasedBarcode];
-  try { showScannerToast('Ready for next scan', 'ok'); } catch (_) {}
-  try { statusOn('save-status', 'Ready for next scan', 'info'); } catch (_) {}
-  try { VoiceGuide.announceOperationalState('scanned', { source: 'scan', voicePhrase: 'Ready for next scan.' }); } catch (_) {}
+  // PHASE2K.2: decode loss is not physical departure evidence. Keep this
+  // hook harmless for the ROI loop; only the manual gate can re-arm FAST.
 }
 
 function resetRapidPhysicalRearm() {
   state.rapidPhysicalLatchedBarcode = '';
-  state.rapidPhysicalClearFrames = 0;
+  state.rapidPhysicalClearStartedAt = 0;
   state.rapidPhysicalRearmed = true;
+  state.rapidPhysicalDifferentCandidate = '';
+  state.rapidPhysicalDifferentCount = 0;
+  state.rapidPhysicalDifferentStartedAt = 0;
+  state.rapidPhysicalPendingBarcode = '';
+  state.rapidNextScanArming = false;
+}
+
+function syncRapidNextScanUI() {
+  const gate = $('rapid-next-gate') || $('rapid-next-gate-global');
+  const button = $('rapid-next-scan') || $('rapid-next-scan-global');
+  const scanner = $('scanner-box');
+  // The active scanner session is the visibility source. Do not re-resolve
+  // the form workflow here: a post-add render or stale measure control must
+  // never hide a gate that was just made LOCKED by a successful FAST add.
+  const locked = !!(scanner && scanner.classList.contains('active') &&
+    state.scannerContinuous === true &&
+    state.rapidPhysicalRearmed === false);
+  if (gate) {
+    gate.style.display = locked ? '' : 'none';
+    gate.hidden = !locked;
+    gate.setAttribute('aria-hidden', locked ? 'false' : 'true');
+  }
+  if (button) {
+    button.hidden = !locked;
+    button.disabled = !locked || !!state.rapidNextScanArming;
+  }
+  if (scanner && scanner.classList.contains('active') && state.scannerContinuous === true) {
+    const hint = $('scanner-hint');
+    if (hint) hint.textContent = locked
+      ? 'FAST 1 EACH: ADDED — TAP NEXT SCAN'
+      : 'FAST 1 EACH: READY TO SCAN';
+  }
+}
+
+function armRapidNextScan() {
+  if (resolveScanWorkflow() !== 'FAST_UNOPENED_ONE_EACH') return;
+  const scanner = $('scanner-box');
+  if (!scanner || !scanner.classList.contains('active') || state.rapidPhysicalRearmed || state.rapidNextScanArming) return;
+  state.rapidNextScanArming = true;
+  syncRapidNextScanUI();
+  resetRapidPhysicalRearm();
+  syncRapidNextScanUI();
+  state.scannerCooldown = {};
+  releaseRapidScanLock();
+  state.rapidNextScanArming = false;
+  try { showScannerToast('Ready for next scan', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Ready for next scan', 'info'); } catch (_) {}
+  try { VoiceGuide.announceOperationalState('scanned', { source: 'scan', voicePhrase: 'Ready for next scan.' }); } catch (_) {}
+  syncRapidNextScanUI();
 }
 
 // Returns true when a full-frame detection sits inside the central scan band,
@@ -4208,10 +4265,11 @@ async function openScanner() {
   state.scannerCooldown = {};
   resetRapidPhysicalRearm();
   $('scanner-box').classList.add('active');
+  syncRapidNextScanUI();
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
   $('scanner-toast').style.display = 'none';
   $('scanner-hint').textContent = workflow === 'FAST_UNOPENED_ONE_EACH'
-    ? 'FAST 1 EACH: each scan adds Qty 1. Move bottle away to re-arm.'
+    ? 'FAST 1 EACH: READY TO SCAN. Each scan adds Qty 1; tap NEXT SCAN for the next bottle.'
     : workflow === 'WEIGH_PARTIAL'
       ? 'WEIGH: scan item, then place the bottle on the scale.'
       : 'SET QTY: scan item, then enter the quantity.';
@@ -4374,6 +4432,7 @@ function rapidScanAddItem(it, barcodeResult) {
   // bottle. Weight is explicitly blank: a barcode-only rapid scan is never a
   // grams entry, even if a stale weight field exists on the work screen.
   const draftCountBefore = Drafts.count();
+  const cooldownKey = arguments[2] || state.rapidPhysicalPendingBarcode;
   const intendedDestinations = multiBarActive() ? multiBarDestCount() : 1;
   const notesInput = $('notes-input');
   const previousNotes = notesInput ? notesInput.value : '';
@@ -4414,15 +4473,26 @@ function rapidScanAddItem(it, barcodeResult) {
       return false;
     }
     Feedback.ok();
+    if (cooldownKey) {
+      state.rapidPhysicalLatchedBarcode = cooldownKey;
+      state.rapidPhysicalClearStartedAt = 0;
+      state.rapidPhysicalRearmed = false;
+      state.rapidPhysicalDifferentCandidate = '';
+      state.rapidPhysicalDifferentCount = 0;
+      state.rapidPhysicalDifferentStartedAt = 0;
+      try { syncRapidNextScanUI(); } catch (_) {}
+    }
     try { VoiceGuide.announceOperationalState('added', { itemId: it.id, itemName: it.name, source: 'scan' }); } catch (_) {}
     showScannerToast('✓ Added to Review: ' + (it.name || 'item') + ' · Move bottle away' + (barcodeResult && barcodeResult.aliasUsed ? ' · Matched UPC/EAN variant' : ''), 'ok');
-    try { statusOn('save-status', 'Added — move bottle away · ' + it.name, 'ok'); } catch (_) {}
+    try { statusOn('save-status', 'ADDED TO DRAFT · Move bottle away, then tap NEXT SCAN · ' + it.name, 'ok'); } catch (_) {}
+    try { syncRapidNextScanUI(); } catch (_) {}
     scheduleRapidScanReady();
     return true;
   } catch (_) {
     try { showScannerToast('⚠ Scan failed — try again', 'warn'); } catch (_) {}
     return false;
   } finally {
+    state.rapidPhysicalPendingBarcode = '';
     // Voice is best-effort and must never hold the scanner processing gate.
     releaseRapidScanLock();
   }
@@ -4430,6 +4500,7 @@ function rapidScanAddItem(it, barcodeResult) {
 
 function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
   const barcodeResult = acceptedBarcodeResult || lookupBarcodeResult(code);
+  const cooldownKey = arguments[3];
   const it = barcodeResult.item;
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
   // distinguish "ZXing decoded but no item match" from "ZXing never
@@ -6117,9 +6188,12 @@ function closeScanner() {
   state.scannerContinuous = false;
   state.scannerClosing = false;
   resetRapidPhysicalRearm();
+  syncRapidNextScanUI();
 }
 $('scan-btn').addEventListener('click', openScanner);
 $('scanner-close').addEventListener('click', closeScanner);
+const rapidNextScanButton = $('rapid-next-scan') || $('rapid-next-scan-global');
+if (rapidNextScanButton) rapidNextScanButton.addEventListener('click', armRapidNextScan);
 
 // ════════════════════════════════════════════════════════════════════
 //  External HID scanner support (Bluetooth-keyboard-class)

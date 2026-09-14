@@ -104,7 +104,12 @@ test('Phase 2B canonical cooldown and Phase 2K physical latch treat UPC-A and ze
     Date: { now: () => now },
     Feedback: { scan() {} },
     lookupBarcodeResult: undefined,
-    onBarcodeScanned: () => { accepted += 1; context.state.rapidScanBusy = false; },
+    onBarcodeScanned: (_code, _controls, _result, cooldownKey) => {
+      accepted += 1;
+      context.state.rapidScanBusy = false;
+      context.state.rapidPhysicalLatchedBarcode = cooldownKey;
+      context.state.rapidPhysicalRearmed = false;
+    },
     setTimeout: () => 1,
     clearTimeout() {},
     console,
