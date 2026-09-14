@@ -492,7 +492,7 @@
     .scanner-toast.warn { border-color:#f59e0b; color:#fbbf24; }
     .scanner-toast.err { border-color:#ef4444; color:#fca5a5; }
     .rapid-next-gate {
-      position:absolute; left:18px; right:18px; bottom:72px; z-index:202;
+      position:fixed; left:18px; right:18px; bottom:calc(12px + env(safe-area-inset-bottom, 0px)); z-index:202;
       display:none; padding:12px; border:2px solid #fb923c; border-radius:12px;
       background:rgba(0,0,0,0.9); color:#fff; text-align:center;
     }
@@ -4101,14 +4101,21 @@ function syncRapidNextScanUI() {
   const gate = $('rapid-next-gate');
   const button = $('rapid-next-scan');
   const scanner = $('scanner-box');
+  // The active scanner session is the visibility source. Do not re-resolve
+  // the form workflow here: a post-add render or stale measure control must
+  // never hide a gate that was just made LOCKED by a successful FAST add.
   const locked = !!(scanner && scanner.classList.contains('active') &&
-    resolveScanWorkflow() === 'FAST_UNOPENED_ONE_EACH' &&
+    state.scannerContinuous === true &&
     state.rapidPhysicalRearmed === false);
   if (gate) {
     gate.style.display = locked ? '' : 'none';
+    gate.hidden = !locked;
     gate.setAttribute('aria-hidden', locked ? 'false' : 'true');
   }
-  if (button) button.disabled = !locked || !!state.rapidNextScanArming;
+  if (button) {
+    button.hidden = !locked;
+    button.disabled = !locked || !!state.rapidNextScanArming;
+  }
 }
 
 function armRapidNextScan() {
