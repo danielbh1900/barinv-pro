@@ -92,7 +92,7 @@ test('Phase 2B reports zero-add failure and always releases the rapid lock', () 
   assert.equal(h.calls.release, 1);
 });
 
-test('Phase 2B canonical cooldown treats UPC-A and zero-prefixed EAN-13 as one barcode', () => {
+test('Phase 2B canonical cooldown and Phase 2K physical latch treat UPC-A and zero-prefixed EAN-13 as one barcode', () => {
   const lookupBlock = html.slice(html.indexOf('function barcodeDigitsOnly'), html.indexOf('function lookupByBarcode'));
   let now = 10000;
   let accepted = 0;
@@ -119,7 +119,8 @@ test('Phase 2B canonical cooldown treats UPC-A and zero-prefixed EAN-13 as one b
   assert.equal(accepted, 1);
   now += 2100;
   context.acceptDecodedCode('0652341401024');
-  assert.equal(accepted, 2);
+  // Phase 2K: time passing alone cannot re-arm a continuously visible bottle.
+  assert.equal(accepted, 1);
 });
 
 test('Phase 2B RETURN + UNITS does not require weight, while explicit weight and PARTIAL do', () => {

@@ -1521,6 +1521,9 @@ const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
 const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
 const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
+// PHASE2K — time passing alone must not re-arm a continuously visible bottle.
+// Three no-decode ROI ticks at 160 ms gives a bounded ~480 ms clear-frame gap.
+const RAPID_CLEAR_FRAMES_REQUIRED = 3;
 const SCAN_SUCCESS_CLOSE_MS = 450; // single-scan: show the success toast this long, then close
 // PLAN-2026-06-09 — Scanner center-ROI. Cropped decode region (and the visual
 // frame in CSS .scanner-roi .frame) as a fraction of the displayed video.
@@ -2898,6 +2901,9 @@ const state = {
   rapidScanBusy: false,    // rapid decode lock: one accepted barcode at a time
   rapidScanResetTimer: null,
   rapidScanReadyTimer: null,
+  rapidPhysicalLatchedBarcode: '', // canonical identity of the visible/accepted bottle
+  rapidPhysicalClearFrames: 0,
+  rapidPhysicalRearmed: true,
   zxingControls: null,
   roiTimer: null,       // setTimeout handle for the center-ROI decode loop
   roiReader: null,      // 2nd ZXing reader used only for cropped-ROI decodes
@@ -4017,12 +4023,25 @@ function acceptDecodedCode(code, controls) {
   if (state.qtyModalItem || state.rapidScanBusy) return;
   const barcodeResult = lookupBarcodeResult(code);
   const cooldownKey = canonicalBarcodeCooldownKey(code, barcodeResult);
+  const scanWorkflow = resolveScanWorkflow();
+  // PHASE2K — a fixed cooldown is only a debounce. In FAST mode, keep the
+  // physical barcode latched until the camera sees a clear frame (or a
+  // different canonical barcode). UPC/EAN aliases therefore share one latch.
+  if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH') {
+    if (state.rapidPhysicalLatchedBarcode && cooldownKey === state.rapidPhysicalLatchedBarcode && !state.rapidPhysicalRearmed) return;
+    if (state.rapidPhysicalLatchedBarcode && cooldownKey !== state.rapidPhysicalLatchedBarcode) {
+      state.rapidPhysicalClearFrames = 0;
+      state.rapidPhysicalRearmed = true;
+    }
+    state.rapidPhysicalLatchedBarcode = cooldownKey;
+    state.rapidPhysicalClearFrames = 0;
+    state.rapidPhysicalRearmed = false;
+  }
   const now = Date.now();
   const last = state.scannerCooldown[cooldownKey] || 0;
   if (now - last < DUPE_SCAN_WINDOW_MS) return; // suppress immediate dupes
   state.scannerCooldown[cooldownKey] = now;
   Feedback.scan();
-  const scanWorkflow = resolveScanWorkflow();
   if (scanWorkflow === 'FAST_UNOPENED_ONE_EACH' || scanWorkflow === 'WEIGH_PARTIAL') {
     state.rapidScanBusy = true;
     if (state.rapidScanResetTimer) { try { clearTimeout(state.rapidScanResetTimer); } catch (_) {} }
@@ -4042,6 +4061,27 @@ function acceptDecodedCode(code, controls) {
     state.rapidScanResetTimer = null;
     try { console.warn('[scanner] onBarcodeScanned threw — decode loop kept alive', (e && e.message) || e); } catch (_) {}
   }
+}
+
+function noteRapidPhysicalClearFrame() {
+  if (resolveScanWorkflow() !== 'FAST_UNOPENED_ONE_EACH') return;
+  if (!state.rapidPhysicalLatchedBarcode || state.rapidPhysicalRearmed) return;
+  state.rapidPhysicalClearFrames += 1;
+  if (state.rapidPhysicalClearFrames < RAPID_CLEAR_FRAMES_REQUIRED) return;
+  const releasedBarcode = state.rapidPhysicalLatchedBarcode;
+  state.rapidPhysicalClearFrames = 0;
+  state.rapidPhysicalLatchedBarcode = '';
+  state.rapidPhysicalRearmed = true;
+  if (releasedBarcode && state.scannerCooldown) delete state.scannerCooldown[releasedBarcode];
+  try { showScannerToast('Ready for next scan', 'ok'); } catch (_) {}
+  try { statusOn('save-status', 'Ready for next scan', 'info'); } catch (_) {}
+  try { VoiceGuide.announceOperationalState('scanned', { source: 'scan', voicePhrase: 'Ready for next scan.' }); } catch (_) {}
+}
+
+function resetRapidPhysicalRearm() {
+  state.rapidPhysicalLatchedBarcode = '';
+  state.rapidPhysicalClearFrames = 0;
+  state.rapidPhysicalRearmed = true;
 }
 
 // Returns true when a full-frame detection sits inside the central scan band,
@@ -4125,9 +4165,9 @@ function startRoiDecodeLoop(zxing, hints) {
             console.log('[scanner] roi-decoded', { len: s.length, last4: s.slice(-4) });
           } catch (_) { /* console may be unavailable */ }
           acceptDecodedCode(code, state.zxingControls);
-        }
+        } else noteRapidPhysicalClearFrame();
       }
-    } catch (_) { /* skip this tick */ }
+    } catch (_) { noteRapidPhysicalClearFrame(); /* skip this tick */ }
     if (state.roiReader) state.roiTimer = setTimeout(tick, ROI_DECODE_INTERVAL_MS);
   };
   state.roiTimer = setTimeout(tick, ROI_DECODE_INTERVAL_MS);
@@ -4166,6 +4206,7 @@ async function openScanner() {
   state.scannerContinuous = continuous;
   state.scannerClosing = false;
   state.scannerCooldown = {};
+  resetRapidPhysicalRearm();
   $('scanner-box').classList.add('active');
   $('scanner-rapid-tag').style.display = continuous ? '' : 'none';
   $('scanner-toast').style.display = 'none';
@@ -4319,6 +4360,7 @@ function scheduleRapidScanReady() {
   state.rapidScanReadyTimer = setTimeout(() => {
     state.rapidScanReadyTimer = null;
     if (!state.scannerContinuous) return;
+    if (state.rapidPhysicalRearmed === false) return;
     const scanner = $('scanner-box');
     if (!scanner || !scanner.classList.contains('active')) return;
     try { showScannerToast('Ready for next scan', 'ok'); } catch (_) {}
@@ -4373,8 +4415,8 @@ function rapidScanAddItem(it, barcodeResult) {
     }
     Feedback.ok();
     try { VoiceGuide.announceOperationalState('added', { itemId: it.id, itemName: it.name, source: 'scan' }); } catch (_) {}
-    showScannerToast('✓ Added to Review: ' + (it.name || 'item') + (barcodeResult && barcodeResult.aliasUsed ? ' · Matched UPC/EAN variant' : ''), 'ok');
-    try { statusOn('save-status', 'Added — move to next bottle · ' + it.name, 'ok'); } catch (_) {}
+    showScannerToast('✓ Added to Review: ' + (it.name || 'item') + ' · Move bottle away' + (barcodeResult && barcodeResult.aliasUsed ? ' · Matched UPC/EAN variant' : ''), 'ok');
+    try { statusOn('save-status', 'Added — move bottle away · ' + it.name, 'ok'); } catch (_) {}
     scheduleRapidScanReady();
     return true;
   } catch (_) {
@@ -6074,6 +6116,7 @@ function closeScanner() {
   state.zxingControls = null;
   state.scannerContinuous = false;
   state.scannerClosing = false;
+  resetRapidPhysicalRearm();
 }
 $('scan-btn').addEventListener('click', openScanner);
 $('scanner-close').addEventListener('click', closeScanner);
