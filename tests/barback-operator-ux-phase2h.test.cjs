@@ -39,7 +39,7 @@ test('Phase 2H Add button is disabled when no item is selected', () => {
 
 test('Phase 2H pending card follows the selected item and clears after successful add', () => {
   const source = functionSource('phase1RenderPendingSelection');
-  const card = { classList: { values: [], toggle(name, value) { this.values.push([name, value]); } } };
+  const card = { style: {}, classList: { values: [], toggle(name, value) { this.values.push([name, value]); } }, setAttribute() {} };
   const item = { textContent: '' };
   const add = { classList: { toggle() {} } };
   const context = {

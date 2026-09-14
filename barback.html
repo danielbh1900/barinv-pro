@@ -2001,9 +2001,16 @@ function phase1RenderPendingSelection() {
   const item = $('phase1-pending-item');
   const add = $('save-btn');
   const pending = !!(phase1PendingItemId && state.selectedItemId === phase1PendingItemId);
-  if (card) card.classList.toggle('active', pending);
+  if (card) {
+    card.classList.toggle('active', pending);
+    // Keep the post-add state explicit even if a mobile/WebView stylesheet is
+    // stale or fails to apply the class-only display rule.
+    card.style.display = pending ? '' : 'none';
+    card.setAttribute('aria-hidden', pending ? 'false' : 'true');
+  }
   if (item) item.textContent = pending ? phase1PendingItemName : '';
   if (add) add.classList.toggle('phase1-add-needed', pending);
+  try { syncAddButtonLabel(); } catch (_) {}
 }
 function phase1HideDraftSuccess() {
   const card = $('phase1-draft-success');
