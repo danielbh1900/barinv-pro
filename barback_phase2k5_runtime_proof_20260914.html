@@ -647,8 +647,12 @@
 <div id="phase2k5-runtime-proof" role="status" style="position:sticky;top:59px;z-index:1099;padding:8px 10px;background:#172554;color:#bfdbfe;border-bottom:2px solid #60a5fa;font:800 12px/1.45 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;">
   <div>RUNTIME PAGE: 2K.5</div>
   <div id="phase2k5-runtime-diagnostics">PAGE BUILD: 2K5 · SERVICE WORKER CONTROLLED: checking · FAST STATE: ARMED</div>
+  <div id="phase2k6-runtime-status" style="margin-top:5px;color:#bfdbfe;">FAST 1 EACH: READY TO SCAN</div>
+  <button id="phase2k6-next-scan" type="button" hidden disabled style="display:none;margin-top:8px;width:100%;min-height:64px;padding:12px;border:2px solid #fbbf24;border-radius:9px;background:#f59e0b;color:#111827;font:900 22px system-ui;">NEXT SCAN</button>
+  <div id="phase2k6-next-scan-help" style="display:none;margin-top:5px;color:#fed7aa;">Tap NEXT SCAN when ready for the next bottle.</div>
   <button type="button" style="margin-top:7px;padding:8px 14px;border:1px solid #93c5fd;border-radius:7px;background:#1d4ed8;color:#fff;font:900 12px system-ui;">TEST CONTROL VISIBLE</button>
 </div>
+<style>#rapid-next-gate { display:none !important; }</style>
 
 <!-- PHASE2E_BLUEFY_BOOT_GUARD: static and JS-independent. Keep this visible
      until the app reports readiness; ?bluefyBootDebug=1 keeps diagnostics open. -->
@@ -1377,6 +1381,27 @@ function renderPhase2K5RuntimeProof() {
   var fastState = 'ARMED';
   try { if (typeof state !== 'undefined' && state.scannerContinuous === true && state.rapidPhysicalRearmed === false) fastState = 'LOCKED'; } catch (_) {}
   panel.textContent = 'PAGE BUILD: 2K5 · SERVICE WORKER CONTROLLED: ' + (swControlled ? 'YES' : 'NO') + ' · FAST STATE: ' + fastState;
+  var next = document.getElementById('phase2k6-next-scan');
+  var status = document.getElementById('phase2k6-runtime-status');
+  var help = document.getElementById('phase2k6-next-scan-help');
+  var locked = fastState === 'LOCKED';
+  if (status) status.textContent = locked ? 'FAST 1 EACH: ADDED — TAP NEXT SCAN' : 'FAST 1 EACH: READY TO SCAN';
+  if (next) {
+    next.hidden = !locked;
+    next.disabled = !locked || !!(typeof state !== 'undefined' && state.rapidNextScanArming);
+    next.style.display = locked ? 'block' : 'none';
+    next.setAttribute('aria-hidden', locked ? 'false' : 'true');
+    next.style.pointerEvents = locked ? 'auto' : 'none';
+    if (!next._phase2k6Bound) {
+      next._phase2k6Bound = true;
+      next.addEventListener('click', function () {
+        if (next.disabled) return;
+        next.disabled = true;
+        try { armRapidNextScan(); } finally { renderPhase2K5RuntimeProof(); }
+      });
+    }
+  }
+  if (help) help.style.display = locked ? 'block' : 'none';
 }
 function renderBluefyBootDiagnostics() {
   var nav = typeof navigator !== 'undefined' ? navigator : {};
