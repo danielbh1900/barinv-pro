@@ -2895,6 +2895,11 @@ let EVENT_REVIEW = {
   activeJobId: null,
 };
 
+let EVENT_CORRECTION = {
+  eventId: null,
+  venueId: null,
+};
+
 const EVENT_CSV_MAX_IMPORT_ROWS = 5000;
 const EVENT_CSV_BATCH_SIZE = 500;
 const EVENT_CSV_EXPORT_PAGE_SIZE = 500;
@@ -5235,6 +5240,179 @@ async function loadHistory() {
 // ══════════════════════════════════════════════════════
 // EVENTS (admin)
 // ══════════════════════════════════════════════════════
+function eventLogNoteMetadata(notes) {
+  const tags = {};
+  const source = typeof notes === 'string' ? notes : '';
+  const pattern = /\[(WEIGHT_G|BOTTLE_STATE|REMAINING_PERCENT|REMAINING_ML)=([^\]\r\n]*)\]/g;
+  let match;
+  while ((match = pattern.exec(source)) !== null) tags[match[1]] = match[2].trim();
+
+  const numberTag = (name, min, max) => {
+    if (!Object.prototype.hasOwnProperty.call(tags, name) || tags[name] === '') return null;
+    const value = Number(tags[name]);
+    return Number.isFinite(value) && value >= min && (max == null || value <= max) ? value : null;
+  };
+
+  return {
+    weightG: numberTag('WEIGHT_G', Number.MIN_VALUE, null),
+    bottleState: String(tags.BOTTLE_STATE || '').toUpperCase(),
+    remainingPercent: numberTag('REMAINING_PERCENT', 0, 100),
+    remainingMl: numberTag('REMAINING_ML', 0, null),
+  };
+}
+
+function eventLogQtyDisplay(e, isCase, upc) {
+  // Keep the established case display unchanged; scale metadata only affects
+  // non-case rows in the Admin Event Log.
+  if (isCase) return `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>`;
+
+  const metadata = eventLogNoteMetadata(e.notes);
+  if (metadata.weightG == null) return esc(e.qty);
+
+  const details = [`${esc(metadata.weightG)} g`];
+  if (metadata.remainingPercent != null) details.push(`${esc(metadata.remainingPercent)}% rem`);
+  if (metadata.remainingMl != null) details.push(`${esc(metadata.remainingMl)} ml`);
+
+  if (metadata.bottleState === 'PARTIAL') {
+    const qtyMatchesWeight = Number.isFinite(Number(e.qty)) && Number(e.qty) === metadata.weightG;
+    if (qtyMatchesWeight) {
+      details.splice(1, 0, 'partial');
+      return details.join(' • ');
+    }
+    return `${esc(e.qty)} partial<br><span style="font-size:10px;color:var(--muted);">${details.join(' • ')}</span>`;
+  }
+
+  return details.join(' • ');
+}
+
+function eventCorrectionEditButton(e) {
+  if (e?.status !== 'PENDING') return '';
+  return `<button class="btn btn-ghost btn-xs" title="Edit pending Event" aria-label="Edit pending Event" onclick="openEventCorrection('${esc(e.id)}')">✎</button>`;
+}
+
+function eventCorrectionReadForm() {
+  const mode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
+  const qty = Number(document.getElementById('event-correction-qty')?.value);
+  const weightG = Number(document.getElementById('event-correction-weight')?.value);
+
+  if (!mode) return { ok: false, error: 'Choose Quantity or Weight correction type.' };
+  if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
+    return { ok: false, error: 'Quantity must be a positive whole number.' };
+  }
+  if (mode === 'WEIGHT' && (!Number.isFinite(weightG) || weightG <= 0)) {
+    return { ok: false, error: 'Weight must be a number greater than zero.' };
+  }
+
+  return { ok: true, mode, qty, weightG: mode === 'WEIGHT' ? weightG : null };
+}
+
+function eventCorrectionSyncMode() {
+  const mode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
+  const weightWrap = document.getElementById('event-correction-weight-wrap');
+  const weightInput = document.getElementById('event-correction-weight');
+  const saveButton = document.getElementById('event-correction-save');
+  if (weightWrap) weightWrap.style.display = mode === 'WEIGHT' ? '' : 'none';
+  if (weightInput) weightInput.disabled = mode !== 'WEIGHT';
+  if (saveButton) saveButton.disabled = !eventCorrectionReadForm().ok;
+}
+
+function openEventCorrection(id) {
+  const event = EVENT_REVIEW.rows.find(row => row.id === id);
+  if (!event || event.status !== 'PENDING') {
+    toast('Only PENDING Events can be corrected.', 't-err');
+    loadEvents();
+    return;
+  }
+  if (!SESSION.venueId || event.venue_id !== SESSION.venueId) {
+    toast('Event is outside the active Venue.', 't-err');
+    loadEvents();
+    return;
+  }
+
+  EVENT_CORRECTION = { eventId: event.id, venueId: SESSION.venueId };
+  const metadata = eventLogNoteMetadata(event.notes);
+  const initialWeight = metadata.weightG != null ? metadata.weightG : event.qty;
+  const location = [event.bars?.name, event.stations?.name].filter(Boolean).join(' • ') || '—';
+
+  openModal(
+    'Correct Pending Event',
+    `<div style="display:grid;gap:6px;margin-bottom:16px;font-size:12px;">
+       <div><span style="color:var(--muted);">Item:</span> <b>${esc(event.items?.name || '—')}</b></div>
+       <div><span style="color:var(--muted);">Action:</span> ${esc(event.action || '—')}</div>
+       <div><span style="color:var(--muted);">Bar / Station:</span> ${esc(location)}</div>
+       <div><span style="color:var(--muted);">Current stored quantity:</span> ${esc(event.qty)}</div>
+       <div><span style="color:var(--muted);">Current detected weight:</span> ${metadata.weightG == null ? '—' : esc(metadata.weightG) + ' g'}</div>
+     </div>
+     <div class="field">
+       <label>Correction Type</label>
+       <label style="display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;">
+         <input type="radio" name="event-correction-mode" value="QUANTITY" onchange="eventCorrectionSyncMode()"> Quantity only
+       </label>
+       <label style="display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;">
+         <input type="radio" name="event-correction-mode" value="WEIGHT" onchange="eventCorrectionSyncMode()"> Weight / scale measurement
+       </label>
+     </div>
+     <div class="field">
+       <label>Quantity</label>
+       <input id="event-correction-qty" type="number" min="1" step="1" value="${esc(event.qty)}" oninput="eventCorrectionSyncMode()">
+     </div>
+     <div class="field" id="event-correction-weight-wrap" style="display:none;">
+       <label>Weight (g)</label>
+       <input id="event-correction-weight" type="number" min="0" step="any" value="${esc(initialWeight)}" disabled oninput="eventCorrectionSyncMode()">
+     </div>`,
+    saveEventCorrection,
+    `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-a btn-sm" id="event-correction-save" onclick="modalOK()" disabled>SAVE CORRECTION</button>`
+  );
+  eventCorrectionSyncMode();
+}
+
+async function saveEventCorrection() {
+  const values = eventCorrectionReadForm();
+  if (!values.ok) {
+    toast(values.error, 't-err');
+    return;
+  }
+  if (!EVENT_CORRECTION.eventId || !EVENT_CORRECTION.venueId || SESSION.venueId !== EVENT_CORRECTION.venueId) {
+    toast('Active Venue changed; correction cancelled.', 't-err');
+    closeModal();
+    await loadEvents();
+    return;
+  }
+
+  const saveButton = document.getElementById('event-correction-save');
+  if (saveButton) saveButton.disabled = true;
+
+  const { data, error } = await SB.rpc('barinv_correct_pending_event', {
+    p_venue_id: EVENT_CORRECTION.venueId,
+    p_event_id: EVENT_CORRECTION.eventId,
+    p_mode: values.mode,
+    p_qty: values.qty,
+    p_weight_g: values.weightG,
+  });
+
+  if (error) {
+    const message = eventReviewSafeError(error, 'Event correction failed');
+    toast(message, 't-err');
+    if (/no longer PENDING|not found in this Venue/i.test(String(error.message || ''))) {
+      closeModal();
+      await loadEvents();
+      return;
+    }
+    eventCorrectionSyncMode();
+    return;
+  }
+
+  closeModal();
+  toast(
+    values.mode === 'WEIGHT'
+      ? `Event corrected: qty ${values.qty} • ${Number(data?.weight_g ?? values.weightG)} g`
+      : `Event corrected: qty ${values.qty}`,
+    't-ok'
+  );
+  await loadEvents();
+}
+
 async function loadEvents() {
   // Populate filters
   const { nights, bars } = SESSION.cache;
@@ -5293,7 +5471,7 @@ async function loadEvents() {
     const date = new Date(e.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
     const isCase = e.items?.unit === 'case';
     const upc = isCase ? (Number(e.items?.units_per_case)||1) : 1;
-    const qtyDisplay = isCase ? `${e.qty} <span style="font-size:10px;color:var(--muted);">(${e.qty * upc} units)</span>` : String(e.qty);
+    const qtyDisplay = eventLogQtyDisplay(e, isCase, upc);
     const canSelect = e.status === 'PENDING' && !EVENT_REVIEW.allMatching;
     const checked = EVENT_REVIEW.selectedIds.has(e.id) ? ' checked' : '';
     return `<tr>
@@ -5307,6 +5485,7 @@ async function loadEvents() {
       <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
       <td>
         <div style="display:flex;gap:6px;">
+          ${eventCorrectionEditButton(e)}
           ${e.status === 'PENDING' ? `<button class="btn btn-a2 btn-xs" onclick="setStatus('${esc(e.id)}','APPROVED')">✓</button>` : ''}
           ${e.status === 'PENDING' ? `<button class="btn btn-danger btn-xs" onclick="setStatus('${esc(e.id)}','REJECTED')">✗</button>` : ''}
         </div>
