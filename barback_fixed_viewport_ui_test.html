@@ -649,18 +649,28 @@
       height:100vh; height:100svh; min-height:0;
       overflow:hidden; display:flex; flex-direction:column;
     }
+    /* Keep the document itself fixed once the operational screen is active.
+       The bounded work area remains touch-scrollable only when an active
+       workflow needs more room, with scrollbars visually suppressed. */
+    body:has(#screen-main.active),
+    html:has(#screen-main.active) {
+      height:100vh; height:100svh; overflow:hidden;
+    }
     #screen-main.active > .identity-bar,
     #screen-main.active > .barback-scope-banner,
     #screen-main.active > .footer { flex:0 0 auto; }
     #screen-main.active > .wrap {
       flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden;
       overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
-      padding-bottom:calc(12px + env(safe-area-inset-bottom, 8px));
-      scroll-padding-bottom:calc(12px + env(safe-area-inset-bottom, 8px));
+      scrollbar-width:none;
+      padding-bottom:calc(112px + env(safe-area-inset-bottom, 8px));
+      scroll-padding-bottom:calc(112px + env(safe-area-inset-bottom, 8px));
     }
+    #screen-main.active > .wrap::-webkit-scrollbar,
+    #screen-main.active .item-results::-webkit-scrollbar { display:none; width:0; height:0; }
     #screen-main.active .identity-bar { padding:6px 10px; }
     #screen-main.active #barback-scope-banner { margin:4px 8px 0; padding:6px 8px; }
-    #screen-main.active .phase1-block { margin:4px 0; padding:7px; }
+    #screen-main.active .phase1-block { margin:3px 0; padding:6px; }
     #screen-main.active .action-row { gap:6px; margin:3px 0; }
     #screen-main.active .action { min-height:50px; padding:14px 6px; font-size:18px; }
     #screen-main.active #scan-btn { min-height:50px; padding:12px 8px; margin:3px 0; }
@@ -670,7 +680,20 @@
     #screen-main.active .phase1-measure-unit-row button,
     #screen-main.active .phase1-scale-access button { min-height:44px; }
     #screen-main.active #phase1-more-options > summary { padding:8px 10px; }
-    #screen-main.active #phase1-sticky-summary { margin:6px 0; }
+    #screen-main.active #phase1-sticky-summary {
+      position:sticky; bottom:0; z-index:90; margin:6px 0 0;
+      padding:6px 0 calc(8px + env(safe-area-inset-bottom, 8px));
+      background:rgba(3,7,18,.97); border-top:1px solid #374151;
+    }
+    #screen-main.active #phase1-sticky-summary .phase1-sticky-actions { min-height:52px; }
+    #screen-main.active #search-input { min-height:44px; }
+    #screen-main.active .browse-btn { min-height:44px; margin-top:3px; padding:10px 12px; }
+    #screen-main.active .item-results {
+      max-height:96px; overflow-y:auto; scrollbar-width:none;
+    }
+    #screen-main.active .recent-chips { max-height:42px; overflow:hidden; }
+    #screen-main.active .row { margin-top:2px; margin-bottom:2px; }
+    #screen-main.active #phase1-measure-block { margin-top:3px; }
     #screen-main.active > .footer { padding-bottom:env(safe-area-inset-bottom, 0px); }
     #screen-main.active > .footer button { min-height:44px; }
   </style>
