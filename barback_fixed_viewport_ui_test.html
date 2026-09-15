@@ -696,6 +696,30 @@
     #screen-main.active #phase1-measure-block { margin-top:3px; }
     #screen-main.active > .footer { padding-bottom:env(safe-area-inset-bottom, 0px); }
     #screen-main.active > .footer button { min-height:44px; }
+
+    /* FIXED_VIEWPORT_UI_TEST_ONLY — approved NEXT SCAN presentation.
+       The existing panel and armRapidNextScan() handler remain authoritative. */
+    .rapid-next-panel[aria-hidden="false"] {
+      display:block !important; visibility:visible !important; opacity:1 !important;
+      position:fixed !important; left:12px !important; right:12px !important;
+      bottom:calc(72px + env(safe-area-inset-bottom, 8px)) !important;
+      z-index:10000 !important; pointer-events:auto !important;
+      clip:auto !important; clip-path:none !important; overflow:visible !important;
+      margin:0 !important; padding:12px !important;
+      border:2px solid #fb923c !important; border-radius:12px !important;
+      background:#111827 !important; color:#fff !important; text-align:center !important;
+    }
+    .rapid-next-panel[aria-hidden="false"] button {
+      display:block !important; visibility:visible !important; opacity:1 !important;
+      pointer-events:auto !important; width:100% !important; min-height:64px !important;
+      border:0 !important; border-radius:10px !important;
+      background:#fb923c !important; color:#111 !important;
+      font-size:22px !important; font-weight:900 !important;
+    }
+    .rapid-next-panel[aria-hidden="true"] {
+      display:none !important; visibility:hidden !important; opacity:0 !important;
+      pointer-events:none !important;
+    }
   </style>
   <!-- Public Supabase config fallback for barbacks on personal phones
        that have never opened the BARINV admin app. Loaded BEFORE the
