@@ -504,7 +504,7 @@
     }
     .rapid-next-panel button:disabled { opacity:.55; }
     .rapid-next-panel .sub { margin-top:7px; color:#fed7aa; font-size:13px; }
-    .rapid-next-panel[aria-hidden="false"] { display:block; }
+    .rapid-next-panel[aria-hidden="false"] { display:block; position:fixed; left:18px; right:18px; bottom:calc(80px + env(safe-area-inset-bottom, 0px)); z-index:1000; }
 
     /* ── Scanner center-ROI scan window (PLAN-2026-06-09) ────────────
        Visual guidance that also mirrors the cropped decode region used by
@@ -646,7 +646,7 @@
   <script src="barinv-public-config.js?v=20260605a" onerror="console.warn('[barinv] barinv-public-config.js missing — barbacks need localStorage seeded')"></script>
 </head>
 <body>
-<div style="padding:8px 12px;background:#065f46;color:#fff;text-align:center;font-size:12px;font-weight:900;letter-spacing:.08em;">NEXTSCAN CSS FIX TEST-01</div>
+<div style="padding:8px 12px;background:#065f46;color:#fff;text-align:center;font-size:12px;font-weight:900;letter-spacing:.08em;">NEXTSCAN CSS FIX TEST-02</div>
 
 <!-- PHASE2E_BLUEFY_BOOT_GUARD: static and JS-independent. Keep this visible
      until the app reports readiness; ?bluefyBootDebug=1 keeps diagnostics open. -->
