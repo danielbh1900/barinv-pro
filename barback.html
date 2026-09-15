@@ -504,6 +504,7 @@
     }
     .rapid-next-panel button:disabled { opacity:.55; }
     .rapid-next-panel .sub { margin-top:7px; color:#fed7aa; font-size:13px; }
+    .rapid-next-panel[aria-hidden="false"] { display:block; position:fixed; left:18px; right:18px; bottom:calc(80px + env(safe-area-inset-bottom, 0px)); z-index:1000; }
 
     /* ── Scanner center-ROI scan window (PLAN-2026-06-09) ────────────
        Visual guidance that also mirrors the cropped decode region used by
