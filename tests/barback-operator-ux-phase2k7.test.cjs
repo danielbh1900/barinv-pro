@@ -31,12 +31,12 @@ test('Phase 2K.7 synchronizes FAST footer text with ARMED and LOCKED', () => {
   assert.match(html, /id="scanner-hint"/);
 });
 
-test('Phase 2K.7 production gate uses thumb-zone safe-area placement', () => {
-  const css = html.slice(html.indexOf('.rapid-next-gate {'), html.indexOf('.rapid-next-gate button {'));
-  assert.match(css, /position:fixed/);
-  assert.match(css, /bottom:calc\(80px \+ env\(safe-area-inset-bottom/);
-  assert.match(css, /z-index:1000/);
-  assert.match(html, /data-body-level="true"/);
+test('Phase 2K.7 production gate uses stable in-flow placement', () => {
+  const css = html.slice(html.indexOf('.rapid-next-panel {'), html.indexOf('.rapid-next-panel button {'));
+  assert.doesNotMatch(css, /position:fixed/);
+  assert.match(css, /position:relative/);
+  assert.match(css, /z-index:250/);
+  assert.match(html, /id="rapid-next-gate"/);
 });
 
 test('Phase 2K.7 production has no Phase 2K.5 runtime-proof diagnostics', () => {

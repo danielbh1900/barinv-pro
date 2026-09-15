@@ -491,17 +491,18 @@
     }
     .scanner-toast.warn { border-color:#f59e0b; color:#fbbf24; }
     .scanner-toast.err { border-color:#ef4444; color:#fca5a5; }
-    .rapid-next-gate {
-      position:fixed; left:18px; right:18px; bottom:calc(80px + env(safe-area-inset-bottom, 0px)); z-index:1000;
-      display:none; padding:12px; border:2px solid #fb923c; border-radius:12px;
-      background:rgba(0,0,0,0.9); color:#fff; text-align:center;
+    .rapid-next-panel {
+      display:none; margin:10px 0 12px; padding:12px;
+      border:2px solid #fb923c; border-radius:12px;
+      background:#111827; color:#fff; text-align:center;
+      position:relative; z-index:250;
     }
-    .rapid-next-gate button {
-      width:100%; min-height:58px; border:0; border-radius:10px;
+    .rapid-next-panel button {
+      width:100%; min-height:64px; border:0; border-radius:10px;
       background:#fb923c; color:#111; font-size:22px; font-weight:900;
     }
-    .rapid-next-gate button:disabled { opacity:.55; }
-    .rapid-next-gate .sub { margin-top:7px; color:#fed7aa; font-size:13px; }
+    .rapid-next-panel button:disabled { opacity:.55; }
+    .rapid-next-panel .sub { margin-top:7px; color:#fed7aa; font-size:13px; }
 
     /* ── Scanner center-ROI scan window (PLAN-2026-06-09) ────────────
        Visual guidance that also mirrors the cropped decode region used by
@@ -1042,6 +1043,11 @@
     <div id="save-status"></div>
     <div id="phase1-draft-success" class="phase1-draft-success" role="status" aria-live="polite"></div>
     <div id="phase1-voice-summary" class="phase1-voice-summary" role="status" aria-live="polite">VOICE GUIDE: OFF · Configure in MORE OPTIONS</div>
+    <div class="rapid-next-panel" id="rapid-next-gate" hidden aria-hidden="true" style="display:none;">
+      <div id="rapid-next-status" style="font-size:13px;font-weight:900;letter-spacing:.06em;color:#fed7aa;">FAST 1 EACH: READY TO SCAN</div>
+      <button id="rapid-next-scan" type="button" hidden disabled>NEXT SCAN</button>
+      <div class="sub">Aim at the next bottle, then tap NEXT SCAN</div>
+    </div>
 
     <div id="phase1-sticky-summary" class="phase1-sticky-summary" role="status" aria-live="polite">
       <div id="phase1-current-action" class="phase1-current-action">Choose TAKE or RETURN · Review: 0 drafts</div>
@@ -1241,12 +1247,6 @@
   <div class="scanner-toast" id="scanner-toast">—</div>
   <div class="hint" id="scanner-hint">Move slowly closer or farther until barcode is sharp. Avoid glare. Keep barcode flat inside the frame. Camera permission is required.</div>
 </div>
-<!-- PHASE2K4_GLOBAL_NEXT_SCAN — body-level gate survives scanner overlay rerenders. -->
-<div class="rapid-next-gate" id="rapid-next-gate" data-body-level="true" hidden aria-hidden="true" style="display:none;">
-  <button id="rapid-next-scan" type="button" hidden disabled>NEXT SCAN</button>
-  <div class="sub">Aim at the next bottle, then tap NEXT SCAN</div>
-</div>
-
 <!-- ============================ SUCCESS / ERROR OVERLAY ============================ -->
 <div class="ok-overlay" id="ok-overlay">
   <div class="card">
@@ -4098,7 +4098,7 @@ function resetRapidPhysicalRearm() {
 }
 
 function syncRapidNextScanUI() {
-  const gate = $('rapid-next-gate') || $('rapid-next-gate-global');
+  const gate = $('rapid-next-gate');
   const button = $('rapid-next-scan') || $('rapid-next-scan-global');
   const scanner = $('scanner-box');
   // The active scanner session is the visibility source. Do not re-resolve
@@ -4111,6 +4111,8 @@ function syncRapidNextScanUI() {
     gate.style.display = locked ? '' : 'none';
     gate.hidden = !locked;
     gate.setAttribute('aria-hidden', locked ? 'false' : 'true');
+    const status = $('rapid-next-status');
+    if (status) status.textContent = locked ? 'FAST 1 EACH: ADDED — TAP NEXT SCAN' : 'FAST 1 EACH: READY TO SCAN';
   }
   if (button) {
     button.hidden = !locked;
