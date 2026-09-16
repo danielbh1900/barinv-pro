@@ -1,5 +1,5 @@
-// BARINV Service Worker — stale-while-revalidate for app shell
-const CACHE = 'barinv-v72';
+// BARINV Service Worker — network-first documents, stale-while-revalidate assets
+const CACHE = 'barinv-v73';
 const SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -27,6 +27,28 @@ self.addEventListener('fetch', e => {
   }
 
   if (e.request.method !== 'GET') return;
+
+  // Admin navigations must prefer the newest deployed HTML while online.
+  // Preserve offline use by falling back to the exact cached document, then
+  // the precached app-shell entry points when a network request cannot finish.
+  if (e.request.mode === 'navigate' || e.request.destination === 'document') {
+    e.respondWith((async () => {
+      try {
+        const res = await fetch(e.request);
+        if (res.ok) {
+          const cache = await caches.open(CACHE);
+          await cache.put(e.request, res.clone());
+        }
+        return res;
+      } catch (_) {
+        const cache = await caches.open(CACHE);
+        return (await cache.match(e.request))
+          || (await cache.match('./'))
+          || cache.match('./index.html');
+      }
+    })());
+    return;
+  }
 
   e.respondWith(
     caches.open(CACHE).then(cache =>
