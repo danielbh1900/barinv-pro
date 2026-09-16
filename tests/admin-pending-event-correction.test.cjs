@@ -96,7 +96,7 @@ test('Edit control is available only for PENDING events', () => {
   assert.equal(h.context.eventCorrectionEditButton({ id: 'r1', status: 'REJECTED' }), '');
 });
 
-test('opening a correction requires manual mode selection without magnitude inference', () => {
+test('opening a correction shows three unselected modes and does not infer from quantity magnitude', () => {
   const h = harness();
   h.context.EVENT_REVIEW.rows = [{
     id: 'p1', venue_id: 'venue-a', status: 'PENDING', qty: 681.5,
@@ -106,18 +106,52 @@ test('opening a correction requires manual mode selection without magnitude infe
   h.context.openEventCorrection('p1');
   assert.equal(h.modal.title, 'Correct Pending Event');
   assert.doesNotMatch(h.modal.body, /type="radio"[^>]*checked/);
+  assert.match(h.modal.body, /value="FULL"[\s\S]*Full \/ Unopened bottle/);
+  assert.match(h.modal.body, /value="WEIGHT"[\s\S]*Partial \/ Weight/);
+  assert.match(h.modal.body, /value="QUANTITY"[\s\S]*Quantity only/);
+  assert.match(h.modal.body, /Removes scale\/partial measurement data/);
+  assert.match(h.modal.body, /Use for a weighed or partially used bottle/);
+  assert.match(h.modal.body, /Use for count-only items/);
   assert.equal(h.elements.get('event-correction-save').disabled, true);
   assert.equal(h.elements.get('event-correction-weight-wrap').style.display, 'none');
+  assert.equal(h.elements.get('event-correction-weight').disabled, true);
   assert.doesNotMatch(app.slice(start, end), /qty\s*>\s*10/i);
   assert.doesNotMatch(app.slice(start, end), /qty\s*>=\s*10/i);
 });
 
-test('Quantity mode sends structured intent and no weight', async () => {
+test('HENNESSY Full / Unopened setup keeps qty 1 and hides Weight without saving', () => {
+  const h = harness();
+  h.context.EVENT_REVIEW.rows = [{
+    id: 'hennessy-pending', venue_id: 'venue-a', status: 'PENDING', qty: 1,
+    notes: '[WEIGHT_G=1][REMAINING_PERCENT=0][REMAINING_ML=0]', action: 'RETURNED',
+    items: { name: 'HENNESSY VS' }, bars: { name: 'Main Bar' }, stations: { name: 'Well 1' },
+  }];
+
+  h.context.openEventCorrection('hennessy-pending');
+  assert.match(h.modal.body, /Item:<\/span> <b>HENNESSY VS<\/b>/);
+  assert.match(h.modal.body, /Current stored quantity:<\/span> 1/);
+  assert.equal(h.elements.get('event-correction-qty').value, '1');
+  assert.equal(h.elements.get('event-correction-save').disabled, true);
+
+  h.setMode('FULL');
+  h.context.eventCorrectionSyncMode();
+  assert.equal(h.elements.get('event-correction-qty').value, '1');
+  assert.equal(h.elements.get('event-correction-weight-wrap').style.display, 'none');
+  assert.equal(h.elements.get('event-correction-weight').disabled, true);
+  assert.equal(h.elements.get('event-correction-save').disabled, false);
+  assert.equal(h.calls.length, 0, 'pre-save modal QA must not invoke the RPC');
+});
+
+test('Full / Unopened maps to QUANTITY with the selected bottle count and no weight', async () => {
   const h = harness();
   h.context.EVENT_CORRECTION = { eventId: 'p1', venueId: 'venue-a' };
-  h.setMode('QUANTITY');
+  h.setMode('FULL');
   h.elements.get('event-correction-qty').value = '1';
-  h.elements.get('event-correction-weight').value = '681.5';
+  h.elements.get('event-correction-weight').value = 'not-a-weight';
+  h.context.eventCorrectionSyncMode();
+  assert.equal(h.elements.get('event-correction-weight-wrap').style.display, 'none');
+  assert.equal(h.elements.get('event-correction-weight').disabled, true);
+  assert.equal(h.elements.get('event-correction-save').disabled, false);
   await h.context.saveEventCorrection();
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls)), [{
     name: 'barinv_correct_pending_event',
@@ -131,31 +165,61 @@ test('Quantity mode sends structured intent and no weight', async () => {
   assert.equal(h.reloads, 1);
 });
 
-test('Weight mode sends the human-selected quantity and decimal weight', async () => {
+test('Quantity only maps to QUANTITY with null weight', async () => {
   const h = harness();
   h.context.EVENT_CORRECTION = { eventId: 'p2', venueId: 'venue-a' };
-  h.setMode('WEIGHT');
-  h.elements.get('event-correction-qty').value = '1';
-  h.elements.get('event-correction-weight').value = '681.5';
+  h.setMode('QUANTITY');
+  h.elements.get('event-correction-qty').value = '4';
+  h.context.eventCorrectionSyncMode();
+  assert.equal(h.elements.get('event-correction-weight-wrap').style.display, 'none');
+  assert.equal(h.elements.get('event-correction-weight').disabled, true);
   await h.context.saveEventCorrection();
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0])), {
     name: 'barinv_correct_pending_event',
     payload: {
-      p_venue_id: 'venue-a', p_event_id: 'p2', p_mode: 'WEIGHT',
+      p_venue_id: 'venue-a', p_event_id: 'p2', p_mode: 'QUANTITY',
+      p_qty: 4, p_weight_g: null,
+    },
+  });
+});
+
+test('Partial / Weight maps to WEIGHT with the selected integer quantity and decimal weight', async () => {
+  const h = harness();
+  h.context.EVENT_CORRECTION = { eventId: 'p3', venueId: 'venue-a' };
+  h.setMode('WEIGHT');
+  h.elements.get('event-correction-qty').value = '1';
+  h.elements.get('event-correction-weight').value = '681.5';
+  h.context.eventCorrectionSyncMode();
+  assert.equal(h.elements.get('event-correction-weight-wrap').style.display, '');
+  assert.equal(h.elements.get('event-correction-weight').disabled, false);
+  assert.equal(h.elements.get('event-correction-save').disabled, false);
+  await h.context.saveEventCorrection();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0])), {
+    name: 'barinv_correct_pending_event',
+    payload: {
+      p_venue_id: 'venue-a', p_event_id: 'p3', p_mode: 'WEIGHT',
       p_qty: 1, p_weight_g: 681.5,
     },
   });
   assert.equal(h.toasts.at(-1).message, 'Event corrected: qty 1 • 681.5 g');
 });
 
-test('invalid quantity and weight are blocked before the RPC call', async () => {
+test('invalid quantity is blocked for each selected mode', async () => {
   const h = harness();
   h.context.EVENT_CORRECTION = { eventId: 'p1', venueId: 'venue-a' };
-  h.setMode('QUANTITY');
-  for (const value of ['0', '-1', '1.5']) {
-    h.elements.get('event-correction-qty').value = value;
-    await h.context.saveEventCorrection();
+  for (const mode of ['FULL', 'WEIGHT', 'QUANTITY']) {
+    h.setMode(mode);
+    for (const value of ['0', '-1', '1.5', 'not-an-integer']) {
+      h.elements.get('event-correction-qty').value = value;
+      await h.context.saveEventCorrection();
+    }
   }
+  assert.equal(h.calls.length, 0);
+});
+
+test('invalid weight is blocked only for Partial / Weight mode', async () => {
+  const h = harness();
+  h.context.EVENT_CORRECTION = { eventId: 'p1', venueId: 'venue-a' };
   h.setMode('WEIGHT');
   h.elements.get('event-correction-qty').value = '1';
   for (const value of ['', '0', '-1', 'not-a-number']) {
@@ -163,6 +227,14 @@ test('invalid quantity and weight are blocked before the RPC call', async () => 
     await h.context.saveEventCorrection();
   }
   assert.equal(h.calls.length, 0);
+
+  for (const mode of ['FULL', 'QUANTITY']) {
+    h.setMode(mode);
+    h.elements.get('event-correction-weight').value = 'not-a-weight';
+    await h.context.saveEventCorrection();
+  }
+  assert.equal(h.calls.length, 2);
+  assert.ok(h.calls.every(({ payload }) => payload.p_mode === 'QUANTITY' && payload.p_weight_g === null));
 });
 
 test('venue change blocks the RPC and reloads the Event Log', async () => {

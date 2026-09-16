@@ -5291,11 +5291,12 @@ function eventCorrectionEditButton(e) {
 }
 
 function eventCorrectionReadForm() {
-  const mode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
+  const uiMode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
+  const mode = eventCorrectionRpcMode(uiMode);
   const qty = Number(document.getElementById('event-correction-qty')?.value);
   const weightG = Number(document.getElementById('event-correction-weight')?.value);
 
-  if (!mode) return { ok: false, error: 'Choose Quantity or Weight correction type.' };
+  if (!mode) return { ok: false, error: 'Choose a correction type.' };
   if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 1) {
     return { ok: false, error: 'Quantity must be a positive whole number.' };
   }
@@ -5303,16 +5304,22 @@ function eventCorrectionReadForm() {
     return { ok: false, error: 'Weight must be a number greater than zero.' };
   }
 
-  return { ok: true, mode, qty, weightG: mode === 'WEIGHT' ? weightG : null };
+  return { ok: true, uiMode, mode, qty, weightG: mode === 'WEIGHT' ? weightG : null };
+}
+
+function eventCorrectionRpcMode(uiMode) {
+  if (uiMode === 'WEIGHT') return 'WEIGHT';
+  if (uiMode === 'FULL' || uiMode === 'QUANTITY') return 'QUANTITY';
+  return '';
 }
 
 function eventCorrectionSyncMode() {
-  const mode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
+  const uiMode = document.querySelector('input[name="event-correction-mode"]:checked')?.value || '';
   const weightWrap = document.getElementById('event-correction-weight-wrap');
   const weightInput = document.getElementById('event-correction-weight');
   const saveButton = document.getElementById('event-correction-save');
-  if (weightWrap) weightWrap.style.display = mode === 'WEIGHT' ? '' : 'none';
-  if (weightInput) weightInput.disabled = mode !== 'WEIGHT';
+  if (weightWrap) weightWrap.style.display = uiMode === 'WEIGHT' ? '' : 'none';
+  if (weightInput) weightInput.disabled = uiMode !== 'WEIGHT';
   if (saveButton) saveButton.disabled = !eventCorrectionReadForm().ok;
 }
 
@@ -5346,10 +5353,16 @@ function openEventCorrection(id) {
      <div class="field">
        <label>Correction Type</label>
        <label style="display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;">
-         <input type="radio" name="event-correction-mode" value="QUANTITY" onchange="eventCorrectionSyncMode()"> Quantity only
+         <input type="radio" name="event-correction-mode" value="FULL" onchange="eventCorrectionSyncMode()">
+         <span>Full / Unopened bottle<small style="display:block;color:var(--muted);font-size:11px;margin-top:2px;">Removes scale/partial measurement data</small></span>
        </label>
        <label style="display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;">
-         <input type="radio" name="event-correction-mode" value="WEIGHT" onchange="eventCorrectionSyncMode()"> Weight / scale measurement
+         <input type="radio" name="event-correction-mode" value="WEIGHT" onchange="eventCorrectionSyncMode()">
+         <span>Partial / Weight<small style="display:block;color:var(--muted);font-size:11px;margin-top:2px;">Use for a weighed or partially used bottle</small></span>
+       </label>
+       <label style="display:flex;gap:8px;align-items:center;margin:8px 0;cursor:pointer;">
+         <input type="radio" name="event-correction-mode" value="QUANTITY" onchange="eventCorrectionSyncMode()">
+         <span>Quantity only<small style="display:block;color:var(--muted);font-size:11px;margin-top:2px;">Use for count-only items</small></span>
        </label>
      </div>
      <div class="field">
