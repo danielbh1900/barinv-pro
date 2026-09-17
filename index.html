@@ -8482,7 +8482,7 @@ document.getElementById('stock-import-file')?.addEventListener('change', async f
     if(!row[nameIdx]) continue;
     const item = itemMap.get(row[nameIdx].toLowerCase());
     if(!item) continue;
-    const stock = Math.max(0, parseInt(row[stockIdx])||0);
+    const stock = Math.max(0, parseFloat(row[stockIdx])||0);
     const { error } = await SB.from('items').update({ liquor_room_stock: stock }).eq('id', item.id);
     if(!error) { item.liquor_room_stock = stock; updated++; }
   }
@@ -12019,22 +12019,7 @@ async function dspSaveAll() {
       const { error } = await SB.from('events').insert(cleanRecords);
       if(error) { toast('Save error: ' + error.message, 't-err'); return; }
 
-      // ── Auto-update Liquor Room stock ──
-      const numBars = DSP_SELECTED_BARS.length;
-      for(const [itemId, s] of Object.entries(DSP_STATE)) {
-        const item = SESSION.cache.items.find(i => i.id === itemId);
-        if(!item) continue;
-        const currentStock = Number(item.liquor_room_stock) || 0;
-        const out = ((s.taken || 0) + (s.comp || 0)) * numBars;
-        const back = (s.returned || 0) * numBars;
-        const newStock = Math.max(0, currentStock - out + back);
-        if(newStock !== currentStock) {
-          await SB.from('items').update({ liquor_room_stock: newStock }).eq('id', itemId);
-          item.liquor_room_stock = newStock;
-        }
-      }
-
-      toast(`✓ Saved ${cleanRecords.length} events across ${DSP_SELECTED_BARS.length} bar(s) · Stock updated`, 't-ok');
+      toast(`✓ Saved ${cleanRecords.length} events across ${DSP_SELECTED_BARS.length} bar(s) · Stock updated by database`, 't-ok');
       DSP_STATE = {};
       DSP_STAFF_MAP = {};
       try { localStorage.removeItem('barinv_staff_map'); } catch(_){}
