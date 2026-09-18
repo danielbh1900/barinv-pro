@@ -6578,6 +6578,24 @@ function normalizeBottleState(raw, weight_g) {
   return BOTTLE_STATES.indexOf(raw) >= 0 ? raw : 'NOT_WEIGHED';
 }
 
+// INSERT-boundary metadata contract. The database remains authoritative; this
+// mirrors the same checks so malformed drafts are rejected before submission.
+function validateEventMetadataContract(input) {
+  const qty = Number(input && input.qty);
+  const weight = normalizeWeightG(input && input.weight_g);
+  const tare = normalizeWeightG(input && (input.tare_weight_g != null ? input.tare_weight_g : input.empty_weight_g));
+  const full = normalizeWeightG(input && input.full_weight_g);
+  const state = normalizeBottleState(input && input.bottle_state, weight);
+  const percent = input && input.remaining_percent != null ? Number(input.remaining_percent) : null;
+  const hasMetadata = weight != null || state !== 'NOT_WEIGHED' || tare != null || full != null || percent != null || input?.liquid_weight_g != null || input?.remaining_ml != null;
+  if (hasMetadata && qty !== 1) return 'Weight metadata requires quantity 1';
+  if (state === 'PARTIAL' && percent != null && Number.isFinite(percent) && percent >= 100) return 'PARTIAL bottle must be less than 100% full';
+  if (weight != null && tare != null && weight < tare) return 'Measured weight cannot be below tare weight';
+  if ((tare != null || full != null) && (tare == null || full == null || full <= tare)) return 'Full bottle weight must be greater than tare weight';
+  if (state === 'PARTIAL' && weight != null && full != null && weight > full) return 'PARTIAL weight cannot exceed full bottle weight';
+  return null;
+}
+
 // Build the compact, single-line notes enrichment. Returns '' when
 // there is nothing to record (no weight AND state is NOT_WEIGHED).
 function buildWeightNotes(weight_g, bottle_state) {
@@ -9093,6 +9111,8 @@ function onQueueEditSave(ce, form) {
   if (action !== 'TAKEN' && action !== 'RETURNED') {
     statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
   }
+  const metadataError = validateEventMetadataContract({ ...payload, qty: qtyNum });
+  if (metadataError) return { ok:false, error: metadataError };
   if (!isMovementAllowed(action)) {
     statusOn('review-status', movementBlockMessage(action), 'err'); return;
   }
@@ -9293,6 +9313,11 @@ function onDraftEditSave(ce, form) {
   const _ml = nonNegNum(arr[i].bottle_size_ml);
   const liquid_weight_g = deriveLiquidG(weight_g, _validProfile ? _tare : null);
   const remaining_ml = deriveRemainingMl(remaining_percent, _ml);
+  const metadataError = validateEventMetadataContract({
+    qty, weight_g, bottle_state, tare_weight_g: _tare, full_weight_g: _fp,
+    remaining_percent, liquid_weight_g, remaining_ml
+  });
+  if (metadataError) { statusOn('review-status', metadataError, 'err'); return; }
 
   // Mutate ONLY allowed fields. Never rewrite session_id / night_id /
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.

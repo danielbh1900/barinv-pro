@@ -4715,6 +4715,24 @@ async function submitEvent() {
   if (!itemId) { toast('Select an item', 't-err'); return; }
   if (!barId) { toast('Select a bar', 't-err'); return; }
 
+  // Client-side mirror of the database INSERT contract. The server remains
+  // authoritative; this prevents malformed metadata from entering the queue.
+  const meta = {};
+  for (const m of notes?.matchAll(/\[([A-Z0-9_]+)=([^\]\r\n]*)\]/g) || []) meta[m[1]] = m[2];
+  const scaleKeys = ['WEIGHT_G','BOTTLE_STATE','TARE_WEIGHT_G','FULL_WEIGHT_G','REMAINING_PERCENT','LIQUID_WEIGHT_G','REMAINING_ML'];
+  const hasScale = scaleKeys.some(k => Object.prototype.hasOwnProperty.call(meta, k));
+  const nWeight = meta.WEIGHT_G == null ? null : Number(meta.WEIGHT_G);
+  const nTare = meta.TARE_WEIGHT_G == null ? null : Number(meta.TARE_WEIGHT_G);
+  const nFull = meta.FULL_WEIGHT_G == null ? null : Number(meta.FULL_WEIGHT_G);
+  const nRemaining = meta.REMAINING_PERCENT == null ? null : Number(meta.REMAINING_PERCENT);
+  let metadataError = null;
+  if (hasScale && qty !== 1) metadataError = 'Weight metadata requires quantity 1';
+  else if (meta.BOTTLE_STATE?.toUpperCase() === 'PARTIAL' && Number.isFinite(nRemaining) && nRemaining >= 100) metadataError = 'PARTIAL bottle must be less than 100% full';
+  else if (Number.isFinite(nWeight) && Number.isFinite(nTare) && nWeight < nTare) metadataError = 'Measured weight cannot be below tare weight';
+  else if ((meta.TARE_WEIGHT_G != null || meta.FULL_WEIGHT_G != null) && (!Number.isFinite(nTare) || !Number.isFinite(nFull) || nFull <= nTare)) metadataError = 'Full bottle weight must be greater than tare weight';
+  else if (meta.BOTTLE_STATE?.toUpperCase() === 'PARTIAL' && Number.isFinite(nWeight) && Number.isFinite(nFull) && nWeight > nFull) metadataError = 'PARTIAL weight cannot exceed full bottle weight';
+  if (metadataError) { toast(metadataError, 't-err'); return; }
+
   const record = {
     night_id: nightId, bar_id: barId, station_id: stationId,
     item_id: itemId, qty, action, notes, submitted_by: by,
