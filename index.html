@@ -4563,7 +4563,7 @@ async function loadDashboard() {
       nightSel.value = cur;
     }
 
-    let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku)').order('created_at', { ascending: false }).limit(60);
+    let q = SB.from('events').select('*, bars:bars!events_bar_id_fkey(name), destination_bar:bars!events_destination_bar_id_fkey(name), stations(name), items(name, sku)').order('created_at', { ascending: false }).limit(60);
     const nightId = document.getElementById('dash-night')?.value;
     if (nightId) q = q.eq('night_id', nightId);
     const { data, error } = await q;
@@ -5228,7 +5228,7 @@ async function loadHistory() {
   const byName = SESSION.user?.name || '';
   const { data: events, error } = await SB
     .from('events')
-    .select('*, items(name, unit, units_per_case), bars(name)')
+    .select('*, items(name, unit, units_per_case), bars:bars!events_bar_id_fkey(name)')
     .eq('submitted_by', byName)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -5454,7 +5454,7 @@ async function loadEvents() {
   bf.innerHTML = '<option value="">All Bars</option>' + bars.map(b => `<option value="${esc(b.id)}" ${b.id === bv ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
   nf.value = nv; bf.value = bv;
 
-  let q = SB.from('events').select('*, bars(name), stations(name), items(name, sku, unit, units_per_case)').order('created_at', { ascending: false }).limit(200);
+  let q = SB.from('events').select('*, bars:bars!events_bar_id_fkey(name), destination_bar:bars!events_destination_bar_id_fkey(name), stations(name), items(name, sku, unit, units_per_case)').order('created_at', { ascending: false }).limit(200);
   if (nf.value) q = q.eq('night_id', nf.value);
   if (bf.value) q = q.eq('bar_id', bf.value);
   const sv = document.getElementById('ef-status').value;
@@ -7774,7 +7774,7 @@ async function loadAnalytics() {
   nSel.value = nv; bSel.value = bv;
 
   // Fetch events
-  let q = SB.from('events').select('*, items(name,sku), bars(name), stations(name)').order('created_at');
+  let q = SB.from('events').select('*, items(name,sku), bars:bars!events_bar_id_fkey(name), stations(name)').order('created_at');
   if (nSel.value) q = q.eq('night_id', nSel.value);
   if (bSel.value) q = q.eq('bar_id', bSel.value);
   const { data: events } = await q;
@@ -7941,7 +7941,7 @@ async function loadReportData() {
   const by     = document.getElementById('rp-by').value.trim();
 
   let q = SB.from('events')
-    .select('*, items(name,sku,unit,units_per_case), bars(name), stations(name)')
+    .select('*, items(name,sku,unit,units_per_case), bars:bars!events_bar_id_fkey(name), stations(name)')
     .order('created_at', { ascending: false })
     .limit(2000);
 
@@ -8570,7 +8570,7 @@ async function loadVarianceReport() {
 
   // Fetch events for this night
   const { data: events } = await SB.from('events')
-    .select('*, items(name,par_level,full_shots,shot_weight_g,empty_bottle_weight_g,full_bottle_weight_g,cost_price,sale_price,units_per_case,unit), bars(name), stations(name)')
+    .select('*, items(name,par_level,full_shots,shot_weight_g,empty_bottle_weight_g,full_bottle_weight_g,cost_price,sale_price,units_per_case,unit), bars:bars!events_bar_id_fkey(name), stations(name)')
     .eq('night_id', nv).eq('status','APPROVED');
   if(!events) return;
 
@@ -8800,7 +8800,7 @@ async function exportAllNights() {
   toast('Preparing all-nights export...','t-info');
 
   const { data: events } = await SB.from('events')
-    .select('*, items(name), bars(name), nights(name,date)')
+    .select('*, items(name), bars:bars!events_bar_id_fkey(name), nights(name,date)')
     .eq('status','APPROVED').order('created_at');
   if(!events) { toast('Error fetching events','t-err'); return; }
 
@@ -8854,7 +8854,7 @@ async function loadAccountability() {
 
   // 1. Fetch dispatch events with cost/price data
   let evQ = SB.from('events')
-    .select('*, items(name,full_shots,shot_weight_g,empty_bottle_weight_g,category,unit,cost_price,sale_price), bars(name)')
+    .select('*, items(name,full_shots,shot_weight_g,empty_bottle_weight_g,category,unit,cost_price,sale_price), bars:bars!events_bar_id_fkey(name)')
     .eq('night_id', nv).eq('status','APPROVED');
   if(bv) evQ = evQ.eq('bar_id', bv);
   const { data: events } = await evQ;
@@ -10603,7 +10603,7 @@ async function loadCostCenter() {
   if(sel) sel.value = nv;
 
   // Fetch events
-  let q = SB.from('events').select('*, items(name,cost_price,category), bars(name)').eq('status','APPROVED');
+  let q = SB.from('events').select('*, items(name,cost_price,category), bars:bars!events_bar_id_fkey(name)').eq('status','APPROVED');
   if(nv) q = q.eq('night_id', nv);
   const { data: events } = await q;
 
@@ -12202,7 +12202,7 @@ async function exportAnalyticsCSV(fmt) {
   await preload();
   const nSel = document.getElementById('an-night');
   const bSel = document.getElementById('an-bar');
-  let q = SB.from('events').select('*, items(name), bars(name), nights(name)').eq('status','APPROVED').order('created_at');
+  let q = SB.from('events').select('*, items(name), bars:bars!events_bar_id_fkey(name), nights(name)').eq('status','APPROVED').order('created_at');
   if(nSel?.value) q = q.eq('night_id', nSel.value);
   if(bSel?.value) q = q.eq('bar_id', bSel.value);
   const { data: events } = await q;
