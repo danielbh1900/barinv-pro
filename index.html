@@ -1867,7 +1867,7 @@ th.sortable span { font-size:10px; }
         </select>
         <select id="ef-action" onchange="loadEvents()">
           <option value="">All Actions</option>
-          <option>REQUEST</option><option>DELIVERED</option><option>RETURNED</option><option>ADJUSTMENT</option>
+          <option>REQUEST</option><option>DELIVERED</option><option>RETURNED</option><option>TRANSFER</option><option>ADJUSTMENT</option>
         </select>
       </div>
       <div class="fbar" id="event-review-toolbar" style="align-items:center;">
@@ -5505,13 +5505,20 @@ async function loadEvents() {
     const qtyDisplay = eventLogQtyDisplay(e, isCase, upc);
     const canSelect = e.status === 'PENDING' && !EVENT_REVIEW.allMatching;
     const checked = EVENT_REVIEW.selectedIds.has(e.id) ? ' checked' : '';
+    const sourceBarName = e.bars?.name || '—';
+    const destinationBarName = e.action === 'TRANSFER'
+      ? ((SESSION.cache.bars || []).find(b => b.id === e.destination_bar_id)?.name || '—')
+      : '';
+    const locationDisplay = e.action === 'TRANSFER'
+      ? `${esc(sourceBarName)} <span style="color:var(--a);">→</span> ${esc(destinationBarName)}`
+      : `${esc(sourceBarName)}<br><span style="font-size:11px;color:var(--muted)">${esc(e.stations?.name || '')}</span>`;
     return `<tr>
       <td>${canSelect ? `<input type="checkbox" class="event-review-cb" value="${esc(e.id)}" onchange="eventReviewTogglePageItem(this)"${checked}>` : ''}</td>
       <td style="font-family:'Fira Mono',monospace;font-size:11px;">${esc(time)}<br><span style="color:var(--muted)">${esc(date)}</span></td>
       <td>${esc(e.submitted_by)}</td>
       <td><span class="action-badge act-${esc(e.action)}">${esc(e.action)}</span></td>
       <td style="font-weight:500;">${esc(e.items?.name || '—')} ${e.items?.sku ? `<br><span style="font-family:'Fira Mono',monospace;font-size:10px;color:var(--muted)">${esc(e.items.sku)}</span>` : ''}</td>
-      <td>${esc(e.bars?.name || '—')}<br><span style="font-size:11px;color:var(--muted)">${esc(e.stations?.name || '')}</span></td>
+      <td>${locationDisplay}</td>
       <td style="font-family:'Fira Mono',monospace;">${qtyDisplay}</td>
       <td><span class="badge b-${esc(String(e.status || '').toLowerCase())}">${esc(e.status)}</span></td>
       <td>
@@ -8414,6 +8421,13 @@ function renderStockTable() {
   </table></div>`;
 }
 
+function parseLiquorRoomStockInput(raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  if (!/^(?:0|[0-9]+)(?:\.[0-9]+)?$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 window.stockAdj = async function(itemId, delta) {
   const item = SESSION.cache.items.find(i => i.id === itemId);
   if(!item) return;
@@ -8433,7 +8447,8 @@ window.stockSet = async function(itemId) {
   const current = Number(item.liquor_room_stock)||0;
   const val = prompt(`Set stock for ${item.name}:`, current);
   if(val === null) return;
-  const newStock = Math.max(0, parseInt(val)||0);
+  const newStock = parseLiquorRoomStockInput(val);
+  if (newStock == null) { toast('Enter a finite non-negative stock value', 't-err'); return; }
   const { error } = await SB.from('items').update({ liquor_room_stock: newStock }).eq('id', itemId);
   if(error) { toast(error.message, 't-err'); return; }
   item.liquor_room_stock = newStock;
@@ -8459,7 +8474,8 @@ window.stockBulkEdit = async function() {
       let updated = 0;
       for(const inp of inputs) {
         const id = inp.dataset.id;
-        const val = Math.max(0, parseInt(inp.value)||0);
+        const val = parseLiquorRoomStockInput(inp.value);
+        if (val == null) continue;
         const item = SESSION.cache.items.find(i => i.id === id);
         if(item && val !== (Number(item.liquor_room_stock)||0)) {
           const { error } = await SB.from('items').update({ liquor_room_stock: val }).eq('id', id);

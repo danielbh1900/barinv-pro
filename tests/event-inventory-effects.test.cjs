@@ -24,7 +24,7 @@ test('approved Event inventory effects are atomic and exactly once', () => {
     made = true;
     let ready = false;
     for (let i = 0; i < 60; i += 1) {
-      const p = run(['exec', c, 'pg_isready', '-U', 'postgres']);
+      const p = sql(c, 'select 1');
       if (p.status === 0) { ready = true; break; }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
     }

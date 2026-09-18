@@ -852,6 +852,7 @@
       <div class="action-row">
         <button type="button" class="action" data-action="TAKEN">TAKEN</button>
         <button type="button" class="action" data-action="RETURNED">RETURN</button>
+        <button type="button" class="action" data-action="TRANSFER">TRANSFER</button>
       </div>
       <div id="movement-permission-banner" class="small" style="display:none;margin-top:6px;color:#fbbf24;"></div>
     </div>
@@ -859,6 +860,12 @@
     <div class="row" id="bar-pick-row" style="display:none;">
       <label>BAR</label>
       <select id="bar-pick"><option value="">(no bar)</option></select>
+    </div>
+
+    <div class="row" id="transfer-to-row" style="display:none;">
+      <label>TO BAR</label>
+      <select id="transfer-to-pick"><option value="">(choose destination)</option></select>
+      <div id="transfer-scope-hint" class="muted small" style="margin-top:4px;"></div>
     </div>
 
     <!-- Multi-Destination mode (barback only; hidden in VIP/Table mode and
@@ -2912,6 +2919,7 @@ const state = {
   openingParRouteBusy: false,
   qtyModalItem: null,     // item awaiting qty confirmation from a single scan
   selectedAction: null,
+  transferDestinationBarId: null,
   selectedItemId: null,
   selectedItemName: null,
   selectedBarId: null,
@@ -2967,7 +2975,9 @@ function setAllowedMovements(raw) {
     banner.style.display = banner.textContent ? '' : 'none';
   }
   $$('.action').forEach(btn => {
-    const enabled = btn.dataset.action === 'TAKEN' ? state.allowedMovements.take : state.allowedMovements.return;
+    const enabled = btn.dataset.action === 'TAKEN' ? state.allowedMovements.take
+      : btn.dataset.action === 'RETURNED' ? state.allowedMovements.return
+      : (state.allowedMovements.take && state.allowedMovements.return && multiBarAssignedBars().length > 1);
     btn.disabled = !enabled;
     btn.style.opacity = enabled ? '' : '0.45';
     btn.style.cursor = enabled ? '' : 'not-allowed';
@@ -2977,12 +2987,14 @@ function setAllowedMovements(raw) {
 
 function isMovementAllowed(action) {
   const m = state.allowedMovements || { take: true, return: true };
-  return action === 'TAKEN' ? m.take : action === 'RETURNED' ? m.return : false;
+  return action === 'TAKEN' ? m.take : action === 'RETURNED' ? m.return
+    : action === 'TRANSFER' ? (m.take && m.return && multiBarAssignedBars().length > 1) : false;
 }
 
 function movementBlockMessage(action) {
   if (action === 'TAKEN' && !isMovementAllowed(action)) return 'This link is RETURN only.';
   if (action === 'RETURNED' && !isMovementAllowed(action)) return 'This link is TAKE only.';
+  if (action === 'TRANSFER' && !isMovementAllowed(action)) return 'TRANSFER requires at least two allowed bars and both TAKE and RETURN permission.';
   return 'This movement is not allowed for the current link.';
 }
 
@@ -3345,6 +3357,7 @@ function enterMain() {
     sel.onchange = () => {
       state.selectedBarId = sel.value;
       try { renderWhoLine(); } catch (_) {}
+      try { renderTransferUI(); } catch (_) {}
     };
     $('bar-pick-row').style.display = '';
   } else {
@@ -3356,6 +3369,7 @@ function enterMain() {
   // Multi-Destination UI — shown only for a barback session with >1
   // assigned bar; hidden in VIP/Table mode and single-bar sessions.
   try { renderMultiBarUI(); } catch (_) {}
+  try { renderTransferUI(); } catch (_) {}
 
   // Restore rapid-mode preference
   const prefs = Prefs.get();
@@ -3415,6 +3429,7 @@ function applyActionTint() {
   $$('.action').forEach(b => {
     b.classList.toggle('selected', b.dataset.action === state.selectedAction);
   });
+  try { renderTransferUI(); } catch (_) {}
   renderPhase1MeasureControls();
   // SCALE_BLE — RETURN-form scale row: capability-gated, RETURN only. Hidden on
   // iPhone (no Web Bluetooth) and for TAKEN. typeof guard: bleScale may not be
@@ -3484,6 +3499,13 @@ $$('.action').forEach(btn => {
       return;
     }
     state.selectedAction = btn.dataset.action;
+    if (state.selectedAction === 'TRANSFER') {
+      state.multiBarMode = false;
+      state.multiBars = [];
+      if ($('multibar-toggle')) $('multibar-toggle').checked = false;
+      try { renderMultiBarUI(); } catch (_) {}
+      try { renderTransferUI(); } catch (_) {}
+    }
     // Phase 1I — choosing an action starts from the safe, shared unit mode.
     // WEIGHT / GRAMS must be an explicit follow-up choice for that action.
     phase1MeasureUnit = 'UNITS';
@@ -6363,6 +6385,14 @@ async function saveCore(payload) {
   if (!isMovementAllowed(payload && payload.action)) {
     return { synced:false, queued:false, error: movementBlockMessage(payload && payload.action) };
   }
+  if (payload && payload.action === 'TRANSFER') {
+    if (!payload.bar_id || !payload.destination_bar_id || payload.bar_id === payload.destination_bar_id) {
+      return { synced:false, queued:false, error:'TRANSFER source and destination must differ' };
+    }
+    if (!isAreaAllowedForSession(payload.bar_id) || !isAreaAllowedForSession(payload.destination_bar_id)) {
+      return { synced:false, queued:false, error:'TRANSFER bars are not in this link\'s allowed areas' };
+    }
+  }
   const ce = uuidv4();
   const userNotes = payload.notes || '';
 
@@ -6420,6 +6450,7 @@ async function saveCore(payload) {
     venue_id: p.venue_id,
     night_id: p.night_id,
     bar_id:   payload.bar_id || null,
+    destination_bar_id: payload.destination_bar_id || null,
     station_id: null,
     item_id:  payload.item_id,
     qty:      payload.qty,
@@ -6934,8 +6965,19 @@ function addToReview(payload) {
   if (payload.action === 'TAKEN' && qtyNum !== Math.floor(qtyNum)) {
     return { ok:false, error:'TAKEN qty must be a whole number' };
   }
-  if (payload.action !== 'TAKEN' && payload.action !== 'RETURNED') {
+  if (payload.action === 'TRANSFER' && qtyNum !== Math.floor(qtyNum)) {
+    return { ok:false, error:'TRANSFER qty must be a whole number unless it is a weighted bottle with qty 1' };
+  }
+  if (payload.action !== 'TAKEN' && payload.action !== 'RETURNED' && payload.action !== 'TRANSFER') {
     return { ok:false, error:'action must be TAKEN or RETURNED' };
+  }
+  if (payload.action === 'TRANSFER') {
+    if (!payload.destination_bar_id || payload.destination_bar_id === payload.bar_id) {
+      return { ok:false, error:'TRANSFER source and destination must differ' };
+    }
+    if (!isAreaAllowedForSession(payload.destination_bar_id)) {
+      return { ok:false, error:'TRANSFER destination is not in this link\'s allowed areas' };
+    }
   }
   // Manual Scale MVP — PARTIAL bottles MUST carry a positive weight, or
   // they can't support partial-inventory tracking. Defensive guard here
@@ -6985,6 +7027,7 @@ function addToReview(payload) {
     venue_id: p.venue_id,
     night_id: p.night_id,
     bar_id:   payload.bar_id || null,
+    destination_bar_id: payload.destination_bar_id || null,
     station_id: null,
     item_id:  payload.item_id,
     item_name: payload.item_name || null,        // draft UI only — stripped at submit
@@ -7108,6 +7151,33 @@ function updateMultiBarCount() {
   const n = (state.multiBars || []).length;
   if ($('multibar-count')) $('multibar-count').textContent = n + ' bar' + (n !== 1 ? 's' : '') + ' selected';
   syncAddButtonLabel();
+}
+function renderTransferUI() {
+  const row = $('transfer-to-row');
+  const sel = $('transfer-to-pick');
+  if (!row || !sel) return;
+  const active = state.selectedAction === 'TRANSFER';
+  const bars = active ? getAllowedDestinationsForCurrentSession() : [];
+  const source = state.selectedBarId || '';
+  const destinations = bars.filter(b => b.id !== source);
+  row.style.display = active ? '' : 'none';
+  sel.innerHTML = active
+    ? '<option value="">(choose destination)</option>' + destinations.map(b =>
+        '<option value="' + esc(b.id) + '">' + esc(barDisplayLabel(b)) + '</option>').join('')
+    : '<option value="">(choose destination)</option>';
+  if (active && destinations.length < 1) {
+    sel.disabled = true;
+    state.transferDestinationBarId = null;
+    const hint = $('transfer-scope-hint');
+    if (hint) hint.textContent = 'TRANSFER unavailable: this session has fewer than two allowed bars.';
+  } else {
+    sel.disabled = false;
+    if (state.transferDestinationBarId && destinations.some(b => b.id === state.transferDestinationBarId)) sel.value = state.transferDestinationBarId;
+    else state.transferDestinationBarId = null;
+    const hint = $('transfer-scope-hint');
+    if (hint) hint.textContent = 'Source: ' + (bars.find(b => b.id === source)?.name || 'choose a source bar') + ' · destination must be another allowed bar.';
+  }
+  sel.onchange = () => { state.transferDestinationBarId = sel.value || null; };
 }
 function renderMultiBarUI() {
   const row = $('multibar-row'); if (!row) return;
@@ -7875,6 +7945,15 @@ function addCurrentSelectionToReview(opts) {
   const itemName = opts.item ? opts.item.name : state.selectedItemName;
   if (!itemId) return { ok:false, error:'Pick or scan an item first' };
   const itemObj = opts.item || _selectedItemObj() || { id: itemId, name: itemName };
+  const destinationBarId = opts.destination_bar_id != null ? opts.destination_bar_id : state.transferDestinationBarId;
+  if (state.selectedAction === 'TRANSFER') {
+    if (state.multiBarMode) return { ok:false, error:'TRANSFER is single-source to single-destination only' };
+    if (!destinationBarId) return { ok:false, error:'Choose a destination bar for TRANSFER' };
+    if (!state.selectedBarId || state.selectedBarId === destinationBarId) return { ok:false, error:'TRANSFER source and destination must differ' };
+    if (!isAreaAllowedForSession(state.selectedBarId) || !isAreaAllowedForSession(destinationBarId)) {
+      return { ok:false, error:'TRANSFER bars are not in this link\'s allowed areas' };
+    }
+  }
 
   const qty = (opts.qtyOverride != null) ? opts.qtyOverride : parseFloat($('qty-input').value);
   if (!isFinite(qty) || qty <= 0) return { ok:false, error:'Qty must be greater than zero' };
@@ -7914,7 +7993,7 @@ function addCurrentSelectionToReview(opts) {
       if (rr && rr.ok) added++; else { fail++; lastErr = (rr && rr.error) || 'add failed'; }
     }
   } else {
-    const rr = addToReview({ ...base, bar_id: state.selectedBarId });
+    const rr = addToReview({ ...base, bar_id: state.selectedBarId, destination_bar_id: destinationBarId });
     if (rr && rr.ok) added++; else { fail++; lastErr = (rr && rr.error) || 'add failed'; }
   }
   try { refreshDraftCount(); } catch (_) {}
@@ -8999,6 +9078,7 @@ function onQueueEdit(ce) {
       '<select class="qe-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
         '<option value="TAKEN"'    + (q.action === 'TAKEN'    ? ' selected' : '') + '>TAKEN</option>' +
         '<option value="RETURNED"' + (q.action === 'RETURNED' ? ' selected' : '') + '>RETURNED</option>' +
+        '<option value="TRANSFER"' + (q.action === 'TRANSFER' ? ' selected' : '') + '>TRANSFER</option>' +
       '</select>' +
       '<label class="small">Qty</label>' +
       '<input class="qe-qty" type="number" step="0.1" min="0" value="' + esc(String(q.qty)) + '" ' +
@@ -9040,6 +9120,11 @@ function onQueueEdit(ce) {
             bars.map(b => '<option value="' + esc(b.id) + '"' + (b.id === q.bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
           '</select>')
       ) +
+      '<label class="small qe-transfer-label" style="display:' + (q.action === 'TRANSFER' ? '' : 'none') + ';">To bar</label>' +
+      '<select class="qe-transfer" style="display:' + (q.action === 'TRANSFER' ? '' : 'none') + ';padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+        '<option value="">Pick destination</option>' +
+        bars.filter(b => b.id !== q.bar_id).map(b => '<option value="' + esc(b.id) + '"' + (b.id === q.destination_bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
+      '</select>' +
       '<label class="small">Notes</label>' +
       '<input class="qe-notes" type="text" value="' + esc(q.notes || '') + '" ' +
         'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
@@ -9053,6 +9138,11 @@ function onQueueEdit(ce) {
   form.querySelector('.qe-cancel').addEventListener('click', () => {
     form.style.display = 'none';
     form.innerHTML = '';
+  });
+  form.querySelector('.qe-action').addEventListener('change', (e) => {
+    const on = e.target.value === 'TRANSFER';
+    form.querySelector('.qe-transfer').style.display = on ? '' : 'none';
+    form.querySelector('.qe-transfer-label').style.display = on ? '' : 'none';
   });
   form.querySelector('.qe-save').addEventListener('click', () => onQueueEditSave(ce, form));
   // Reuse the safe per-row delete logic — confirms, removes the queued
@@ -9081,6 +9171,7 @@ function onQueueEditSave(ce, form) {
   const action = form.querySelector('.qe-action').value;
   const qtyStr = form.querySelector('.qe-qty').value;
   const notes  = (form.querySelector('.qe-notes').value || '').trim();
+  const destinationBarId = form.querySelector('.qe-transfer')?.value || null;
 
   // Bar handling — locked OR explicit select. The locked branch
   // happens when reviewSessionBars() returned [] during edit-form
@@ -9108,8 +9199,11 @@ function onQueueEditSave(ce, form) {
     barId = q.bar_id || null;
   }
 
-  if (action !== 'TAKEN' && action !== 'RETURNED') {
+  if (action !== 'TAKEN' && action !== 'RETURNED' && action !== 'TRANSFER') {
     statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
+  }
+  if (action === 'TRANSFER' && (!destinationBarId || destinationBarId === barId || !reviewSessionBars().some(b => b.id === destinationBarId))) {
+    statusOn('review-status', 'Pick a different allowed destination bar', 'err'); return;
   }
   const metadataError = validateEventMetadataContract({ ...payload, qty: qtyNum });
   if (metadataError) return { ok:false, error: metadataError };
@@ -9120,7 +9214,7 @@ function onQueueEditSave(ce, form) {
   if (!isFinite(qty) || qty <= 0) {
     statusOn('review-status', 'Qty must be a positive number', 'err'); return;
   }
-  if (action === 'TAKEN' && !(Number.isInteger(qty) && qty >= 1)) {
+  if ((action === 'TAKEN' || action === 'TRANSFER') && !(Number.isInteger(qty) && qty >= 1)) {
     statusOn('review-status', 'TAKEN qty must be a positive integer (bottles)', 'err'); return;
   }
 
@@ -9129,6 +9223,7 @@ function onQueueEditSave(ce, form) {
   arr[i].action          = action;
   arr[i].qty             = qty;
   arr[i].bar_id          = barId;     // session-allowed (or preserved when bar editing was locked)
+  arr[i].destination_bar_id = action === 'TRANSFER' ? destinationBarId : null;
   arr[i].notes           = notes;
   arr[i].attempts        = 0;          // reset retry counter so next SYNC tries again
   arr[i].last_error      = null;
@@ -9200,6 +9295,7 @@ function onDraftEdit(ce) {
       '<select class="de-action" style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
         '<option value="TAKEN"'    + (d.action === 'TAKEN'    ? ' selected' : '') + '>TAKEN</option>' +
         '<option value="RETURNED"' + (d.action === 'RETURNED' ? ' selected' : '') + '>RETURNED</option>' +
+        '<option value="TRANSFER"' + (d.action === 'TRANSFER' ? ' selected' : '') + '>TRANSFER</option>' +
       '</select>' +
       '<label class="small">Qty</label>' +
       '<input class="de-qty" type="number" step="0.1" min="0" value="' + esc(String(d.qty)) + '" ' +
@@ -9222,6 +9318,11 @@ function onDraftEdit(ce) {
             bars.map(b => '<option value="' + esc(b.id) + '"' + (b.id === d.bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
           '</select>')
       ) +
+      '<label class="small de-transfer-label" style="display:' + (d.action === 'TRANSFER' ? '' : 'none') + ';">To bar</label>' +
+      '<select class="de-transfer" style="display:' + (d.action === 'TRANSFER' ? '' : 'none') + ';padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
+        '<option value="">Pick destination</option>' +
+        bars.filter(b => b.id !== d.bar_id).map(b => '<option value="' + esc(b.id) + '"' + (b.id === d.destination_bar_id ? ' selected' : '') + '>' + esc(b.name || '?') + '</option>').join('') +
+      '</select>' +
       '<label class="small">Notes</label>' +
       '<input class="de-notes" type="text" value="' + esc(d.notes || '') + '" ' +
         'style="padding:6px;background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;">' +
@@ -9245,6 +9346,11 @@ function onDraftEdit(ce) {
   form.querySelector('.de-cancel').addEventListener('click', () => {
     form.style.display = 'none'; form.innerHTML = '';
   });
+  form.querySelector('.de-action').addEventListener('change', (e) => {
+    const on = e.target.value === 'TRANSFER';
+    form.querySelector('.de-transfer').style.display = on ? '' : 'none';
+    form.querySelector('.de-transfer-label').style.display = on ? '' : 'none';
+  });
   form.querySelector('.de-save').addEventListener('click', () => onDraftEditSave(ce, form));
   form.querySelector('.de-delete').addEventListener('click', () => onDraftDelete(ce));
 }
@@ -9257,6 +9363,7 @@ function onDraftEditSave(ce, form) {
   const action = form.querySelector('.de-action').value;
   const qtyStr = form.querySelector('.de-qty').value;
   const notes  = (form.querySelector('.de-notes').value || '').trim();
+  const destination_bar_id = form.querySelector('.de-transfer')?.value || null;
   const barLocked = !!form.querySelector('.de-bar-locked');
   const barSelect = form.querySelector('.de-bar');
   let bar_id = arr[i].bar_id;
@@ -9270,8 +9377,11 @@ function onDraftEditSave(ce, form) {
     }
     bar_id = v;
   }
-  if (action !== 'TAKEN' && action !== 'RETURNED') {
+  if (action !== 'TAKEN' && action !== 'RETURNED' && action !== 'TRANSFER') {
     statusOn('review-status', 'Action must be TAKEN or RETURNED', 'err'); return;
+  }
+  if (action === 'TRANSFER' && (!destination_bar_id || destination_bar_id === bar_id || !reviewSessionBars().some(b => b.id === destination_bar_id))) {
+    statusOn('review-status', 'Pick a different allowed destination bar', 'err'); return;
   }
   if (!isMovementAllowed(action)) {
     statusOn('review-status', movementBlockMessage(action), 'err'); return;
@@ -9280,7 +9390,7 @@ function onDraftEditSave(ce, form) {
   if (!isFinite(qty) || qty <= 0) {
     statusOn('review-status', 'Qty must be a positive number', 'err'); return;
   }
-  if (action === 'TAKEN' && (qty !== Math.floor(qty))) {
+  if ((action === 'TAKEN' || action === 'TRANSFER') && (qty !== Math.floor(qty))) {
     statusOn('review-status', 'TAKEN qty must be a positive integer (bottles)', 'err'); return;
   }
 
@@ -9323,7 +9433,8 @@ function onDraftEditSave(ce, form) {
   // staff_id / venue_id / source / client_event_id / item_id / drafted_at.
   // weight_g / bottle_state / measurement_source + the Scale V2.1/V3 profile fields
   // are draft-only helpers (stripped + flattened into notes at submit).
-  arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id, notes: notes,
+  arr[i] = { ...arr[i], action: action, qty: qty, bar_id: bar_id,
+             destination_bar_id: action === 'TRANSFER' ? destination_bar_id : null, notes: notes,
              weight_g: weight_g, bottle_state: bottle_state, measurement_source: measurement_source,
              tare_weight_g: _validProfile ? _tare : null, empty_weight_g: undefined,
              full_weight_g: _validProfile ? _fp : null,
