@@ -51,3 +51,16 @@ test('acceptance contract covers physical alias, bounded recovery, conflicts, an
   assert.match(source, /scanWorkflow === 'FAST_UNOPENED_ONE_EACH'/);
   assert.match(source, /openQtyModal\(it\)/);
 });
+
+test('WEIGH replacement path atomically arms replacement and records state transitions', () => {
+  const beginStart = source.indexOf('function beginWeighPending(it)');
+  const beginEnd = source.indexOf('function weighPendingMarkUnopened', beginStart);
+  assert.ok(beginStart >= 0 && beginEnd > beginStart);
+  const begin = source.slice(beginStart, beginEnd);
+  assert.match(begin, /phase1WeighPendingItem = it/);
+  assert.match(begin, /phase1ReplacementArmed = !!\(phase1PendingItemId && state\.selectedItemId/);
+  assert.match(begin, /setPickedItem\(it, 'scan'\)/);
+  assert.match(begin, /afterBeginWeighPendingItemId/);
+  assert.match(begin, /afterSetPickedItemId/);
+  assert.match(begin, /finally \{ phase1ReplacementArmed = false; \}/);
+});
