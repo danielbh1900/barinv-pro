@@ -1023,6 +1023,45 @@ tr:hover td { background: rgba(255,255,255,0.015); }
 #toast.t-info { background: var(--s3); border: 1px solid var(--border2); color: var(--text); }
 #toast.t-warn { background: var(--a);  color: #000; }
 
+/* BLUEFY_WEIGHT_DIAGNOSTICS_START - temporary safe runtime diagnostics. */
+#bluefy-diag-tab {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 12000;
+  border: 1px solid #6b7280;
+  background: #111827;
+  color: #f9fafb;
+  padding: 7px 9px;
+  font: 700 10px/1 'Fira Mono', monospace;
+  letter-spacing: .08em;
+  cursor: pointer;
+  opacity: .86;
+}
+#bluefy-diag-panel {
+  position: fixed;
+  left: 8px;
+  bottom: 42px;
+  z-index: 12001;
+  width: min(430px, calc(100vw - 16px));
+  max-height: min(78vh, 620px);
+  overflow: auto;
+  display: none;
+  padding: 10px;
+  border: 1px solid #6b7280;
+  background: rgba(17, 24, 39, .98);
+  color: #f9fafb;
+  box-shadow: 0 8px 30px rgba(0,0,0,.45);
+  font: 10px/1.45 'Fira Mono', monospace;
+}
+#bluefy-diag-panel.open { display: block; }
+#bluefy-diag-head { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }
+#bluefy-diag-title { color:#ffb86b; font-weight:700; letter-spacing:.08em; }
+#bluefy-diag-output { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; color:#d1d5db; }
+#bluefy-diag-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+#bluefy-diag-actions button, #bluefy-diag-head button { border:1px solid #4b5563; background:#1f2937; color:#f9fafb; padding:6px 8px; font:700 10px/1 'Fira Mono',monospace; cursor:pointer; }
+/* BLUEFY_WEIGHT_DIAGNOSTICS_END */
+
 /* ── EMPTY STATE ── */
 .empty {
   text-align: center;
@@ -1392,6 +1431,18 @@ th.sortable span { font-size:10px; }
 
 <!-- OFFLINE BANNER -->
 <div id="offline-banner">⚡ Offline — Actions queued, will sync when connected</div>
+
+<!-- BLUEFY_WEIGHT_DIAGNOSTICS_START - no secrets; local bounded trace only. -->
+<button id="bluefy-diag-tab" type="button" onclick="toggleBluefyDiagnostics()" aria-label="Open Bluefy diagnostics">DEBUG</button>
+<section id="bluefy-diag-panel" aria-label="Bluefy runtime diagnostics">
+  <div id="bluefy-diag-head"><span id="bluefy-diag-title">BLUEFY DIAGNOSTICS</span><button type="button" onclick="toggleBluefyDiagnostics()" aria-label="Close diagnostics">X</button></div>
+  <pre id="bluefy-diag-output">Waiting for a scan or scale event.</pre>
+  <div id="bluefy-diag-actions">
+    <button type="button" onclick="clearBluefyDiagnostics()">CLEAR</button>
+    <button type="button" onclick="copyBluefyDiagnostics()">COPY DIAGNOSTICS</button>
+  </div>
+</section>
+<!-- BLUEFY_WEIGHT_DIAGNOSTICS_END -->
 
 <!-- ══════════════════════════════════════════════════════
      SETUP WIZARD
@@ -3063,6 +3114,133 @@ function toast(msg, type = 't-info') {
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.className = '', 3000);
 }
+
+// BLUEFY_WEIGHT_DIAGNOSTICS_START - observation only; no resolver/scale behavior changes.
+const BLUEFY_DIAG_BUILD_ID = 'BLUEFY-WEIGHT-DIAG-20260919';
+const BLUEFY_DIAG_CACHE_MARKER = 'barinv-v73';
+const BLUEFY_DIAG_HISTORY_LIMIT = 40;
+const BLUEFY_DIAG = { history: [], open: false };
+
+function bluefyDiagSafeItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  return {
+    id: item.id == null ? null : String(item.id),
+    name: item.name == null ? null : String(item.name),
+    size: item.bottle_size_ml == null ? (item.size == null ? null : String(item.size)) : String(item.bottle_size_ml),
+    barcode: item.sku == null ? (item.barcode == null ? null : String(item.barcode)) : String(item.sku)
+  };
+}
+
+function bluefyDiagCatalog() {
+  const session = (typeof SESSION === 'object' && SESSION) ? SESSION : null;
+  const items = session && session.cache && Array.isArray(session.cache.items) ? session.cache.items : [];
+  return {
+    present: !!session,
+    length: items.length,
+    source: session?.preloadStatus?.source || (items.length ? 'memory' : 'none'),
+    generation: session?.catalogGeneration == null ? 'NONE' : String(session.catalogGeneration)
+  };
+}
+
+function bluefyDiagServiceWorker() {
+  let controller = false;
+  try { controller = !!(navigator.serviceWorker && navigator.serviceWorker.controller); } catch (_) {}
+  return { controller, cacheMarker: BLUEFY_DIAG_CACHE_MARKER };
+}
+
+function bluefyDiagWeighState() {
+  const input = document.getElementById('dsp-weigh-input');
+  const result = document.getElementById('dsp-weigh-result');
+  const scale = (typeof BLE_SCALE === 'object' && BLE_SCALE) ? BLE_SCALE : {};
+  return {
+    state: input ? (result && result.style.display !== 'none' ? 'WEIGH_READING' : 'WEIGH_OPEN') : 'WEIGH_CLOSED',
+    bleConnected: !!scale.connected,
+    latestWeight: scale.lastWeight == null ? null : Number(scale.lastWeight),
+    inputWeight: input && input.value ? String(input.value) : null
+  };
+}
+
+function bluefyDiagRender() {
+  const out = document.getElementById('bluefy-diag-output');
+  if (!out) return;
+  out.textContent = BLUEFY_DIAG.history.length
+    ? BLUEFY_DIAG.history.map((entry, index) => 'EVENT ' + (index + 1) + '\n' + JSON.stringify(entry, null, 2)).join('\n\n')
+    : 'Waiting for a scan or scale event.';
+}
+
+function bluefyDiagRecord(fields) {
+  const catalog = bluefyDiagCatalog();
+  const sw = bluefyDiagServiceWorker();
+  const weigh = bluefyDiagWeighState();
+  const entry = {
+    time: new Date().toISOString(),
+    runtime: 'BLUEFY_WEB',
+    buildId: BLUEFY_DIAG_BUILD_ID,
+    flow: fields.flow || 'UNKNOWN',
+    rawBarcode: fields.rawBarcode == null ? null : String(fields.rawBarcode),
+    rawLength: fields.rawBarcode == null ? 0 : String(fields.rawBarcode).length,
+    lookupBarcode: fields.lookupBarcode == null ? (fields.rawBarcode == null ? null : String(fields.rawBarcode)) : String(fields.lookupBarcode),
+    normalizedBarcode: fields.normalizedBarcode == null ? null : String(fields.normalizedBarcode),
+    sessionPresent: catalog.present,
+    catalogLength: catalog.length,
+    catalogSource: catalog.source,
+    catalogGeneration: catalog.generation,
+    lookupFunction: fields.lookupFunction || 'UNKNOWN',
+    lookupFields: fields.lookupFields || 'UNKNOWN',
+    exactMatchCount: fields.exactMatchCount == null ? null : Number(fields.exactMatchCount),
+    matchResult: fields.matchResult || 'UNKNOWN',
+    matchedItem: bluefyDiagSafeItem(fields.matchedItem),
+    selectedItemAfterLookup: bluefyDiagSafeItem(fields.selectedItemAfterLookup),
+    weighState: fields.weighState || weigh.state,
+    bleConnected: fields.bleConnected == null ? weigh.bleConnected : !!fields.bleConnected,
+    latestWeight: fields.latestWeight == null ? weigh.latestWeight : Number(fields.latestWeight),
+    serviceWorkerController: sw.controller,
+    cacheBuildMarker: sw.cacheMarker,
+    error: fields.error ? String(fields.error).slice(0, 180) : null
+  };
+  BLUEFY_DIAG.history.push(entry);
+  while (BLUEFY_DIAG.history.length > BLUEFY_DIAG_HISTORY_LIMIT) BLUEFY_DIAG.history.shift();
+  window.__BARINV_BLUEFY_DIAGNOSTICS = BLUEFY_DIAG.history.slice();
+  bluefyDiagRender();
+  try { console.info('[BLUEFY_DIAG]', JSON.stringify(entry)); } catch (_) {}
+  return entry;
+}
+
+function bluefyDiagCatalogMatches(code) {
+  const items = bluefyDiagCatalog();
+  const wanted = String(code == null ? '' : code).toLowerCase();
+  const matches = [];
+  (SESSION?.cache?.items || []).forEach(item => {
+    const sku = item && item.sku != null ? String(item.sku).toLowerCase() : '';
+    if (sku && sku === wanted) matches.push(item);
+  });
+  return { items, matches };
+}
+
+function toggleBluefyDiagnostics() {
+  BLUEFY_DIAG.open = !BLUEFY_DIAG.open;
+  const panel = document.getElementById('bluefy-diag-panel');
+  if (panel) panel.classList.toggle('open', BLUEFY_DIAG.open);
+  bluefyDiagRender();
+}
+
+function clearBluefyDiagnostics() {
+  BLUEFY_DIAG.history.length = 0;
+  window.__BARINV_BLUEFY_DIAGNOSTICS = [];
+  bluefyDiagRender();
+}
+
+async function copyBluefyDiagnostics() {
+  const text = JSON.stringify(BLUEFY_DIAG.history, null, 2);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); toast('Diagnostics copied', 't-ok'); return; }
+  } catch (_) {}
+  try {
+    const area = document.createElement('textarea'); area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); toast('Diagnostics copied', 't-ok');
+  } catch (_) { toast('Copy unavailable', 't-warn'); }
+}
+// BLUEFY_WEIGHT_DIAGNOSTICS_END
 
 // ══════════════════════════════════════════════════════
 // MODAL
@@ -4799,6 +4977,7 @@ async function toggleScanner() {
 }
 
 async function startScanner() {
+  bluefyDiagRecord({ flow: 'NORMAL_SCAN_LAUNCH', lookupFunction: 'startScanner', lookupFields: 'Html5Qrcode.start', matchResult: 'UNKNOWN' });
   const area  = document.getElementById('scanner-area');
   const hint  = document.getElementById('scanner-hint');
   const btn   = document.getElementById('scan-btn');
@@ -5070,6 +5249,8 @@ function autoSelectItem(item) {
 
 async function handleScannedCode(code) {
   try {
+    const diagCatalog = bluefyDiagCatalogMatches(code);
+    const diagExact = diagCatalog.matches.filter(i => i && i.active !== false);
     document.getElementById('ev-search').value = code;
     const isAdmin = SESSION.role === 'admin';
     const activeItems = SESSION.cache.items.filter(i => i.active);
@@ -5077,6 +5258,7 @@ async function handleScannedCode(code) {
     // 1. Exact SKU match
     const exactMatch = activeItems.find(i => i.sku && i.sku.toLowerCase() === code.toLowerCase());
     if (exactMatch) {
+      bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku exact', exactMatchCount: diagExact.length, matchResult: diagExact.length > 1 ? 'DUPLICATE' : 'MATCH', matchedItem: exactMatch, selectedItemAfterLookup: exactMatch });
       autoSelectItem(exactMatch);
       return;
     }
@@ -5085,6 +5267,7 @@ async function handleScannedCode(code) {
     const prefix = code.substring(0, 8);
     const partialMatch = activeItems.find(i => i.sku && i.sku.substring(0, 8) === prefix);
     if (partialMatch) {
+      bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku first-8 prefix', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: partialMatch, selectedItemAfterLookup: partialMatch });
       autoSelectItem(partialMatch);
       if(isAdmin) {
         // Offer to save the new barcode
@@ -5096,6 +5279,7 @@ async function handleScannedCode(code) {
     // 1c. Name-contains match from search text
     const nameMatch = activeItems.find(i => i.name.toLowerCase().includes(code.toLowerCase()) || code.toLowerCase().includes(i.name.toLowerCase()));
     if (nameMatch) {
+      bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.name contains', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: nameMatch, selectedItemAfterLookup: nameMatch });
       autoSelectItem(nameMatch);
       return;
     }
@@ -5136,9 +5320,11 @@ async function handleScannedCode(code) {
       if (bestMatch && bestScore >= 1) {
         // Barback: just select the item, no DB write
         if (!isAdmin) {
+          bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'OpenFoodFacts/UPCitemdb then catalog name fuzzy', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: bestMatch, selectedItemAfterLookup: bestMatch });
           autoSelectItem(bestMatch);
           return;
         }
+        bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'OpenFoodFacts/UPCitemdb then catalog name fuzzy', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: bestMatch, selectedItemAfterLookup: null });
         // Admin: offer to save barcode permanently
         openModal('Barcode Match Found',
           `<div style="margin-bottom:14px;font-size:13px;line-height:1.6;">
@@ -5168,6 +5354,7 @@ async function handleScannedCode(code) {
     }
 
     // 5. No match
+    bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku/prefix/name then online lookup/fuzzy', exactMatchCount: diagExact.length, matchResult: 'UNKNOWN', matchedItem: null, selectedItemAfterLookup: null });
     if (!isAdmin) {
       populateItemSelect(); // show full list, not filtered by barcode
       toast('Barcode not recognized — pick from list', 't-info');
@@ -5175,6 +5362,7 @@ async function handleScannedCode(code) {
     }
     openBarcodeManualPicker(code, productName);
   } catch (e) {
+    bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku/prefix/name then online lookup/fuzzy', matchResult: 'ERROR', error: e && e.message ? e.message : e });
     console.error('Scanner error:', e);
     toast('Scan error — try again', 't-err');
   }
@@ -11028,7 +11216,9 @@ async function rcpDelete(id) {
 const BLE_SCALE = { device: null, server: null, characteristic: null, lastWeight: null, connected: false };
 
 async function bleScaleConnect(emptyW, shotW, fullShots) {
+  bluefyDiagRecord({ flow: 'SCALE_CONNECT_ATTEMPT', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'UNKNOWN', weighState: 'WAITING_FOR_SCALE' });
   if (!navigator.bluetooth) {
+    bluefyDiagRecord({ flow: 'SCALE_ERROR', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'ERROR', weighState: 'BLE_NOT_SUPPORTED', error: 'bluetooth_not_supported' });
     toast('Bluetooth not supported — use Chrome on Mac', 't-err');
     return;
   }
@@ -11074,6 +11264,7 @@ async function bleScaleConnect(emptyW, shotW, fullShots) {
       const b = document.getElementById('ble-scale-btn');
       if (b) b.textContent = '📶 Scale';
       toast('Scale disconnected', 't-info');
+      bluefyDiagRecord({ flow: 'SCALE_DISCONNECT', lookupFunction: 'bleScaleConnect', lookupFields: 'gattserverdisconnected', matchResult: 'UNKNOWN', weighState: 'DISCONNECTED', bleConnected: false, latestWeight: null });
     });
 
     const server = await device.gatt.connect();
@@ -11105,6 +11296,7 @@ async function bleScaleConnect(emptyW, shotW, fullShots) {
                 }
                 const b = document.getElementById('ble-scale-btn');
                 if (b) b.textContent = `📶 ${weight}g`;
+                bluefyDiagRecord({ flow: 'SCALE_READING', lookupFunction: 'bleParseWeight', lookupFields: 'characteristicvaluechanged', matchResult: 'MATCH', weighState: 'READING', bleConnected: true, latestWeight: weight });
               }
             });
             found = true;
@@ -11115,16 +11307,19 @@ async function bleScaleConnect(emptyW, shotW, fullShots) {
     }
 
     if (!found) {
+      bluefyDiagRecord({ flow: 'SCALE_NO_CHARACTERISTIC', lookupFunction: 'bleScaleConnect', lookupFields: 'notify/indicate characteristic', matchResult: 'ERROR', weighState: 'NO_WEIGHT_CHARACTERISTIC', bleConnected: false, error: 'no_weight_characteristic' });
       toast('Connected but no weight data found. Try placing item on scale.', 't-err');
       if (btn) { btn.textContent = '📶 No data'; btn.disabled = false; }
       return;
     }
 
     BLE_SCALE.connected = true;
+    bluefyDiagRecord({ flow: 'SCALE_CONNECTED', lookupFunction: 'bleScaleConnect', lookupFields: 'notify/indicate characteristic', matchResult: 'MATCH', weighState: 'CONNECTED', bleConnected: true });
     if (btn) { btn.textContent = '📶 Connected'; btn.disabled = false; }
     toast(`Scale connected: ${device.name || 'BLE Scale'}`, 't-ok');
 
   } catch (e) {
+    bluefyDiagRecord({ flow: 'SCALE_ERROR', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'ERROR', weighState: 'ERROR', bleConnected: false, error: e?.name || e?.message || 'scale_error' });
     if (e.name !== 'NotFoundError') toast('Scale error: ' + e.message, 't-err');
     if (btn) { btn.textContent = '📶 Scale'; btn.disabled = false; }
   }
@@ -11457,6 +11652,7 @@ let DSP_SCANNER = null;
 let DSP_SCAN_ACTIVE = false;
 
 window.dspStartScan = function() {
+  bluefyDiagRecord({ flow: 'DISPATCH_SCAN_LAUNCH', lookupFunction: 'dspStartScan', lookupFields: 'Html5Qrcode.start', matchResult: 'UNKNOWN', weighState: 'SCANNER' });
   if(DSP_SCAN_ACTIVE) { dspStopScan(); return; }
   if(typeof Html5Qrcode === 'undefined') { toast('Scanner loading...','t-err'); return; }
 
@@ -11509,9 +11705,12 @@ window.dspStopScan = function() {
 };
 
 function dspHandleBarcode(code) {
+  const diagCatalog = bluefyDiagCatalogMatches(code);
+  const diagExact = diagCatalog.matches.filter(i => i && i.active !== false);
   // 1. Instant local SKU match
   const match = SESSION.cache.items.find(i => i.sku && i.sku.toLowerCase() === code.toLowerCase());
   if(match) {
+    bluefyDiagRecord({ flow: 'DISPATCH_SCAN_TO_WEIGH', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'dspHandleBarcode', lookupFields: 'SESSION.cache.items.active.sku exact', exactMatchCount: diagExact.length, matchResult: diagExact.length > 1 ? 'DUPLICATE' : 'MATCH', matchedItem: match, selectedItemAfterLookup: match, weighState: 'ITEM_CARD_SELECTED' });
     // Scroll to item and highlight it
     document.getElementById('dsp-search').value = '';
     dspRenderCards();
@@ -11529,6 +11728,7 @@ function dspHandleBarcode(code) {
   }
 
   // 2. No local match — search by code
+  bluefyDiagRecord({ flow: 'DISPATCH_SCAN_TO_WEIGH', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'dspHandleBarcode', lookupFields: 'SESSION.cache.items.active.sku exact', exactMatchCount: diagExact.length, matchResult: diagExact.length > 1 ? 'DUPLICATE' : 'UNKNOWN', matchedItem: null, selectedItemAfterLookup: null, weighState: 'ITEM_NOT_FOUND' });
   document.getElementById('dsp-search').value = code;
   dspFilter();
 
@@ -11782,6 +11982,7 @@ window.dspTransfer = function(itemId) {
 window.dspWeighReturn = function(itemId) {
   const item = SESSION.cache.items.find(i => i.id === itemId);
   if (!item) return;
+  bluefyDiagRecord({ flow: 'WEIGH_OPEN', lookupFunction: 'dspWeighReturn', lookupFields: 'SESSION.cache.items.id', matchResult: 'MATCH', matchedItem: item, selectedItemAfterLookup: item, weighState: 'WAITING_FOR_WEIGHT' });
   const emptyW = Number(item.empty_bottle_weight_g || 0);
   const fullW = Number(item.full_bottle_weight_g || 0);
   const fullShots = Number(item.full_shots || 0);
