@@ -1571,6 +1571,7 @@ const DEFAULT_TEST_PIN = '1234';
 const RECENT_MAX = 50;
 const SYNC_MAX_ATTEMPTS = 6;       // exponential backoff cap per entry
 const DUPE_SCAN_WINDOW_MS = 2000;  // ignore same barcode within this window
+const UNKNOWN_SCAN_HOLD_MS = 1800; // one-shot unknown candidate hold; bounded for a later catalog match
 // PHASE2K.1 — short decode gaps are not reliable physical departure evidence.
 // Require continuous absence for 1400 ms; any detection resets this gate.
 const RAPID_CLEAR_ABSENCE_MS = 1400; // diagnostic only; never unlocks FAST
@@ -2951,6 +2952,8 @@ const state = {
   selectedBarId: null,
   scannerContinuous: false,
   scannerClosing: false,   // single-scan: true during the brief success-toast→close window
+  unknownScanTimer: null,  // bounded one-shot UNKNOWN candidate hold
+  unknownScanPending: null, // { code, controls } while waiting for a later catalog match
   scannerCooldown: {},  // canonical barcode identity → lastScannedAt
   rapidScanBusy: false,    // rapid decode lock: one accepted barcode at a time
   rapidScanResetTimer: null,
@@ -4119,6 +4122,31 @@ async function ensureZXing() {
 // PLAN-2026-06-09 — Shared accept path for BOTH decode routes (full-frame
 // ZXing continuous + cropped center-ROI loop). One dupe window so a code seen
 // by either route within DUPE_SCAN_WINDOW_MS is never double-added.
+function clearUnknownScanHold() {
+  if (state.unknownScanTimer) { try { clearTimeout(state.unknownScanTimer); } catch (_) {} state.unknownScanTimer = null; }
+  state.unknownScanPending = null;
+}
+function clearSelectionForUnknownScan() {
+  state.selectedItemId = null;
+  state.selectedItemName = null;
+  phase1PendingItemId = null;
+  phase1PendingItemName = '';
+  phase1WeighPendingItem = null;
+  try { const picked = $('picked-item'); if (picked) { picked.style.display = 'none'; picked.innerHTML = ''; } } catch (_) {}
+  try { phase1RenderPendingSelection(); } catch (_) {}
+  try { refreshWeightProfileUI(); } catch (_) {}
+  try { renderPhase1StickySummary(); } catch (_) {}
+  try { syncAddButtonLabel(); } catch (_) {}
+}
+function finalizeUnknownScanHold() {
+  const pending = state.unknownScanPending;
+  clearUnknownScanHold();
+  if (!pending) return;
+  if (pending.controls && pending.controls.stop) { try { pending.controls.stop(); } catch (_) {} }
+  try { closeScanner(); } catch (_) {}
+  try { searchItems(pending.code); } catch (_) {}
+  try { bluefyBarbackDiagRecord({ flow: 'UNKNOWN_HOLD_TIMEOUT', rawBarcode: pending.code, lookupFunction: 'lookupBarcodeResult', lookupFields: 'bounded one-shot candidate hold', matchResult: 'UNKNOWN', selectedItem: null, weighState: 'ITEM_NOT_FOUND' }); } catch (_) {}
+}
 function acceptDecodedCode(code, controls) {
   if (!code) return;
   // SCAN_QTY (PLAN-2026-06-21) — while the quantity sheet is open for a scanned
@@ -4602,6 +4630,12 @@ function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
       cache_items_count: (cache.items || []).length,
     });
   } catch (_) { /* console may be unavailable */ }
+  if (it || barcodeResult.ambiguous) {
+    if (state.unknownScanPending) {
+      try { bluefyBarbackDiagRecord({ flow: 'UNKNOWN_HOLD_MATCHED', rawBarcode: code, lookupFunction: 'lookupBarcodeResult', lookupFields: 'bounded one-shot candidate hold', exactMatchCount: (barcodeResult.matches || []).length, matchResult: barcodeResult.ambiguous ? 'DUPLICATE' : 'MATCH', matchedItem: it, selectedItem: it, weighState: barcodeResult.ambiguous ? 'CONFLICT' : 'ITEM_MATCHED' }); } catch (_) {}
+      clearUnknownScanHold();
+    }
+  }
   if (barcodeResult.ambiguous) {
     try { showScannerToast('Barcode matched multiple items — select item manually', 'warn'); } catch (_) {}
     try { $('search-input').value = code; } catch (_) {}
@@ -4617,6 +4651,17 @@ function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
     // operator can see exactly what ZXing read. Previously the rapid-
     // mode toast disappeared in 1.4 s and the search field was never
     // populated — the operator had no way to inspect the bad barcode.
+    const oneShotHold = !state.scannerContinuous && (diagWorkflow === 'SET_QUANTITY_COUNT' || diagWorkflow === 'WEIGH_PARTIAL');
+    if (oneShotHold) {
+      clearSelectionForUnknownScan();
+      releaseRapidScanLock();
+      clearUnknownScanHold();
+      state.unknownScanPending = { code: String(code), controls };
+      try { bluefyBarbackDiagRecord({ flow: 'UNKNOWN_HOLD_STARTED', rawBarcode: code, lookupFunction: 'lookupBarcodeResult', lookupFields: 'bounded one-shot candidate hold', exactMatchCount: 0, matchResult: 'UNKNOWN', selectedItem: null, weighState: 'UNKNOWN_HOLD' }); } catch (_) {}
+      showScannerToast('Barcode candidate not in catalog — scanning briefly for a matching code', 'warn');
+      state.unknownScanTimer = setTimeout(finalizeUnknownScanHold, UNKNOWN_SCAN_HOLD_MS);
+      return;
+    }
     showScannerToast(
       'Barcode scanned but item not found (' + code + ') — ' +
         (cache.items || []).length + ' cached items',
@@ -6263,6 +6308,7 @@ function applyScannerTrackTuning() {
 }
 
 function closeScanner() {
+  clearUnknownScanHold();
   closeQtyModal();
   if (state.rapidScanReadyTimer) { try { clearTimeout(state.rapidScanReadyTimer); } catch (_) {} state.rapidScanReadyTimer = null; }
   $('scanner-box').classList.remove('active');
