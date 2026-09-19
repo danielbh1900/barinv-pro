@@ -517,6 +517,11 @@ body {
   margin: 0 auto;
 }
 
+/* DESKTOP_FULL_WIDTH_LAYOUT_FIX: remove the narrow centered cap on wide desktop. */
+@media (min-width: 1366px) {
+  .main { max-width: none; }
+}
+
 .page { display: none; animation: fadeIn 0.2s ease; }
 .page.active { display: block; }
 
