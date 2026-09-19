@@ -632,6 +632,17 @@
     .ble-weight { font-size:32px; font-weight:800; color:#4ade80; text-align:center; padding:8px 0; }
     .ble-weight.unstable { color:#fbbf24; }
 
+    /* BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_START - temporary safe trace. */
+    #bluefy-barback-diag-tab { position:fixed; left:8px; bottom:8px; z-index:12000; border:1px solid #6b7280; border-radius:5px; background:#111827; color:#f9fafb; padding:7px 9px; font:700 10px/1 'Fira Mono',monospace; letter-spacing:.08em; cursor:pointer; opacity:.88; }
+    #bluefy-barback-diag-panel { position:fixed; left:8px; bottom:42px; z-index:12001; width:min(440px,calc(100vw - 16px)); max-height:min(78vh,640px); overflow:auto; display:none; padding:10px; border:1px solid #6b7280; border-radius:6px; background:rgba(17,24,39,.98); color:#f9fafb; box-shadow:0 8px 30px rgba(0,0,0,.45); font:10px/1.45 'Fira Mono',monospace; }
+    #bluefy-barback-diag-panel.open { display:block; }
+    #bluefy-barback-diag-head { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }
+    #bluefy-barback-diag-title { color:#ffb86b; font-weight:700; letter-spacing:.08em; }
+    #bluefy-barback-diag-output { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; color:#d1d5db; }
+    #bluefy-barback-diag-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    #bluefy-barback-diag-actions button, #bluefy-barback-diag-head button { border:1px solid #4b5563; border-radius:4px; background:#1f2937; color:#f9fafb; padding:6px 8px; font:700 10px/1 'Fira Mono',monospace; cursor:pointer; }
+    /* BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_END */
+
     /* Phase 5: recent-item quick-pick chips */
     .recent-chips { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0 4px; }
     .chip {
@@ -668,6 +679,14 @@
      font-size:11px;font-weight:800;letter-spacing:0.08em;border-bottom:1px solid #ef4444;">
   ⚠ OFFLINE — saves are queued locally and will sync when the network returns
 </div>
+<!-- BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_START - no secrets; local bounded trace only. -->
+<button id="bluefy-barback-diag-tab" type="button" onclick="toggleBluefyBarbackDiagnostics()" aria-label="Open Bluefy Barback diagnostics">DEBUG</button>
+<section id="bluefy-barback-diag-panel" aria-label="Bluefy Barback runtime diagnostics">
+  <div id="bluefy-barback-diag-head"><span id="bluefy-barback-diag-title">BARBACK DIAGNOSTICS</span><button type="button" onclick="toggleBluefyBarbackDiagnostics()" aria-label="Close diagnostics">X</button></div>
+  <pre id="bluefy-barback-diag-output">Waiting for a scan or scale event.</pre>
+  <div id="bluefy-barback-diag-actions"><button type="button" onclick="clearBluefyBarbackDiagnostics()">CLEAR</button><button type="button" onclick="copyBluefyBarbackDiagnostics()">COPY DIAGNOSTICS</button></div>
+</section>
+<!-- BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_END -->
 <div id="outbox-storage-error" role="alert" aria-live="assertive"
      style="display:none;position:sticky;top:0;z-index:102;background:#7f1d1d;color:#fff;
      padding:10px 14px;text-align:center;font-size:12px;font-weight:800;line-height:1.45;
@@ -1982,6 +2001,7 @@ function beginWeighPending(it) {
   var notes = $('notes-input');
   if (notes) notes.value = '';
   try { setPickedItem(it, 'scan'); } catch (_) {}
+  bluefyBarbackDiagRecord({ flow: 'WEIGH_SELECTED', rawBarcode: null, lookupFunction: 'beginWeighPending', lookupFields: 'setPickedItem(state.selectedItemId)', exactMatchCount: 1, matchResult: 'MATCH', matchedItem: it, selectedItem: it, weighState: 'WAITING_FOR_WEIGHT' });
   try { renderPhase1MeasureControls(); } catch (_) {}
   try { statusOn('save-status', 'Scanned: ' + (it.name || 'item') + ' — place bottle on scale or enter weight', 'info'); } catch (_) {}
   try { VoiceGuide.announceOperationalState('scanned', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'Item scanned. Place bottle on scale.' }); } catch (_) {}
@@ -2963,6 +2983,38 @@ const state = {
   ble: { available:false, deviceId:null, connected:false, lastWeight:null, lastStable:false },
   weightSource: { scaleUsed:false },
 };
+
+// BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_START - observation only; no workflow behavior changes.
+const BLUEFY_BARBACK_DIAG_BUILD_ID = 'BLUEFY-BARBACK-WEIGH-DIAG-20260919';
+const BLUEFY_BARBACK_DIAG_HISTORY_LIMIT = 40;
+const BLUEFY_BARBACK_DIAG = { history: [], open: false };
+
+function bluefyBarbackDiagSafeItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  return { id: item.id == null ? null : String(item.id), name: item.name == null ? null : String(item.name), size: item.bottle_size_ml == null ? (item.size == null ? null : String(item.size)) : String(item.bottle_size_ml), barcode: item.sku == null ? (item.barcode == null ? (item.code == null ? null : String(item.code)) : String(item.barcode)) : String(item.sku) };
+}
+function bluefyBarbackDiagScale() {
+  const direct = (typeof bleScale === 'object' && bleScale) ? bleScale : null;
+  const native = state && state.ble ? state.ble : null;
+  return { connected: !!((direct && direct.connected) || (native && native.connected)), latestWeight: direct && direct.latest != null ? Number(direct.latest.grams == null ? direct.latest : direct.latest.grams) : (native && native.lastWeight == null ? null : (native ? Number(native.lastWeight) : null)), stable: !!((direct && direct.latest && direct.latest.stable) || (native && native.lastStable)) };
+}
+function bluefyBarbackDiagRecord(fields) {
+  const items = Array.isArray(cache.items) ? cache.items : [];
+  const scale = bluefyBarbackDiagScale();
+  const mode = resolveScanWorkflow();
+  const entry = { time: new Date().toISOString(), runtime: 'BLUEFY_BARBACK_WEB', buildId: BLUEFY_BARBACK_DIAG_BUILD_ID, flow: fields.flow || 'UNKNOWN', rawBarcode: fields.rawBarcode == null ? null : String(fields.rawBarcode), lookupBarcode: fields.lookupBarcode == null ? (fields.rawBarcode == null ? null : String(fields.rawBarcode)) : String(fields.lookupBarcode), catalogLength: items.length, lookupFunction: fields.lookupFunction || 'UNKNOWN', lookupFields: fields.lookupFields || 'UNKNOWN', exactMatchCount: fields.exactMatchCount == null ? null : Number(fields.exactMatchCount), matchResult: fields.matchResult || 'UNKNOWN', matchedItem: bluefyBarbackDiagSafeItem(fields.matchedItem), selectedItem: bluefyBarbackDiagSafeItem(fields.selectedItem || (state.selectedItemId ? items.find(item => item.id === state.selectedItemId) : null)), mode, weighState: fields.weighState || (phase1WeighPendingItem ? 'WAITING_FOR_WEIGHT' : 'IDLE'), bleConnected: fields.bleConnected == null ? scale.connected : !!fields.bleConnected, latestWeight: fields.latestWeight == null ? scale.latestWeight : Number(fields.latestWeight), error: fields.error ? String(fields.error).slice(0, 180) : null };
+  BLUEFY_BARBACK_DIAG.history.push(entry);
+  while (BLUEFY_BARBACK_DIAG.history.length > BLUEFY_BARBACK_DIAG_HISTORY_LIMIT) BLUEFY_BARBACK_DIAG.history.shift();
+  window.__BARINV_BLUEFY_BARBACK_DIAGNOSTICS = BLUEFY_BARBACK_DIAG.history.slice();
+  bluefyBarbackDiagRender();
+  try { console.info('[BLUEFY_BARBACK_DIAG]', JSON.stringify(entry)); } catch (_) {}
+  return entry;
+}
+function bluefyBarbackDiagRender() { const output = document.getElementById('bluefy-barback-diag-output'); if (!output) return; output.textContent = BLUEFY_BARBACK_DIAG.history.length ? BLUEFY_BARBACK_DIAG.history.map((entry, index) => 'EVENT ' + (index + 1) + '\n' + JSON.stringify(entry, null, 2)).join('\n\n') : 'Waiting for a scan or scale event.'; }
+function toggleBluefyBarbackDiagnostics() { BLUEFY_BARBACK_DIAG.open = !BLUEFY_BARBACK_DIAG.open; const panel = document.getElementById('bluefy-barback-diag-panel'); if (panel) panel.classList.toggle('open', BLUEFY_BARBACK_DIAG.open); bluefyBarbackDiagRender(); }
+function clearBluefyBarbackDiagnostics() { BLUEFY_BARBACK_DIAG.history.length = 0; window.__BARINV_BLUEFY_BARBACK_DIAGNOSTICS = []; bluefyBarbackDiagRender(); }
+async function copyBluefyBarbackDiagnostics() { const text = JSON.stringify(BLUEFY_BARBACK_DIAG.history, null, 2); try { if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); showScannerToast('Diagnostics copied', 'ok'); return; } } catch (_) {} try { const area = document.createElement('textarea'); area.value = text; area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); showScannerToast('Diagnostics copied', 'ok'); } catch (_) { showScannerToast('Copy unavailable', 'warn'); } }
+// BLUEFY_BARBACK_WEIGHT_DIAGNOSTICS_END
 
 function normalizeAllowedMovements(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { take: true, return: true };
@@ -4534,6 +4586,8 @@ function onBarcodeScanned(code, controls, acceptedBarcodeResult) {
   const barcodeResult = acceptedBarcodeResult || lookupBarcodeResult(code);
   const cooldownKey = arguments[3];
   const it = barcodeResult.item;
+  const diagWorkflow = resolveScanWorkflow();
+  bluefyBarbackDiagRecord({ flow: 'BARCODE_RESOLUTION', rawBarcode: code, lookupBarcode: String(code == null ? '' : code).trim(), lookupFunction: 'lookupBarcodeResult', lookupFields: 'cache.items barcode/code/sku exact, digits, aliases', exactMatchCount: (barcodeResult.matches || []).length, matchResult: barcodeResult.ambiguous ? 'DUPLICATE' : (it ? 'MATCH' : 'UNKNOWN'), matchedItem: it, selectedItem: it, mode: diagWorkflow, weighState: it ? (diagWorkflow === 'WEIGH_PARTIAL' ? 'ITEM_MATCHED_WAITING_FOR_WEIGHT' : 'ITEM_MATCHED') : 'ITEM_NOT_FOUND' });
   // PLAN-2026-06-04 — safe diagnostic so the Web Inspector can
   // distinguish "ZXing decoded but no item match" from "ZXing never
   // decoded anything". No secret content — just lookup result + cache
