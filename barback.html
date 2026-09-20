@@ -9542,11 +9542,42 @@ function onDraftEdit(ce) {
     form.querySelector('.de-transfer').style.display = on ? '' : 'none';
     form.querySelector('.de-transfer-label').style.display = on ? '' : 'none';
   });
-  form.querySelector('.de-save').addEventListener('click', () => onDraftEditSave(ce, form));
+  const saveEditButton = form.querySelector('.de-save');
+  const saveEditDiag = flow => {
+    try {
+      const buttonRect = saveEditButton && saveEditButton.getBoundingClientRect ? saveEditButton.getBoundingClientRect() : null;
+      const submitAll = $('review-submit-all');
+      const submitAllRect = submitAll && submitAll.getBoundingClientRect ? submitAll.getBoundingClientRect() : null;
+      const point = buttonRect ? { x: buttonRect.left + buttonRect.width / 2, y: buttonRect.top + buttonRect.height / 2 } : null;
+      const hit = point && document.elementFromPoint ? document.elementFromPoint(point.x, point.y) : null;
+      const style = saveEditButton && window.getComputedStyle ? window.getComputedStyle(saveEditButton) : null;
+      bluefyBarbackDiagRecord({
+        flow,
+        lookupFunction: 'onDraftEdit/onDraftEditSave',
+        lookupFields: 'SAVE EDIT pointer/click/hit-test',
+        matchResult: 'OBSERVATION',
+        buttonRect: buttonRect ? { left: buttonRect.left, top: buttonRect.top, right: buttonRect.right, bottom: buttonRect.bottom, width: buttonRect.width, height: buttonRect.height } : null,
+        hitTestElement: hit ? { tag: hit.tagName || null, id: hit.id || null, className: hit.className || null } : null,
+        buttonDisabled: !!(saveEditButton && saveEditButton.disabled),
+        buttonPointerEvents: style ? style.pointerEvents : null,
+        buttonZIndex: style ? style.zIndex : null,
+        submitAllRect: submitAllRect ? { left: submitAllRect.left, top: submitAllRect.top, right: submitAllRect.right, bottom: submitAllRect.bottom, width: submitAllRect.width, height: submitAllRect.height } : null,
+        coveringElement: hit && saveEditButton && hit !== saveEditButton ? (hit.id || hit.className || hit.tagName || null) : null,
+        weighState: 'REVIEW_EDIT'
+      });
+    } catch (_) {}
+  };
+  saveEditDiag('SAVE_EDIT_HIT_TEST');
+  if (saveEditButton) {
+    saveEditButton.addEventListener('pointerdown', () => saveEditDiag('SAVE_EDIT_POINTER_DOWN'), { capture: true });
+    saveEditButton.addEventListener('click', () => saveEditDiag('SAVE_EDIT_CLICK'), { capture: true });
+  }
+  if (saveEditButton) saveEditButton.addEventListener('click', () => onDraftEditSave(ce, form));
   form.querySelector('.de-delete').addEventListener('click', () => onDraftDelete(ce));
 }
 
 function onDraftEditSave(ce, form) {
+  try { bluefyBarbackDiagRecord({ flow: 'SAVE_EDIT_HANDLER_ENTER', lookupFunction: 'onDraftEditSave', lookupFields: 'draft edit validation/save', matchResult: 'OBSERVATION', weighState: 'REVIEW_EDIT' }); } catch (_) {}
   const arr = Drafts.load();
   const i = arr.findIndex(x => x.client_event_id === ce);
   if (i < 0) { statusOn('review-status', 'Draft not found', 'err'); return; }
