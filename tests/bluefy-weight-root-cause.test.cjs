@@ -64,3 +64,134 @@ test('WEIGH replacement path atomically arms replacement and records state trans
   assert.match(begin, /afterSetPickedItemId/);
   assert.match(begin, /finally \{ phase1ReplacementArmed = false; \}/);
 });
+
+test('Settings barcode save paths preserve the entered barcode as a string', () => {
+  const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(adminSource, /const sku\s*=\s*document\.getElementById\('m-sku'\)\.value\.trim\(\) \|\| null/);
+  assert.match(adminSource, /sku:\s*document\.getElementById\('m-sku'\)\.value\.trim\(\) \|\| null/);
+  assert.match(adminSource, /sku:\s*\(r\.sku \|\| r\.barcode \|\| r\.upc \|\| ''\)\.trim\(\) \|\| null/);
+  assert.doesNotMatch(adminSource, /(?:Number|parseInt|parseFloat)\([^)]*(?:m-sku|r\.sku|r\.barcode|r\.upc)/);
+});
+
+test('UPC-A Jameson raw barcode aliases the stored EAN-13 leading-zero form', () => {
+  const raw = '080432500170';
+  const stored = '0080432500170';
+  const digits = value => String(value).trim().replace(/[^0-9]/g, '');
+  const variants = value => {
+    const d = digits(value);
+    const out = new Set([String(value).trim(), d]);
+    if (d.length === 12) out.add('0' + d);
+    if (d.length === 13 && d.startsWith('0')) out.add(d.slice(1));
+    return out;
+  };
+  assert.equal(digits(raw), raw);
+  assert.equal(digits(stored), stored);
+  assert.ok(variants(raw).has(stored));
+  assert.ok(variants(stored).has(raw));
+});
+
+test('WEIGH uses the resolver item object without a second barcode equality gate', () => {
+  const beginStart = source.indexOf('function beginWeighPending(it)');
+  const renderEnd = source.indexOf('// ════════════════════════════════════════════════════════════════════', beginStart + 1);
+  assert.ok(beginStart >= 0 && renderEnd > beginStart);
+  const weighPath = source.slice(beginStart, renderEnd);
+  assert.match(weighPath, /phase1WeighPendingItem = it/);
+  assert.match(weighPath, /setPickedItem\(it, 'scan'\)/);
+  assert.doesNotMatch(weighPath, /(?:barcode|code|sku)\s*===/i);
+  assert.doesNotMatch(weighPath, /(?:===|==)\s*(?:barcode|code|sku)/i);
+  assert.match(source, /phase1WeighPendingItem = it[\s\S]*?setPickedItem\(it, 'scan'\)/);
+});
+
+test('deterministic WEIGH alias path replaces each prior item with the newest match', () => {
+  const items = [
+    { id: 'casamigos', name: 'CASAMIGOS', sku: '0652341401031' },
+    { id: 'jameson', name: 'JAMESON 0.750', sku: '0080432500170' },
+  ];
+  const normalize = value => String(value).trim().replace(/[^0-9]/g, '');
+  const aliases = value => {
+    const d = normalize(value);
+    const out = new Set([d]);
+    if (d.length === 12) out.add('0' + d);
+    if (d.length === 13 && d.startsWith('0')) out.add(d.slice(1));
+    return out;
+  };
+  const resolve = raw => {
+    const candidates = aliases(raw);
+    const matches = items.filter(item => [...aliases(item.sku)].some(v => candidates.has(v)));
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const applyWeighMatch = (state, raw) => {
+    const matched = resolve(raw);
+    assert.ok(matched);
+    return {
+      matched,
+      selected: matched,
+      pending: matched,
+      displayed: matched,
+    };
+  };
+  let weigh = applyWeighMatch({}, '652341401031');
+  assert.equal(weigh.matched.id, 'casamigos');
+  assert.equal(weigh.selected.id, 'casamigos');
+  assert.equal(weigh.pending.id, 'casamigos');
+  assert.equal(weigh.displayed.id, 'casamigos');
+  weigh = applyWeighMatch(weigh, '080432500170');
+  assert.equal(weigh.matched.id, 'jameson');
+  assert.equal(weigh.selected.id, 'jameson');
+  assert.equal(weigh.pending.id, 'jameson');
+  assert.equal(weigh.displayed.id, 'jameson');
+  assert.equal(weigh.matched.name, 'JAMESON 0.750');
+  assert.notEqual(weigh.selected.id, 'casamigos');
+  weigh = applyWeighMatch(weigh, '080432500170');
+  assert.equal(weigh.selected.id, 'jameson');
+});
+
+test('BARCODE_RESOLUTION selectedItem diagnostics read live state, not matchedItem fallback', () => {
+  const start = source.indexOf("flow: 'BARCODE_RESOLUTION'");
+  const end = source.indexOf("});", start);
+  assert.ok(start >= 0 && end > start);
+  const event = source.slice(start, end);
+  assert.match(event, /selectedItem: state\.selectedItemId \?/);
+  assert.doesNotMatch(event, /selectedItem: it,/);
+});
+
+test('WEIGH diagnostics cover dispatch, state entry/exit, render, and actual DOM fields', () => {
+  for (const flow of [
+    'WEIGH_MATCH_DISPATCH',
+    'WEIGH_BEGIN_ENTER',
+    'WEIGH_SET_PICKED_ENTER',
+    'WEIGH_SET_PICKED_EXIT',
+    'WEIGH_RENDER_ENTER',
+    'WEIGH_RENDER_EXIT',
+    'WEIGH_DOM_NEXT_FRAME',
+  ]) assert.match(source, new RegExp(flow));
+  assert.match(source, /document\.getElementById\('phase1-weigh-item'\)/);
+  assert.match(source, /document\.getElementById\('phase1-pending-item'\)/);
+  assert.match(source, /displayText: safeDisplayText\(displayEl\)/);
+  assert.match(source, /displayHidden:/);
+  assert.match(source, /displayValue:/);
+});
+
+test('deterministic WEIGH DOM replacement cannot leave the prior visible bottle', () => {
+  const dom = { 'phase1-weigh-item': { textContent: '' } };
+  const state = { selectedItemId: null, selectedItemName: null, pendingItem: null };
+  const renderWeighItem = item => {
+    state.selectedItemId = item.id;
+    state.selectedItemName = item.name;
+    state.pendingItem = item;
+    dom['phase1-weigh-item'].textContent = item && item.name ? 'Scanned: ' + item.name : 'Scanned item';
+  };
+  const casamigos = { id: 'casamigos', name: 'CASAMIGOS BLANCO' };
+  const gordons = { id: 'gordons', name: "GORDON'S DRY GIN" };
+  const jameson = { id: 'jameson', name: 'JAMESON 0.750' };
+  renderWeighItem(casamigos);
+  renderWeighItem(gordons);
+  assert.equal(state.selectedItemName, gordons.name);
+  assert.equal(state.pendingItem.name, gordons.name);
+  assert.match(dom['phase1-weigh-item'].textContent, /GORDON'S DRY GIN/);
+  renderWeighItem(jameson);
+  assert.equal(state.selectedItemName, jameson.name);
+  assert.equal(state.pendingItem.name, jameson.name);
+  assert.match(dom['phase1-weigh-item'].textContent, /JAMESON 0\.750/);
+  assert.doesNotMatch(dom['phase1-weigh-item'].textContent, /GORDON/);
+});
