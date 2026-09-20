@@ -195,3 +195,51 @@ test('deterministic WEIGH DOM replacement cannot leave the prior visible bottle'
   assert.match(dom['phase1-weigh-item'].textContent, /JAMESON 0\.750/);
   assert.doesNotMatch(dom['phase1-weigh-item'].textContent, /GORDON/);
 });
+
+test('beginWeighPending has no silent return before setPickedItem and emits branch checkpoints', () => {
+  const start = source.indexOf('function beginWeighPending(it)');
+  const setCall = source.indexOf("setPickedItem(it, 'scan')", start);
+  assert.ok(start >= 0 && setCall > start);
+  const beforeSet = source.slice(start, setCall);
+  assert.doesNotMatch(beforeSet, /\breturn\b/);
+  for (const flow of [
+    'WEIGH_BEGIN_CHECK_PENDING_ASSIGN',
+    'WEIGH_BEGIN_CHECK_DOM_LOOKUP',
+    'WEIGH_BEGIN_CHECK_DISPLAY_ASSIGN',
+    'WEIGH_BEGIN_CHECK_WEIGHT_DEFAULT',
+    'WEIGH_BEGIN_CHECK_FORM_ASSIGN',
+    'WEIGH_BEGIN_BEFORE_SET_PICKED',
+  ]) assert.match(beforeSet, new RegExp(flow));
+  assert.match(beforeSet, /phase1WeighPendingItem = it/);
+  assert.match(beforeSet, /phase1ReplacementArmed = !!/);
+});
+
+test('WEIGH replacement model reaches the newest item for existing and empty selection', () => {
+  const applyBegin = (state, matched) => {
+    const pending = matched;
+    const replacementArmed = !!(state.pendingId && state.selectedId && state.selectedId !== matched.id);
+    assert.equal(typeof replacementArmed, 'boolean');
+    return { selectedId: matched.id, selectedName: matched.name, pendingId: pending.id, pendingName: pending.name };
+  };
+  const grey = { id: 'grey', name: 'GREY GOOSE' };
+  const casamigos = { id: 'casamigos', name: 'CASAMIGOS BLANCO' };
+  assert.deepEqual(applyBegin({ selectedId: grey.id, pendingId: grey.id }, casamigos), {
+    selectedId: casamigos.id, selectedName: casamigos.name, pendingId: casamigos.id, pendingName: casamigos.name,
+  });
+  assert.deepEqual(applyBegin({ selectedId: null, pendingId: null }, grey), {
+    selectedId: grey.id, selectedName: grey.name, pendingId: grey.id, pendingName: grey.name,
+  });
+});
+
+test('selected and pending state writers are explicit', () => {
+  const pickedStart = source.indexOf('function setPickedItem(it, source)');
+  const pickedEnd = source.indexOf('// ════════════════════════════════════════════════════════════════════', pickedStart + 1);
+  const picked = source.slice(pickedStart, pickedEnd);
+  assert.match(picked, /state\.selectedItemId = it\.id/);
+  assert.match(picked, /state\.selectedItemName = it\.name/);
+  const markStart = source.indexOf('function phase1MarkPendingSelection(it, source)');
+  const markEnd = source.indexOf('function phase1AllowItemReplacement', markStart);
+  const mark = source.slice(markStart, markEnd);
+  assert.match(mark, /phase1PendingItemId = it && it\.id/);
+  assert.match(mark, /phase1PendingItemName = \(it && it\.name\)/);
+});

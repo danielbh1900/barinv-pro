@@ -1991,21 +1991,32 @@ function beginWeighPending(it) {
   const previousSelectedItemName = state.selectedItemName;
   try { if (typeof bluefyBarbackDiagWeighState === 'function') bluefyBarbackDiagWeighState('WEIGH_BEGIN_ENTER', it); } catch (_) {}
   phase1WeighPendingItem = it;
+  bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_PENDING_ASSIGN', it, phase1WeighPendingItem === it);
   rapidScanBusy = true;
   const card = $('phase1-weigh-pending');
   const item = $('phase1-weigh-item');
   const timeout = $('phase1-weigh-timeout');
+  bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_DOM_LOOKUP', it, !!(card && item && timeout));
   if (item) item.textContent = it && it.name ? 'Scanned: ' + it.name : 'Scanned item';
+  bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_DISPLAY_ASSIGN', it, !item || item.textContent === (it && it.name ? 'Scanned: ' + it.name : 'Scanned item'));
   if (timeout) timeout.style.display = 'none';
   if (card) card.classList.add('active');
   phase1MeasureUnit = 'WEIGHT';
-  phase1EnsureWeightQuantityDefault();
+  try {
+    phase1EnsureWeightQuantityDefault();
+    bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_WEIGHT_DEFAULT', it, true);
+  } catch (error) {
+    bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_BLOCK_WEIGHT_DEFAULT_EXCEPTION', it, false, error);
+    throw error;
+  }
   var bottleState = $('bottle-state-select');
   if (bottleState) bottleState.value = 'PARTIAL';
   var notes = $('notes-input');
   if (notes) notes.value = '';
+  bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_FORM_ASSIGN', it, (!bottleState || bottleState.value === 'PARTIAL') && (!notes || notes.value === ''));
   try { bluefyBarbackDiagRecord({ flow: 'WEIGH_BEGIN_PENDING', lookupFunction: 'beginWeighPending', lookupFields: 'phase1WeighPendingItem then setPickedItem', matchResult: 'MATCH', matchedItem: it, previousSelectedItemId, previousSelectedItemName, afterLookupSelectedItemId: state.selectedItemId, afterLookupSelectedItemName: state.selectedItemName, afterBeginWeighPendingItemId: phase1WeighPendingItem && phase1WeighPendingItem.id, afterBeginWeighPendingItemName: phase1WeighPendingItem && phase1WeighPendingItem.name, displayedWeighItemId: it && it.id, displayedWeighItemName: it && it.name, weighState: 'PENDING_BEFORE_SET_PICKED' }); } catch (_) {}
   phase1ReplacementArmed = !!(phase1PendingItemId && state.selectedItemId && state.selectedItemId !== (it && it.id));
+  bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_BEFORE_SET_PICKED', it, true);
   try { setPickedItem(it, 'scan'); } catch (_) {} finally { phase1ReplacementArmed = false; }
   try { bluefyBarbackDiagRecord({ flow: 'WEIGH_AFTER_SET_PICKED', lookupFunction: 'setPickedItem', lookupFields: 'state.selectedItemId/state.selectedItemName', matchResult: 'MATCH', matchedItem: it, previousSelectedItemId, previousSelectedItemName, afterLookupSelectedItemId: state.selectedItemId, afterLookupSelectedItemName: state.selectedItemName, afterBeginWeighPendingItemId: phase1WeighPendingItem && phase1WeighPendingItem.id, afterBeginWeighPendingItemName: phase1WeighPendingItem && phase1WeighPendingItem.name, afterSetPickedItemId: state.selectedItemId, afterSetPickedItemName: state.selectedItemName, displayedWeighItemId: it && it.id, displayedWeighItemName: it && it.name, weighState: 'WAITING_FOR_WEIGHT' }); } catch (_) {}
   try { if (typeof bluefyBarbackDiagWeighState === 'function') bluefyBarbackDiagWeighState('WEIGH_AFTER_SET_PICKED', it); } catch (_) {}
@@ -3038,11 +3049,28 @@ function bluefyBarbackDiagWeighState(flow, matchedItem) {
     });
   } catch (_) { return null; }
 }
+function bluefyBarbackDiagWeighBegin(flow, matchedItem, conditionResult, error) {
+  try {
+    return bluefyBarbackDiagRecord({
+      flow,
+      matchedItem,
+      matchedItemId: matchedItem && matchedItem.id,
+      matchedItemName: matchedItem && matchedItem.name,
+      stateSelectedItemId: state.selectedItemId,
+      stateSelectedItemName: state.selectedItemName,
+      pendingItemId: phase1PendingItemId,
+      pendingItemName: phase1PendingItemName,
+      conditionResult,
+      error: error ? String(error && error.message || error).slice(0, 180) : null,
+      weighState: phase1WeighPendingItem ? 'WAITING_FOR_WEIGHT' : 'BEGIN_PENDING'
+    });
+  } catch (_) { return null; }
+}
 function bluefyBarbackDiagRecord(fields) {
   const items = Array.isArray(cache.items) ? cache.items : [];
   const scale = bluefyBarbackDiagScale();
   const mode = resolveScanWorkflow();
-  const entry = { time: new Date().toISOString(), runtime: 'BLUEFY_BARBACK_WEB', buildId: BLUEFY_BARBACK_DIAG_BUILD_ID, flow: fields.flow || 'UNKNOWN', rawBarcode: fields.rawBarcode == null ? null : String(fields.rawBarcode), lookupBarcode: fields.lookupBarcode == null ? (fields.rawBarcode == null ? null : String(fields.rawBarcode)) : String(fields.lookupBarcode), catalogLength: items.length, lookupFunction: fields.lookupFunction || 'UNKNOWN', lookupFields: fields.lookupFields || 'UNKNOWN', exactMatchCount: fields.exactMatchCount == null ? null : Number(fields.exactMatchCount), matchResult: fields.matchResult || 'UNKNOWN', matchedItem: bluefyBarbackDiagSafeItem(fields.matchedItem), selectedItem: bluefyBarbackDiagSafeItem(fields.selectedItem || (state.selectedItemId ? items.find(item => item.id === state.selectedItemId) : null)), previousSelectedItemId: fields.previousSelectedItemId == null ? null : String(fields.previousSelectedItemId), previousSelectedItemName: fields.previousSelectedItemName == null ? null : String(fields.previousSelectedItemName), afterLookupSelectedItemId: fields.afterLookupSelectedItemId == null ? null : String(fields.afterLookupSelectedItemId), afterLookupSelectedItemName: fields.afterLookupSelectedItemName == null ? null : String(fields.afterLookupSelectedItemName), afterBeginWeighPendingItemId: fields.afterBeginWeighPendingItemId == null ? null : String(fields.afterBeginWeighPendingItemId), afterBeginWeighPendingItemName: fields.afterBeginWeighPendingItemName == null ? null : String(fields.afterBeginWeighPendingItemName), afterSetPickedItemId: fields.afterSetPickedItemId == null ? null : String(fields.afterSetPickedItemId), afterSetPickedItemName: fields.afterSetPickedItemName == null ? null : String(fields.afterSetPickedItemName), displayedWeighItemId: fields.displayedWeighItemId == null ? null : String(fields.displayedWeighItemId), displayedWeighItemName: fields.displayedWeighItemName == null ? null : String(fields.displayedWeighItemName), matchedItemId: fields.matchedItemId == null ? null : String(fields.matchedItemId), matchedItemName: fields.matchedItemName == null ? null : String(fields.matchedItemName), stateSelectedItemId: fields.stateSelectedItemId == null ? null : String(fields.stateSelectedItemId), stateSelectedItemName: fields.stateSelectedItemName == null ? null : String(fields.stateSelectedItemName), pendingItemId: fields.pendingItemId == null ? null : String(fields.pendingItemId), pendingItemName: fields.pendingItemName == null ? null : String(fields.pendingItemName), displayElementId: fields.displayElementId == null ? null : String(fields.displayElementId), displayText: fields.displayText == null ? null : String(fields.displayText), displayHidden: fields.displayHidden == null ? null : !!fields.displayHidden, displayValue: fields.displayValue == null ? null : String(fields.displayValue), mode, weighState: fields.weighState || (phase1WeighPendingItem ? 'WAITING_FOR_WEIGHT' : 'IDLE'), bleConnected: fields.bleConnected == null ? scale.connected : !!fields.bleConnected, latestWeight: fields.latestWeight == null ? scale.latestWeight : Number(fields.latestWeight), error: fields.error ? String(fields.error).slice(0, 180) : null };
+  const entry = { time: new Date().toISOString(), runtime: 'BLUEFY_BARBACK_WEB', buildId: BLUEFY_BARBACK_DIAG_BUILD_ID, flow: fields.flow || 'UNKNOWN', rawBarcode: fields.rawBarcode == null ? null : String(fields.rawBarcode), lookupBarcode: fields.lookupBarcode == null ? (fields.rawBarcode == null ? null : String(fields.rawBarcode)) : String(fields.lookupBarcode), catalogLength: items.length, lookupFunction: fields.lookupFunction || 'UNKNOWN', lookupFields: fields.lookupFields || 'UNKNOWN', exactMatchCount: fields.exactMatchCount == null ? null : Number(fields.exactMatchCount), matchResult: fields.matchResult || 'UNKNOWN', matchedItem: bluefyBarbackDiagSafeItem(fields.matchedItem), selectedItem: bluefyBarbackDiagSafeItem(fields.selectedItem || (state.selectedItemId ? items.find(item => item.id === state.selectedItemId) : null)), previousSelectedItemId: fields.previousSelectedItemId == null ? null : String(fields.previousSelectedItemId), previousSelectedItemName: fields.previousSelectedItemName == null ? null : String(fields.previousSelectedItemName), afterLookupSelectedItemId: fields.afterLookupSelectedItemId == null ? null : String(fields.afterLookupSelectedItemId), afterLookupSelectedItemName: fields.afterLookupSelectedItemName == null ? null : String(fields.afterLookupSelectedItemName), afterBeginWeighPendingItemId: fields.afterBeginWeighPendingItemId == null ? null : String(fields.afterBeginWeighPendingItemId), afterBeginWeighPendingItemName: fields.afterBeginWeighPendingItemName == null ? null : String(fields.afterBeginWeighPendingItemName), afterSetPickedItemId: fields.afterSetPickedItemId == null ? null : String(fields.afterSetPickedItemId), afterSetPickedItemName: fields.afterSetPickedItemName == null ? null : String(fields.afterSetPickedItemName), displayedWeighItemId: fields.displayedWeighItemId == null ? null : String(fields.displayedWeighItemId), displayedWeighItemName: fields.displayedWeighItemName == null ? null : String(fields.displayedWeighItemName), matchedItemId: fields.matchedItemId == null ? null : String(fields.matchedItemId), matchedItemName: fields.matchedItemName == null ? null : String(fields.matchedItemName), stateSelectedItemId: fields.stateSelectedItemId == null ? null : String(fields.stateSelectedItemId), stateSelectedItemName: fields.stateSelectedItemName == null ? null : String(fields.stateSelectedItemName), pendingItemId: fields.pendingItemId == null ? null : String(fields.pendingItemId), pendingItemName: fields.pendingItemName == null ? null : String(fields.pendingItemName), conditionResult: fields.conditionResult == null ? null : !!fields.conditionResult, displayElementId: fields.displayElementId == null ? null : String(fields.displayElementId), displayText: fields.displayText == null ? null : String(fields.displayText), displayHidden: fields.displayHidden == null ? null : !!fields.displayHidden, displayValue: fields.displayValue == null ? null : String(fields.displayValue), mode, weighState: fields.weighState || (phase1WeighPendingItem ? 'WAITING_FOR_WEIGHT' : 'IDLE'), bleConnected: fields.bleConnected == null ? scale.connected : !!fields.bleConnected, latestWeight: fields.latestWeight == null ? scale.latestWeight : Number(fields.latestWeight), error: fields.error ? String(fields.error).slice(0, 180) : null };
   BLUEFY_BARBACK_DIAG.history.push(entry);
   while (BLUEFY_BARBACK_DIAG.history.length > BLUEFY_BARBACK_DIAG_HISTORY_LIMIT) BLUEFY_BARBACK_DIAG.history.shift();
   window.__BARINV_BLUEFY_BARBACK_DIAGNOSTICS = BLUEFY_BARBACK_DIAG.history.slice();
