@@ -1992,7 +1992,7 @@ function beginWeighPending(it) {
   try { if (typeof bluefyBarbackDiagWeighState === 'function') bluefyBarbackDiagWeighState('WEIGH_BEGIN_ENTER', it); } catch (_) {}
   phase1WeighPendingItem = it;
   bluefyBarbackDiagWeighBegin('WEIGH_BEGIN_CHECK_PENDING_ASSIGN', it, phase1WeighPendingItem === it);
-  rapidScanBusy = true;
+  state.rapidScanBusy = true;
   const card = $('phase1-weigh-pending');
   const item = $('phase1-weigh-item');
   const timeout = $('phase1-weigh-timeout');

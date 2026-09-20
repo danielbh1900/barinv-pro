@@ -286,3 +286,33 @@ test('diagnostic classification distinguishes true, false, and exception outcome
   assert.deepEqual(classify(() => false), { flow: 'WEIGH_SET_PICKED_RESULT', matchResult: 'BLOCKED', conditionResult: false });
   assert.deepEqual(classify(() => { throw new TypeError('probe'); }), { flow: 'WEIGH_SET_PICKED_EXCEPTION', matchResult: 'ERROR', conditionResult: false, error: 'TypeError: probe' });
 });
+
+test('WEIGH begin uses the declared state rapid-scan flag', () => {
+  const start = source.indexOf('function beginWeighPending(it)');
+  const end = source.indexOf('function weighPendingMarkUnopened', start);
+  const begin = source.slice(start, end);
+  assert.match(begin, /state\.rapidScanBusy = true/);
+  assert.doesNotMatch(begin, /(^|[^.\w])rapidScanBusy\s*=\s*true/);
+  assert.match(source, /rapidScanBusy:\s*false/);
+});
+
+test('WEIGH state handoff replaces null and prior selections with newest matches', () => {
+  const transition = (previous, matched) => ({
+    selected: matched,
+    pending: matched,
+    displayed: matched,
+    rapidScanBusy: true,
+    previous,
+  });
+  const gordon = { id: 'gordon', name: "GORDON'S DRY GIN" };
+  const hennessy = { id: 'hennessy', name: 'HENNESSY VS' };
+  const first = transition(null, gordon);
+  assert.equal(first.selected.id, 'gordon');
+  assert.equal(first.pending.id, 'gordon');
+  assert.equal(first.displayed.id, 'gordon');
+  const second = transition(first.selected, hennessy);
+  assert.equal(second.selected.id, 'hennessy');
+  assert.equal(second.pending.id, 'hennessy');
+  assert.equal(second.displayed.id, 'hennessy');
+  assert.notEqual(second.selected.id, 'gordon');
+});
