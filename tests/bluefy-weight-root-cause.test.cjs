@@ -62,7 +62,7 @@ test('WEIGH replacement path atomically arms replacement and records state trans
   assert.match(begin, /setPickedItem\(it, 'scan'\)/);
   assert.match(begin, /afterBeginWeighPendingItemId/);
   assert.match(begin, /afterSetPickedItemId/);
-  assert.match(begin, /finally \{ phase1ReplacementArmed = false; \}/);
+  assert.match(begin, /finally \{\s*phase1ReplacementArmed = false;\s*\}/);
 });
 
 test('Settings barcode save paths preserve the entered barcode as a string', () => {
@@ -242,4 +242,47 @@ test('selected and pending state writers are explicit', () => {
   const mark = source.slice(markStart, markEnd);
   assert.match(mark, /phase1PendingItemId = it && it\.id/);
   assert.match(mark, /phase1PendingItemName = \(it && it\.name\)/);
+});
+
+test('WEIGH captures the real setPickedItem return value without changing guards', () => {
+  const start = source.indexOf('function beginWeighPending(it)');
+  const end = source.indexOf('function weighPendingMarkUnopened', start);
+  assert.ok(start >= 0 && end > start);
+  const begin = source.slice(start, end);
+  assert.match(begin, /flow: 'WEIGH_BEFORE_SET_PICKED'/);
+  assert.match(begin, /accepted = setPickedItem\(it, 'scan'\)/);
+  assert.match(begin, /flow: 'WEIGH_SET_PICKED_RESULT'/);
+  assert.match(begin, /conditionResult: accepted === true/);
+  assert.match(begin, /matchResult: accepted \? 'MATCH' : 'BLOCKED'/);
+});
+
+test('WEIGH records and rethrows setPickedItem exceptions', () => {
+  const start = source.indexOf('function beginWeighPending(it)');
+  const end = source.indexOf('function weighPendingMarkUnopened', start);
+  const begin = source.slice(start, end);
+  assert.match(begin, /flow: 'WEIGH_SET_PICKED_EXCEPTION'/);
+  assert.match(begin, /matchResult: 'ERROR'/);
+  assert.match(begin, /error: String\(\(error && error\.name\)/);
+  assert.match(begin, /throw error;/);
+  assert.doesNotMatch(begin, /catch \(_\) \{\} finally \{ phase1ReplacementArmed = false; \}/);
+});
+
+test('WEIGH result diagnostics include live state and visible item text', () => {
+  assert.match(source, /displayText: \(\(\$\('phase1-weigh-item'\)/);
+  assert.match(source, /flow: 'WEIGH_SET_PICKED_RESULT'[\s\S]*displayElementId: 'phase1-weigh-item'/);
+  assert.match(source, /conditionResult: fields\.conditionResult == null \? null : !!fields\.conditionResult/);
+});
+
+test('diagnostic classification distinguishes true, false, and exception outcomes', () => {
+  const classify = operation => {
+    try {
+      const accepted = operation();
+      return { flow: 'WEIGH_SET_PICKED_RESULT', matchResult: accepted ? 'MATCH' : 'BLOCKED', conditionResult: accepted === true };
+    } catch (error) {
+      return { flow: 'WEIGH_SET_PICKED_EXCEPTION', matchResult: 'ERROR', conditionResult: false, error: error.name + ': ' + error.message };
+    }
+  };
+  assert.deepEqual(classify(() => true), { flow: 'WEIGH_SET_PICKED_RESULT', matchResult: 'MATCH', conditionResult: true });
+  assert.deepEqual(classify(() => false), { flow: 'WEIGH_SET_PICKED_RESULT', matchResult: 'BLOCKED', conditionResult: false });
+  assert.deepEqual(classify(() => { throw new TypeError('probe'); }), { flow: 'WEIGH_SET_PICKED_EXCEPTION', matchResult: 'ERROR', conditionResult: false, error: 'TypeError: probe' });
 });
