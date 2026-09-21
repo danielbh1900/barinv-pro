@@ -2509,24 +2509,12 @@ const cache = { venues:[], items:[], bars:[], nights:[], staff:[], venueId:null,
 // applyBundle(b) overwrites; loadProductionCache() falls back.
 function applyBundle(bundle, venueId) {
   if (!bundle) return false;
-  barSelectorTrace('APPLY_BUNDLE_BEFORE', {
-    bundleBarsCount: Array.isArray(bundle.bars) ? bundle.bars.length : 0,
-    bundleBarIds: Array.isArray(bundle.bars) ? bundle.bars.map(b => b && b.id).filter(Boolean).map(String) : [],
-    cacheBarsCountBefore: Array.isArray(cache.bars) ? cache.bars.length : 0,
-    cacheSourceBefore: cache.source || null
-  });
   cache.items  = bundle.items || [];
   cache.bars   = (bundle.bars || []).filter(b => b.active !== false);
   cache.staff  = bundle.staff || [];
   cache.nights = bundle.nights || cache.nights || [];
   if (venueId) cache.venueId = venueId;
   cache.source = 'phase3';
-  barSelectorTrace('APPLY_BUNDLE_AFTER', {
-    cacheBarsCountAfter: cache.bars.length,
-    activeCacheBarsCount: cache.bars.filter(b => b.active !== false).length,
-    cacheBarIds: cache.bars.map(b => b && b.id).filter(Boolean).map(String),
-    cacheSourceAfter: cache.source
-  });
   return true;
 }
 function loadProductionCache() {
@@ -2547,14 +2535,6 @@ function loadProductionCache() {
       cache.source = 'localStorage';
     }
   }
-  barSelectorTrace('CACHE_LOAD', {
-    cacheSource: cache.source || null,
-    cacheVenueId: cache.venueId || null,
-    cacheBarsCount: Array.isArray(cache.bars) ? cache.bars.length : 0,
-    activeCacheBarsCount: Array.isArray(cache.bars) ? cache.bars.filter(b => b.active !== false).length : 0,
-    cacheBarIds: Array.isArray(cache.bars) ? cache.bars.map(b => b && b.id).filter(Boolean).map(String) : [],
-    cacheLoadReturned: !!(cache.venueId && cache.items.length)
-  });
   return !!(cache.venueId && cache.items.length);
 }
 
@@ -3101,19 +3081,12 @@ function bluefyBarbackDiagRecord(fields) {
   const scale = bluefyBarbackDiagScale();
   const mode = resolveScanWorkflow();
   const entry = { time: new Date().toISOString(), runtime: 'BLUEFY_BARBACK_WEB', buildId: BLUEFY_BARBACK_DIAG_BUILD_ID, flow: fields.flow || 'UNKNOWN', rawBarcode: fields.rawBarcode == null ? null : String(fields.rawBarcode), lookupBarcode: fields.lookupBarcode == null ? (fields.rawBarcode == null ? null : String(fields.rawBarcode)) : String(fields.lookupBarcode), catalogLength: items.length, lookupFunction: fields.lookupFunction || 'UNKNOWN', lookupFields: fields.lookupFields || 'UNKNOWN', exactMatchCount: fields.exactMatchCount == null ? null : Number(fields.exactMatchCount), matchResult: fields.matchResult || 'UNKNOWN', matchedItem: bluefyBarbackDiagSafeItem(fields.matchedItem), selectedItem: bluefyBarbackDiagSafeItem(fields.selectedItem || (state.selectedItemId ? items.find(item => item.id === state.selectedItemId) : null)), previousSelectedItemId: fields.previousSelectedItemId == null ? null : String(fields.previousSelectedItemId), previousSelectedItemName: fields.previousSelectedItemName == null ? null : String(fields.previousSelectedItemName), afterLookupSelectedItemId: fields.afterLookupSelectedItemId == null ? null : String(fields.afterLookupSelectedItemId), afterLookupSelectedItemName: fields.afterLookupSelectedItemName == null ? null : String(fields.afterLookupSelectedItemName), afterBeginWeighPendingItemId: fields.afterBeginWeighPendingItemId == null ? null : String(fields.afterBeginWeighPendingItemId), afterBeginWeighPendingItemName: fields.afterBeginWeighPendingItemName == null ? null : String(fields.afterBeginWeighPendingItemName), afterSetPickedItemId: fields.afterSetPickedItemId == null ? null : String(fields.afterSetPickedItemId), afterSetPickedItemName: fields.afterSetPickedItemName == null ? null : String(fields.afterSetPickedItemName), displayedWeighItemId: fields.displayedWeighItemId == null ? null : String(fields.displayedWeighItemId), displayedWeighItemName: fields.displayedWeighItemName == null ? null : String(fields.displayedWeighItemName), matchedItemId: fields.matchedItemId == null ? null : String(fields.matchedItemId), matchedItemName: fields.matchedItemName == null ? null : String(fields.matchedItemName), stateSelectedItemId: fields.stateSelectedItemId == null ? null : String(fields.stateSelectedItemId), stateSelectedItemName: fields.stateSelectedItemName == null ? null : String(fields.stateSelectedItemName), pendingItemId: fields.pendingItemId == null ? null : String(fields.pendingItemId), pendingItemName: fields.pendingItemName == null ? null : String(fields.pendingItemName), conditionResult: fields.conditionResult == null ? null : !!fields.conditionResult, displayElementId: fields.displayElementId == null ? null : String(fields.displayElementId), displayText: fields.displayText == null ? null : String(fields.displayText), displayHidden: fields.displayHidden == null ? null : !!fields.displayHidden, displayValue: fields.displayValue == null ? null : String(fields.displayValue), mode, weighState: fields.weighState || (phase1WeighPendingItem ? 'WAITING_FOR_WEIGHT' : 'IDLE'), bleConnected: fields.bleConnected == null ? scale.connected : !!fields.bleConnected, latestWeight: fields.latestWeight == null ? scale.latestWeight : Number(fields.latestWeight), error: fields.error ? String(fields.error).slice(0, 180) : null };
-  if (fields.barSelectorTrace) entry.barSelectorTrace = fields.barSelectorTrace;
   BLUEFY_BARBACK_DIAG.history.push(entry);
   while (BLUEFY_BARBACK_DIAG.history.length > BLUEFY_BARBACK_DIAG_HISTORY_LIMIT) BLUEFY_BARBACK_DIAG.history.shift();
   window.__BARINV_BLUEFY_BARBACK_DIAGNOSTICS = BLUEFY_BARBACK_DIAG.history.slice();
   bluefyBarbackDiagRender();
   try { console.info('[BLUEFY_BARBACK_DIAG]', JSON.stringify(entry)); } catch (_) {}
   return entry;
-}
-function barSelectorTrace(stage, details) {
-  try {
-    const d = details || {};
-    bluefyBarbackDiagRecord({ flow: 'BAR_SELECTOR_TRACE', barSelectorTrace: Object.assign({ stage: String(stage || 'UNKNOWN') }, d) });
-  } catch (_) {}
 }
 function bluefyBarbackDiagRender() { const output = document.getElementById('bluefy-barback-diag-output'); if (!output) return; output.textContent = BLUEFY_BARBACK_DIAG.history.length ? BLUEFY_BARBACK_DIAG.history.map((entry, index) => 'EVENT ' + (index + 1) + '\n' + JSON.stringify(entry, null, 2)).join('\n\n') : 'Waiting for a scan or scale event.'; }
 function toggleBluefyBarbackDiagnostics() { BLUEFY_BARBACK_DIAG.open = !BLUEFY_BARBACK_DIAG.open; const panel = document.getElementById('bluefy-barback-diag-panel'); if (panel) panel.classList.toggle('open', BLUEFY_BARBACK_DIAG.open); bluefyBarbackDiagRender(); }
@@ -3211,14 +3184,6 @@ function boot() {
 
   // Restore prior session if still valid
   const existing = Auth.loadSession();
-  barSelectorTrace('SESSION_RESTORE', {
-    persistedSessionFound: !!existing,
-    existingBundlePresent: !!(existing && existing.bundle),
-    serverSessionPresent: !!(existing && existing.server_session),
-    restoredSessionBarId: existing && existing.server_session && existing.server_session.bar_id || null,
-    restoredAllowedBarsCount: existing && existing.server_session && Array.isArray(existing.server_session.allowed_bars)
-      ? existing.server_session.allowed_bars.length : 0
-  });
   if (existing && existing.token_payload) {
     const re = Auth.decodeToken(buildTokenFromPayload(existing.token_payload));
     if (re.ok) {
@@ -3244,15 +3209,6 @@ function boot() {
         state.authPath     = 'phase3';
         Phase3.rehydrate(existing.scoped_jwt);
         if (existing.bundle) applyBundle(existing.bundle, existing.token_payload.venue_id);
-        else barSelectorTrace('SESSION_RESTORE_NO_BUNDLE', {
-          persistedSessionFound: true,
-          existingBundlePresent: false,
-          serverSessionPresent: !!state.serverSession,
-          restoredSessionBarId: state.serverSession && state.serverSession.bar_id || null,
-          restoredAllowedBarsCount: state.serverSession && Array.isArray(state.serverSession.allowed_bars)
-            ? state.serverSession.allowed_bars.length : 0,
-          cacheBarsCount: Array.isArray(cache.bars) ? cache.bars.length : 0
-        });
         startJwtKeepalive();
         startTelemetryHeartbeat();   // Phase 5
       } else {
@@ -3528,13 +3484,6 @@ function enterMain() {
   }
   renderWhoLine();
 
-  barSelectorTrace('ENTER_MAIN_BEFORE_RENDER', {
-    sessionBarsCount: sessionBars.length,
-    sessionBarIds: sessionBars.map(b => b && b.id).filter(Boolean).map(String),
-    chosenPrimaryBarId: _primary,
-    selectedBarId: state.selectedBarId || null,
-    barPickRowDisplay: $('bar-pick-row') ? $('bar-pick-row').style.display : null
-  });
   if (sessionBars.length > 1) {
     const sel = $('bar-pick');
     sel.innerHTML = sessionBars.map(b =>
@@ -3552,31 +3501,6 @@ function enterMain() {
     // already shows the locked-in bar name.
     $('bar-pick-row').style.display = 'none';
   }
-
-  const _barPick = $('bar-pick');
-  const _barPickRow = $('bar-pick-row');
-  barSelectorTrace('ENTER_MAIN_AFTER_RENDER', {
-    sessionBarsCount: sessionBars.length,
-    sessionBarIds: sessionBars.map(b => b && b.id).filter(Boolean).map(String),
-    chosenPrimaryBarId: _primary,
-    selectedBarId: state.selectedBarId || null,
-    optionCount: _barPick ? _barPick.options.length : 0,
-    optionValues: _barPick ? Array.from(_barPick.options).map(option => String(option.value)) : [],
-    selectedValue: _barPick ? String(_barPick.value || '') : null,
-    barPickRowDisplay: _barPickRow ? _barPickRow.style.display : null
-  });
-  const _barSelectorNextFrame = () => {
-    const pick = $('bar-pick');
-    const row = $('bar-pick-row');
-    barSelectorTrace('ENTER_MAIN_NEXT_FRAME', {
-      optionCount: pick ? pick.options.length : 0,
-      optionValues: pick ? Array.from(pick.options).map(option => String(option.value)) : [],
-      selectedValue: pick ? String(pick.value || '') : null,
-      barPickRowDisplay: row ? row.style.display : null
-    });
-  };
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(_barSelectorNextFrame);
-  else setTimeout(_barSelectorNextFrame, 0);
 
   // Multi-Destination UI — shown only for a barback session with >1
   // assigned bar; hidden in VIP/Table mode and single-bar sessions.
@@ -9000,26 +8924,12 @@ function getSessionAllowedAreaIds() {
   if (ssAllowed.size) {
     ssAllowed.forEach(id => ids.add(id));
     if (ss.bar_id) ids.add(ss.bar_id);
-    barSelectorTrace('SESSION_SCOPE', {
-      scopeSource: 'serverSession',
-      serverSessionBarId: ss.bar_id || null,
-      serverAllowedBarsCount: ssAllowed.size,
-      allowedScopeIds: Array.from(ids),
-      tokenFallbackUsed: false
-    });
     return ids;
   }
   // Fall back to the URL-token payload only when the server returned no scope.
   const p = (state && state.tokenPayload) || {};
   normalizeAllowedBars(p.allowed_bars).forEach(id => ids.add(id));
   if (p.bar_id) ids.add(p.bar_id);
-  barSelectorTrace('SESSION_SCOPE', {
-    scopeSource: 'tokenPayload',
-    serverSessionBarId: ss && ss.bar_id || null,
-    serverAllowedBarsCount: ssAllowed.size,
-    allowedScopeIds: Array.from(ids),
-    tokenFallbackUsed: true
-  });
   return ids;
 }
 function isAreaAllowedForSession(areaId) {
@@ -9029,17 +8939,6 @@ function isAreaAllowedForSession(areaId) {
 }
 function getAllowedDestinationsForCurrentSession() {
   const ids = getSessionAllowedAreaIds();
-  const barSelectorCacheBars = Array.isArray(cache.bars) ? cache.bars : [];
-  const barSelectorMatched = ids.size
-    ? barSelectorCacheBars.filter(b => b.active !== false && ids.has(b.id))
-    : [];
-  barSelectorTrace('DESTINATION_FILTER', {
-    allowedScopeIds: Array.from(ids),
-    cacheBarIds: barSelectorCacheBars.map(b => b && b.id).filter(Boolean).map(String),
-    cacheBarsCount: barSelectorCacheBars.length,
-    matchedDestinationIds: barSelectorMatched.map(b => b && b.id).filter(Boolean).map(String),
-    matchedDestinationCount: barSelectorMatched.length
-  });
   if (!ids.size) return [];
   return (cache.bars || []).filter(b => b.active !== false && ids.has(b.id));
 }
