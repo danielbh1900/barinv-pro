@@ -3196,7 +3196,8 @@ function bluefyDiagRecord(fields) {
     latestWeight: fields.latestWeight == null ? weigh.latestWeight : Number(fields.latestWeight),
     serviceWorkerController: sw.controller,
     cacheBuildMarker: sw.cacheMarker,
-    error: fields.error ? String(fields.error).slice(0, 180) : null
+    error: fields.error ? String(fields.error).slice(0, 180) : null,
+    submitBarTrace: fields.submitBarTrace || null
   };
   BLUEFY_DIAG.history.push(entry);
   while (BLUEFY_DIAG.history.length > BLUEFY_DIAG_HISTORY_LIMIT) BLUEFY_DIAG.history.shift();
@@ -3204,6 +3205,18 @@ function bluefyDiagRecord(fields) {
   bluefyDiagRender();
   try { console.info('[BLUEFY_DIAG]', JSON.stringify(entry)); } catch (_) {}
   return entry;
+}
+
+function submitBarTrace(stage, details) {
+  try {
+    const d = details || {};
+    bluefyDiagRecord({
+      flow: 'SUBMIT_BAR_TRACE',
+      lookupFunction: String(stage || 'UNKNOWN'),
+      lookupFields: 'SESSION.venueId/cache.bars/#ev-bar',
+      submitBarTrace: Object.assign({ stage: String(stage || 'UNKNOWN') }, d)
+    });
+  } catch (_) {}
 }
 
 function bluefyDiagCatalogMatches(code) {
@@ -4675,7 +4688,18 @@ async function preload() {
     SESSION.cache.staff      = staff.data || [];
     SESSION.cache.nights     = nights.data || [];
     SESSION.cache.placements = placements.data || [];
+    submitBarTrace('PRELOAD_BARS', {
+      venueId: SESSION.venueId || null,
+      barsQueryCount: Array.isArray(bars.data) ? bars.data.length : 0,
+      barsQueryError: bars.error ? { status: bars.error.status || null, message: String(bars.error.message || bars.error).slice(0, 180) } : null,
+      cacheBarsCount: SESSION.cache.bars.length,
+      bars: SESSION.cache.bars.map(b => ({ id: b && b.id != null ? String(b.id) : null, name: b && b.name != null ? String(b.name) : null, active: !!(b && b.active === true) }))
+    });
   } catch (e) {
+    submitBarTrace('PRELOAD_ERROR', {
+      venueId: SESSION.venueId || null,
+      barsQueryError: { status: e && e.status || null, message: String(e && e.message || e).slice(0, 180) }
+    });
     console.warn('Preload error:', e);
   }
 }
@@ -4816,6 +4840,13 @@ async function loadSubmitPage() {
   await preload();
 
   const { bars, stations, items, nights } = SESSION.cache;
+  const activeBars = bars.filter(b => b.active);
+  submitBarTrace('LOAD_SUBMIT', {
+    venueId: SESSION.venueId || null,
+    cacheBarsCount: bars.length,
+    activeBarsCount: activeBars.length,
+    activeBars: activeBars.map(b => ({ id: b && b.id != null ? String(b.id) : null, name: b && b.name != null ? String(b.name) : null }))
+  });
 
   // Night selector
   const nightSel = document.getElementById('ev-night');
@@ -4832,6 +4863,21 @@ async function loadSubmitPage() {
   const barSel = document.getElementById('ev-bar');
   barSel.innerHTML = '<option value="">— select bar —</option>' +
     bars.filter(b => b.active).map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
+  submitBarTrace('EV_BAR_RENDER', {
+    optionsLength: barSel.options.length,
+    optionValues: Array.from(barSel.options).map(option => String(option.value)),
+    selectedValue: String(barSel.value || '')
+  });
+  const submitBarNextFrame = () => {
+    const nextBarSel = document.getElementById('ev-bar');
+    submitBarTrace('NEXT_FRAME', {
+      optionsLength: nextBarSel ? nextBarSel.options.length : 0,
+      optionValues: nextBarSel ? Array.from(nextBarSel.options).map(option => String(option.value)) : [],
+      selectedValue: nextBarSel ? String(nextBarSel.value || '') : ''
+    });
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(submitBarNextFrame);
+  else setTimeout(submitBarNextFrame, 0);
 
   // Items
   populateItemSelect();
