@@ -1495,6 +1495,8 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-scan-button-row .btn { min-height:44px; }
 #staff-dashboard .staff-scan-action-modes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
 #staff-dashboard .staff-voice-guide { margin-top:10px; padding:10px; border:1px solid var(--border2); border-radius:10px; background:var(--s2); }
+#staff-dashboard .staff-dashboard-tools { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:16px; min-width:0; }
+#staff-dashboard .staff-dashboard-tools > * { min-width:0; margin-top:0 !important; }
 #staff-dashboard .staff-voice-row { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 #staff-dashboard .staff-voice-label { font:800 11px/1.2 'Fira Mono',monospace; letter-spacing:.04em; }
 #staff-dashboard .staff-voice-actions { display:flex; gap:7px; flex-wrap:wrap; }
@@ -1507,6 +1509,7 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-scan-mode-button.is-selected { border-color:var(--a); background:rgba(230,126,0,.16); box-shadow:inset 0 0 0 1px var(--a); }
 #staff-dashboard .staff-scan-mode-button:disabled { opacity:.42; cursor:not-allowed; }
 @media (max-width:520px) { #staff-dashboard .staff-scan-action-modes { grid-template-columns:1fr; } #staff-dashboard .staff-scan-mode-button { min-height:58px; } }
+@media (max-width:700px) { #staff-dashboard .staff-dashboard-tools { grid-template-columns:minmax(0,1fr); } }
 #staff-dashboard .staff-scan-reader { width:min(100%,520px); min-height:0; margin:12px auto 0; overflow:hidden; border-radius:12px; }
 #staff-dashboard .staff-scan-feedback { margin-top:12px; min-height:44px; padding:10px 12px; border:1px solid #cab588; border-radius:9px; background:#efe5d2; color:#5f503b; font:800 12px/1.4 'Fira Mono',monospace; letter-spacing:.04em; }
 #staff-dashboard .staff-scan-feedback.is-ok { border-color:#2f9b68; color:#176541; }
@@ -3035,10 +3038,11 @@ th.sortable span { font-size:10px; }
       </div>
       <div class="field" style="margin-bottom:0;"><label>Authorized Bars</label><div id="staff-landing-bars" class="staff-bars-list"></div></div>
       <div id="staff-scope-warning" class="alert alert-err"></div>
+      <div class="staff-dashboard-tools" aria-label="Staff settings">
       <div id="staff-scale-widget-dashboard" style="margin-top:16px;"></div>
-      <div id="staff-voice-guide" class="staff-voice-guide" aria-label="Staff voice guide">
+      <div id="staff-voice-guide" class="staff-voice-guide" aria-label="Staff voice settings">
         <div class="staff-voice-row">
-          <span class="staff-voice-label">VOICE GUIDE</span>
+          <span class="staff-voice-label">VOICE SETTINGS</span>
           <div class="staff-voice-actions">
             <button class="btn btn-ghost btn-sm" id="staff-voice-toggle" type="button" aria-pressed="false">TURN ON</button>
             <button class="btn btn-ghost btn-sm" id="staff-voice-test" type="button">TEST VOICE</button>
@@ -3049,6 +3053,7 @@ th.sortable span { font-size:10px; }
           <button class="btn btn-ghost btn-sm" id="staff-voice-item-toggle" type="button" aria-pressed="false">OFF</button>
         </div>
         <span id="staff-voice-status" class="staff-voice-status" aria-live="polite">Voice Guide: Off</span>
+      </div>
       </div>
     </div>
     <div id="staff-shell-dashboard" class="panel" style="padding:20px;">
@@ -4138,6 +4143,7 @@ async function saveStaffOpening() {
 
 let STAFF_TAKING_STATE = {};
 let STAFF_TAKING_SELECTED_BARS = [];
+let STAFF_TAKING_CONTEXT_KEY = '';
 let STAFF_TAKING_SAVING = false;
 let STAFF_TAKING_ERROR = '';
 
@@ -4302,6 +4308,16 @@ function staffTakingBars() {
   const allowed = new Set((SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => String(bar.id)));
   return STAFF_TAKING_SELECTED_BARS.filter(id => allowed.has(String(id))).map(id =>
     SESSION.cache.authorizedBars.find(bar => String(bar.id) === String(id))).filter(Boolean);
+}
+
+function staffTakingContextKey() {
+  const user = SESSION.user || {};
+  const authorizedBarIds = (SESSION.cache.authorizedBars || [])
+    .filter(bar => bar && bar.active !== false)
+    .map(bar => String(bar.id))
+    .sort()
+    .join(',');
+  return [SESSION.venueId || '', user.nightId || '', user.staff_id || '', user.assignment_id || '', authorizedBarIds].join('|');
 }
 
 function staffTakingSetError(message, ok = false) {
@@ -4686,8 +4702,8 @@ const StaffVoiceGuide = {
     const synth = typeof window !== 'undefined' && window.speechSynthesis;
     this.supported = !!(synth && typeof synth.speak === 'function' && typeof window.SpeechSynthesisUtterance === 'function');
     try {
-      this.enabled = this.supported && localStorage.getItem(STAFF_VOICE_GUIDE_ENABLED_KEY) === '1';
-      this.speakItemNames = localStorage.getItem(STAFF_VOICE_GUIDE_NAMES_KEY) === '1';
+      this.enabled = this.supported && localStorage.getItem(STAFF_VOICE_GUIDE_ENABLED_KEY) !== '0';
+      this.speakItemNames = localStorage.getItem(STAFF_VOICE_GUIDE_NAMES_KEY) !== '0';
     } catch (_) { this.enabled = false; this.speakItemNames = false; }
     this.refreshVoices();
     this.updateUI();
@@ -4745,21 +4761,39 @@ const StaffVoiceGuide = {
     if (/^(?:\d{8,}|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f-]{13,})$/i.test(name)) return '';
     return name.length > 40 ? name.slice(0, 39).trimEnd() + '…' : name;
   },
+  formatQuantity(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'one';
+    if (Number.isInteger(n)) return String(Math.abs(n));
+    return String(Math.abs(Math.round(n * 100) / 100));
+  },
+  quantityPhrase(value, singular, plural = singular + 's') {
+    const n = Number(value);
+    const words = { 1: 'One', 2: 'Two', 3: 'Three', 4: 'Four', 5: 'Five' };
+    const quantity = Number.isInteger(Math.abs(n)) && words[Math.abs(n)] ? words[Math.abs(n)] : this.formatQuantity(value);
+    return `${quantity} ${Math.abs(n) === 1 ? singular : plural}`;
+  },
   speakState(generic, itemName, options) {
     if (!this.speakItemNames) return this.speak(generic, options);
     const safe = this.safeItemName(itemName);
-    return this.speak(safe ? generic.replace(/\.$/, '') + ': ' + safe + '.' : generic, options);
+    return this.speak(safe ? safe + '. ' + generic : generic, options);
   },
   announce(type, details = {}) {
     const itemName = this.safeItemName(details.itemName);
+    const quantity = details.quantity == null ? 1 : details.quantity;
     const generic = {
       scanned: 'Item recognized.',
-      routed: details.mode === 'WEIGH' ? 'Item routed to weight controls.' : 'Item routed to quantity controls.',
-      added: 'One item added.',
+      setQty: 'Set quantity.',
+      readyToWeigh: 'Ready to weigh.',
+      added: `${this.quantityPhrase(quantity, 'item')} added.`,
+      taken: `${this.quantityPhrase(quantity, 'item')} taken.`,
+      returned: `${this.quantityPhrase(quantity, 'item')} returned.`,
+      transferred: `${this.quantityPhrase(quantity, 'item')} transferred.`,
+      opened: `${this.quantityPhrase(quantity, 'item')} opened.`,
       duplicate: 'Duplicate scan ignored.',
       blocked: 'Action blocked.',
       unavailable: 'Item unavailable.',
-      weight: 'Weight accepted.',
+      weight: `${this.quantityPhrase(quantity, 'weighted item')} added.`,
       failed: 'Action failed.'
     }[type] || 'Staff action updated.';
     return this.speakState(generic, itemName, { urgent: type !== 'scanned' });
@@ -4768,8 +4802,17 @@ const StaffVoiceGuide = {
     const text = String(message || '');
     const itemName = item?.name || '';
     if (/DUPLICATE READ IGNORED/i.test(text)) return this.announce('duplicate', { itemName });
-    if (/selected — use the existing/i.test(text)) return this.announce('routed', { itemName, mode: /weight/i.test(text) ? 'WEIGH' : 'SET_QTY' });
-    if (/FAST 1 EACH: ADDED|TAKEN \+1|RETURN \+1|\+1 for /i.test(text)) return this.announce('added', { itemName });
+    if (/ITEM SELECTED.*SET QTY|selected — use the existing quantity/i.test(text)) return this.announce('setQty', { itemName });
+    if (/ITEM SELECTED.*WEIGHT|selected — use the existing weight/i.test(text)) return this.announce('readyToWeigh', { itemName });
+    if (/FAST 1 EACH: ADDED/i.test(text)) return this.announce('added', { itemName, quantity: 1 });
+    const taken = text.match(/TAKEN \+([0-9]+(?:\.[0-9]+)?)/i);
+    if (taken) return this.announce('taken', { itemName, quantity: taken[1] });
+    const returned = text.match(/RETURN \+([0-9]+(?:\.[0-9]+)?)/i);
+    if (returned) return this.announce('returned', { itemName, quantity: returned[1] });
+    const transferred = text.match(/TRANSFER QTY\s+([0-9]+(?:\.[0-9]+)?)/i);
+    if (transferred) return this.announce('transferred', { itemName, quantity: transferred[1] });
+    const opened = text.match(/FOUND — .*\+([0-9]+(?:\.[0-9]+)?) for /i);
+    if (opened) return this.announce('opened', { itemName, quantity: opened[1] });
     if (/NOT FOUND|NOT ELIGIBLE|NOT RETURNABLE|unavailable|LIMIT REACHED|WEIGH REQUIRED|blocked/i.test(text)) return this.announce('blocked', { itemName });
     if (tone === 'error') return this.announce('failed', { itemName });
     return false;
@@ -5542,10 +5585,12 @@ function staffScannerKnownItem(rawBarcode) {
   return staffBarcodeResolve(Array.from(candidates.values()), rawBarcode);
 }
 
-function staffScannerSetFeedback(message, tone = '') {
+function staffScannerSetFeedback(message, tone = '', options = {}) {
   STAFF_SCANNER.feedback = String(message || '');
   STAFF_SCANNER.feedbackTone = tone;
-  try { StaffVoiceGuide.announceFeedback(STAFF_SCANNER.feedback, tone, STAFF_SCANNER.result?.item || null); } catch (_) {}
+  if (options.speak !== false) {
+    try { StaffVoiceGuide.announceFeedback(STAFF_SCANNER.feedback, tone, STAFF_SCANNER.result?.item || null); } catch (_) {}
+  }
   staffScannerRender();
 }
 
@@ -5861,7 +5906,7 @@ function staffScannerHandleDecoded(rawBarcode, source = 'manual', now = Date.now
     const message = applied?.status === 'ROUTED'
       ? `${STAFF_SCANNER.actionMode === 'SET_QTY' ? 'ITEM SELECTED — SET QTY IN THE ITEM CARD' : 'ITEM SELECTED — USE THE ITEM WEIGHT CONTROLS'} · TAP NEXT SCAN WHEN DONE`
       : STAFF_SCANNER.mode === 'taking' && STAFF_SCANNER.kind === 'unit' ? 'FAST 1 EACH: ADDED — TAP NEXT SCAN' : 'SCAN ACCEPTED — TAP NEXT SCAN';
-    staffScannerSetFeedback(message, 'ok');
+    staffScannerSetFeedback(message, 'ok', { speak: false });
   }
   return applied;
 }
@@ -6047,7 +6092,6 @@ async function staffQuickScanOpenWorkflow(mode, itemId) {
   const eligibility = staffQuickScanEligibility(item);
   if (!item || !eligibility[mode]) { staffScannerSetFeedback('NOT ELIGIBLE IN THIS WORKFLOW', 'error'); return; }
   await staffScannerClose();
-  if (mode === 'taking' && !staffTakingBars().length) STAFF_TAKING_SELECTED_BARS = staffDispatchAuthorizedBars().map(bar => String(bar.id));
   if (mode === 'returning' && !STAFF_RETURNING_SOURCE_BAR) STAFF_RETURNING_SOURCE_BAR = String(staffReturningBars()[0]?.id || '');
   if (mode === 'transfer') {
     const bars = staffTransferBars();
@@ -6224,8 +6268,14 @@ function renderStaffTaking() {
 
 function openStaffTaking() {
   if (!staffOperationalGuard()) return;
-  STAFF_TAKING_STATE = {};
-  STAFF_TAKING_SELECTED_BARS = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => String(bar.id));
+  const contextKey = staffTakingContextKey();
+  if (STAFF_TAKING_CONTEXT_KEY !== contextKey) {
+    STAFF_TAKING_CONTEXT_KEY = contextKey;
+    STAFF_TAKING_STATE = {};
+    STAFF_TAKING_SELECTED_BARS = [];
+  } else {
+    STAFF_TAKING_STATE = {};
+  }
   STAFF_TAKING_ERROR = '';
   showStaffShellView('taking');
 }
@@ -6255,7 +6305,6 @@ async function saveStaffTaking() {
     const { error } = await SB.from('events').insert(records);
     if (error) throw new Error(error.message || 'Taking save failed.');
     STAFF_TAKING_STATE = {};
-    STAFF_TAKING_SELECTED_BARS = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => String(bar.id));
     staffTakingSetError(`Taking submitted: ${records.length} movement rows across ${new Set(records.map(record => record.bar_id)).size} authorized Bars.`, true);
     renderStaffTaking();
   } catch (error) {
