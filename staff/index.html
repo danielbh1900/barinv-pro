@@ -1500,6 +1500,10 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-voice-row { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
 #staff-dashboard .staff-voice-label { font:800 11px/1.2 'Fira Mono',monospace; letter-spacing:.04em; }
 #staff-dashboard .staff-voice-actions { display:flex; gap:7px; flex-wrap:wrap; }
+#staff-dashboard .staff-bar-identity { display:inline-grid; gap:2px; min-width:0; vertical-align:middle; }
+#staff-dashboard .staff-bar-code { font:800 12px/1.2 'Fira Mono',monospace; color:var(--text); }
+#staff-dashboard .staff-bar-display-name { font-size:12px; line-height:1.25; color:var(--text); overflow-wrap:anywhere; }
+#staff-dashboard .staff-bar-bartenders { font-size:11px; line-height:1.25; color:var(--muted); overflow-wrap:anywhere; }
 #staff-dashboard .staff-voice-guide .btn { min-height:40px; }
 #staff-dashboard .staff-voice-status { display:block; margin-top:7px; color:var(--muted); font:10px/1.3 'Fira Mono',monospace; }
 #staff-dashboard .staff-scan-mode-button { min-width:0; min-height:68px; padding:10px; border:2px solid var(--border2); border-radius:10px; background:var(--s2); color:var(--text); cursor:pointer; text-align:left; }
@@ -3031,7 +3035,7 @@ th.sortable span { font-size:10px; }
         <div style="display:flex;gap:8px;align-items:center;"><button class="btn btn-ghost btn-sm" id="staff-theme-toggle" type="button" onclick="staffThemeToggle()" aria-label="Switch to dark theme" title="Switch to dark theme">DARK</button><button class="btn btn-ghost btn-sm" onclick="doLogout()">Log Out</button></div>
       </div>
       <div class="fg fg-2">
-        <div class="field"><label>Staff</label><div id="staff-landing-name" class="form-value"></div></div>
+        <div class="field"><label>BARBACK</label><div id="staff-landing-name" class="form-value"></div></div>
         <div class="field"><label>Role</label><div id="staff-landing-role" class="form-value"></div></div>
         <div class="field"><label>Working Area</label><div id="staff-landing-area" class="form-value"></div></div>
         <div class="field"><label>Night</label><div id="staff-landing-night" class="form-value"></div></div>
@@ -3868,7 +3872,7 @@ function renderStaffDashboard() {
   const barsEl = document.getElementById('staff-landing-bars');
   const bars = SESSION.cache.authorizedBars || [];
   barsEl.innerHTML = bars.length
-    ? bars.map(bar => `<span class="badge b-active" style="margin:0 6px 6px 0;display:inline-block;">${esc(bar.name || bar.id)}</span>`).join('')
+    ? bars.map(bar => `<span class="badge b-active" style="margin:0 6px 6px 0;display:inline-block;">${staffBarIdentityHtml(bar)}</span>`).join('')
     : '<span class="empty-text">None available</span>';
   const warning = document.getElementById('staff-scope-warning');
   if (warning && bars.length) { warning.textContent = ''; warning.className = 'alert alert-err'; }
@@ -4074,7 +4078,7 @@ function renderStaffOpening() {
   if (!context || !summary || !grid || !preview) return;
   const visibleItems = staffRenderItemFilter('opening', items);
   staffScaleRenderWidget('opening');
-  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${bars.map(bar => bar.name).join(', ') || 'No authorized active Bars'}`;
+  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${bars.map(staffBarIdentityText).join(' | ') || 'No authorized active Bars'}`;
   const rows = staffOpeningRows();
   const openingQty = rows.reduce((sum, row) => sum + row.qty, 0);
   summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${bars.length}</div><div class="stat-lbl">BARS</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${openingQty}</div><div class="stat-lbl">OPENING QTY</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${rows.length}</div><div class="stat-lbl">ITEM / BAR ROWS</div></div>`;
@@ -4085,10 +4089,10 @@ function renderStaffOpening() {
   } else if (!visibleItems.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
   } else {
-    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${esc(bar.name)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(bar.name)}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(bar.name)}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(bar.name)}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
+    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(staffBarIdentityText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
     Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
   }
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(row.bar.name)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityText(row.bar))}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
   staffOpeningSetError(STAFF_OPENING_ERROR);
 }
 
@@ -6119,7 +6123,7 @@ function staffDispatchAuthorizedBars() {
 
 function staffDispatchSwitchMarkup(mode, selectedId) {
   const bars = staffDispatchAuthorizedBars();
-  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(bar.name || bar.id)}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
+  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
 }
 
 function staffDispatchResetItem(mode, itemId) {
@@ -6238,18 +6242,16 @@ function renderStaffTaking() {
   const visibleItems = staffRenderItemFilter('taking', items);
   if (STAFF_SCALE_CONTEXT.mode !== 'taking' || !items.some(item => String(item.id) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'taking', itemId: String(items[0]?.id || '') };
   staffScaleRenderWidget('taking');
-  context.textContent = `${user.nightName || user.nightId || 'Night'} · Staff Taking · ${bars.map(bar => bar.name).join(', ') || 'No destination Bars selected'}`;
+  context.textContent = `${user.nightName || user.nightId || 'Night'} · Staff Taking · ${bars.map(staffBarIdentityText).join(' | ') || 'No destination Bars selected'}`;
   const authorized = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false);
-  barEl.innerHTML = authorized.length ? authorized.map(bar => `<label style="display:inline-flex;align-items:center;gap:7px;margin:0 12px 8px 0;font-size:12px;"><input type="checkbox" ${STAFF_TAKING_SELECTED_BARS.includes(String(bar.id)) ? 'checked' : ''} onchange="staffTakingToggleBar('${esc(bar.id)}',this.checked)">${esc(bar.name)}</label>`).join('') : '<span class="empty-text">No authorized active Bars are available.</span>';
+  barEl.innerHTML = authorized.length ? authorized.map(bar => `<label style="display:inline-flex;align-items:flex-start;gap:7px;margin:0 12px 10px 0;font-size:12px;min-width:min(100%,220px);"><input type="checkbox" ${STAFF_TAKING_SELECTED_BARS.includes(String(bar.id)) ? 'checked' : ''} onchange="staffTakingToggleBar('${esc(bar.id)}',this.checked)">${staffBarIdentityHtml(bar)}</label>`).join('') : '<span class="empty-text">No authorized active Bars are available.</span>';
   const states = Object.values(STAFF_TAKING_STATE);
   const taken = states.reduce((sum, state) => sum + (Number(state.taken) || 0), 0);
   const comp = states.reduce((sum, state) => sum + (Number(state.comp) || 0), 0);
   const shot = states.reduce((sum, state) => sum + (Number(state.shot) || 0), 0);
   const rows = staffTakingRows();
   summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(bars.length)}</div><div class="stat-lbl">DESTINATIONS</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(taken)}</div><div class="stat-lbl">TAKEN</div></div><div class="stat-card sc-a4" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(comp)}</div><div class="stat-lbl">COMP</div></div><div class="stat-card sc-a3" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(shot)}</div><div class="stat-lbl">SHOTS</div></div>`;
-  if (!bars.length) {
-    grid.innerHTML = '<div class="empty"><div class="empty-text">Select at least one authorized destination Bar.</div></div>';
-  } else if (!items.length) {
+  if (!items.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No active Items are available for Taking.</div></div>';
   } else if (!visibleItems.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
@@ -6262,7 +6264,7 @@ function renderStaffTaking() {
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(row.bar.name)}</td><td>${esc(row.action)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityText(row.bar))}</td><td>${esc(row.action)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
   staffTakingSetError(STAFF_TAKING_ERROR);
 }
 
@@ -6441,7 +6443,7 @@ function renderStaffReturning() {
   if (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
   if (!source && bars.length) STAFF_RETURNING_SOURCE_BAR = String(bars[0].id);
-  select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(bar.name)}</option>`).join('') : '<option value="">No authorized source Bars</option>';
+  select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
@@ -6584,8 +6586,8 @@ function renderStaffTransfer() {
     STAFF_TRANSFER_STATE.destinationBar = String(bars.find(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar))?.id || '');
   }
   if (!items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = String(items[0].id);
-  if (source) source.innerHTML = bars.map(bar => `<option value="${esc(bar.id)}">${esc(bar.name || bar.id)}</option>`).join('');
-  if (destination) destination.innerHTML = bars.filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(bar.name || bar.id)}</option>`).join('');
+  if (source) source.innerHTML = bars.map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityText(bar))}</option>`).join('');
+  if (destination) destination.innerHTML = bars.filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityText(bar))}</option>`).join('');
   const selectedItemIsVisible = visibleItems.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (item) {
     item.innerHTML = visibleItems.length
@@ -6672,7 +6674,7 @@ async function saveStaffTransfer() {
     await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids || [] });
     const validated = staffTransferValidate();
     const bars = new Map(staffTransferBars().map(bar => [String(bar.id), bar]));
-    const notes = `Transfer: ${bars.get(validated.sourceBar)?.name || validated.sourceBar} → ${bars.get(validated.destinationBar)?.name || validated.destinationBar}`;
+    const notes = `Transfer: ${staffBarIdentityText(bars.get(validated.sourceBar))} → ${staffBarIdentityText(bars.get(validated.destinationBar))}`;
     const record = {
       venue_id: SESSION.venueId,
       night_id: user.nightId,
@@ -6770,10 +6772,42 @@ function mapStaffAssignment(row, claims, fallback = {}) {
   };
 }
 
+function staffBarDisplayContext(bar) {
+  const barId = String(bar?.id || '');
+  const assignments = Array.isArray(SESSION.cache.assignments) ? SESSION.cache.assignments : [];
+  const names = Array.isArray(bar?.bartender_names) ? bar.bartender_names : [];
+  assignments.forEach(assignment => {
+    const roleTokens = String(assignment?.role || '').toLowerCase().split(/[,;|/]+/).map(token => token.trim()).filter(Boolean);
+    if (assignment?.revoked || !roleTokens.includes('bartender')) return;
+    if (!Array.isArray(assignment?.allowed_bar_ids) || !assignment.allowed_bar_ids.some(id => String(id) === barId)) return;
+    const name = String(assignment?.staff_name || '').trim();
+    if (name && !names.includes(name)) names.push(name);
+  });
+  const barCode = String(bar?.barCode || bar?.name || bar?.id || 'Bar');
+  const barDisplayName = String(bar?.displayName || bar?.bar_name_at || bar?.name || barCode).trim() || barCode;
+  return { barId, barCode, barDisplayName, bartenderNames: names };
+}
+
+function staffBarIdentityText(bar) {
+  const context = staffBarDisplayContext(bar);
+  const bartenders = context.bartenderNames.length
+    ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
+    : 'No bartender assigned';
+  return `${context.barCode} — ${context.barDisplayName} · ${bartenders}`;
+}
+
+function staffBarIdentityHtml(bar) {
+  const context = staffBarDisplayContext(bar);
+  const bartenders = context.bartenderNames.length
+    ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
+    : 'No bartender assigned';
+  return `<span class="staff-bar-identity"><span class="staff-bar-code">${esc(context.barCode)}</span><span class="staff-bar-display-name">${esc(context.barDisplayName)}</span><span class="staff-bar-bartenders">${esc(bartenders)}</span></span>`;
+}
+
 async function hydrateStaffAuthorizedBars(claims) {
   const allowedIds = new Set((claims.allowed_bar_ids || []).map(id => String(id)));
   const { data, error } = await SB.from('night_bars')
-    .select('bar_id, bars(id, name, active, bar_type)')
+    .select('bar_id, bar_name_at, bars(id, name, active, bar_type)')
     .eq('night_id', claims.night_id);
   if (error) throw new Error('Authorized Bars could not be verified.');
   SESSION.cache.authorizedBars = (data || [])
@@ -6781,6 +6815,9 @@ async function hydrateStaffAuthorizedBars(claims) {
     .map(row => ({
       id: row.bar_id,
       name: row.bars.name,
+      barCode: row.bars.name,
+      displayName: row.bar_name_at || row.bars.name,
+      bar_name_at: row.bar_name_at || null,
       active: true,
       bar_type: row.bars.bar_type || 'bar'
     }));
