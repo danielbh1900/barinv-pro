@@ -3224,6 +3224,7 @@ th.sortable span { font-size:10px; }
   </div>
 </div>
 
+<script src="../barinv-public-config.js"></script>
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
@@ -3676,6 +3677,11 @@ function modalOK() {
 // SETUP WIZARD
 // ══════════════════════════════════════════════════════
 function getConfig() {
+  if (APP_MODE === 'staff') {
+    const cfg = window.BARINV_PUBLIC_SUPABASE_CONFIG;
+    if (!cfg?.url || !cfg?.anonKey) return null;
+    return { url: cfg.url, key: cfg.anonKey };
+  }
   try { return JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); } catch { return null; }
 }
 
@@ -11488,9 +11494,23 @@ async function init() {
   } catch (e) { console.warn('Invalid cfg param', e); }
 
   const cfg = getConfig();
-  if (!cfg) { showSetupWizard(); return; }
+  if (!cfg) {
+    if (APP_MODE === 'staff') {
+      await failClosedSession('Staff configuration unavailable. Please refresh.');
+    } else {
+      showSetupWizard();
+    }
+    return;
+  }
 
-  if (!initSupabase(cfg.url, cfg.key)) { showSetupWizard(); return; }
+  if (!initSupabase(cfg.url, cfg.key)) {
+    if (APP_MODE === 'staff') {
+      await failClosedSession('Staff configuration invalid. Contact your manager.');
+    } else {
+      showSetupWizard();
+    }
+    return;
+  }
 
   // Classify a restored Auth session before any Admin initialization.
   const { data: { session } } = await SB.auth.getSession();
