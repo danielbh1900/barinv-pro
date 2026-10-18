@@ -1,7 +1,8 @@
 {
   "name": "BARINV Pro",
   "short_name": "BARINV",
-  "start_url": "/barinv-pro/staff/",
+  "id": "/barinv-pro/staff/",
+  "start_url": "/barinv-pro/staff/?cb=staff",
   "display": "standalone",
   "background_color": "#1a1a1a",
   "theme_color": "#ff8c00",
