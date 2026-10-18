@@ -3259,6 +3259,8 @@ async function copyBluefyDiagnostics() {
 // MODAL
 // ══════════════════════════════════════════════════════
 function openModal(title, bodyHTML, okCb, footHTML) {
+  // Release the previous modal's controls before replacing its contents.
+  SESSION.modalCb?.releasePendingControls?.();
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHTML;
   const foot = document.getElementById('modal-foot');
@@ -3276,6 +3278,8 @@ function openModal(title, bodyHTML, okCb, footHTML) {
 }
 
 function closeModal() {
+  // A pending passcode save owns this modal until its outcome is known.
+  if (SESSION.modalCb?.pending) return;
   document.getElementById('modal-overlay').classList.remove('open');
   SESSION.modalCb = null;
 }
@@ -4680,7 +4684,7 @@ async function preload() {
       SB.from('items').select('*').order('name'),
       SB.from('staff').select('*').order('name'),
       SB.from('nights').select('*').order('date', { ascending: false }),
-      SB.from('placements').select('*, items(*), stations(*, bars(*)), staff!placements_bartender_id_fkey(*), staff!placements_barback_id_fkey(*)'),
+      SB.from('placements').select('*, items(*), stations(*, bars(*)), bartender:staff!placements_bartender_id_fkey(*), barback:staff!placements_barback_id_fkey(*)'),
     ]);
     SESSION.cache.bars       = bars.data || [];
     SESSION.cache.stations   = stations.data || [];
@@ -7006,9 +7010,12 @@ function renderStaff() {
       <div style="flex:1;min-width:0;">
         <span style="font-weight:600;">${esc(s.name)}</span> ${roleBadges(s.role)}
         ${s.legal_name ? `<span style="font-size:10px;color:var(--muted);margin-left:6px;">(${esc(s.legal_name)})</span>` : ''}
+        <div style="font-size:12px;margin-top:4px;">Permanent Staff ID: ${s.staff_login_id ? `<b>${esc(s.staff_login_id)}</b> <button type="button" class="btn btn-ghost btn-xs" onclick="copyStaffLoginId('${esc(s.id)}')">Copy Staff ID</button>` : '<span style="color:var(--muted);">Unavailable in loaded record</span>'}</div>
         ${s.email || s.phone ? `<div style="font-size:10px;color:var(--muted);font-family:'Fira Mono',monospace;margin-top:2px;">${[s.email, s.phone].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button class="btn btn-ghost btn-xs" onclick="openStaffPasscodeById('${esc(s.id)}')">Staff Pass Code</button>
+        <button class="btn btn-ghost btn-xs" onclick="openStaffPrimaryRoleById('${esc(s.id)}')">Primary Role</button>
         <button class="btn btn-ghost btn-xs" onclick="editStaffById('${esc(s.id)}')">Edit</button>
         <button class="btn btn-danger btn-xs" onclick="deleteRow('staff','${esc(s.id)}',loadSetup)">×</button>
       </div>
@@ -7144,6 +7151,233 @@ function getCheckedRoles() {
   return [...document.querySelectorAll('.m-role-cb:checked')].map(cb => cb.value).join(', ');
 }
 
+async function staffPasscodeStatusRequest(staffId) {
+  const venueId = SESSION.venueId;
+  const cfg = getConfig();
+  if (!cfg) throw new Error('Supabase configuration is missing.');
+  const { data: { session } } = await SB.auth.getSession();
+  if (!session?.access_token) throw new Error('Admin session expired. Sign in again.');
+  const resp = await fetch(cfg.url + '/functions/v1/staff-passcode-admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': cfg.key || '', 'Authorization': 'Bearer ' + session.access_token },
+    body: JSON.stringify({ venue_id: venueId, staff_id: staffId, action: 'status' })
+  });
+  const result = await resp.json();
+  if (!resp.ok || result?.ok !== true || result.staff_id !== staffId || typeof result.passcode_configured !== 'boolean') {
+    throw new Error('Personal passcode status is unavailable.');
+  }
+  return result;
+}
+
+window.openStaffPasscodeById = function(id, initialAction = 'set') {
+  const staff = SESSION.cache.staff.find((row) => row.id === id);
+  if (!staff) return;
+  let actionEl, valueEl, alertEl;
+  const isCurrent = () => SESSION.modalCb === savePasscode &&
+    document.getElementById('m-passcode-alert') === alertEl &&
+    document.getElementById('modal-overlay').classList.contains('open');
+  const savePasscode = async () => {
+    // Claim this modal synchronously: double-click and Enter share one operation.
+    if (savePasscode.pending || !isCurrent()) return;
+    savePasscode.pending = true;
+    const action = actionEl.value;
+    const value = valueEl.value;
+    const venueId = SESSION.venueId;
+    const controls = [...document.querySelectorAll('#modal button, #modal input, #modal select, #modal textarea')]
+      .map((el) => ({ el, disabled: el.disabled }));
+    savePasscode.releasePendingControls = () => controls.forEach(({ el, disabled }) => { el.disabled = disabled; });
+    controls.forEach(({ el }) => { el.disabled = true; });
+    alertEl.textContent = 'Saving…'; alertEl.className = 'alert alert-info show';
+    let sent = false;
+    try {
+      const cfg = getConfig();
+      if (!cfg) throw new Error('Supabase configuration is missing.');
+      const { data: { session } } = await SB.auth.getSession();
+      if (!isCurrent()) return;
+      if (!session?.access_token) throw new Error('Admin session expired. Sign in again.');
+      sent = true;
+      const resp = await fetch(cfg.url + '/functions/v1/staff-passcode-admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': cfg.key || '',
+          'Authorization': 'Bearer ' + session.access_token
+        },
+        body: JSON.stringify({ venue_id: venueId, staff_id: id, action, passcode: value || undefined })
+      });
+      if (!isCurrent()) return;
+      const result = await resp.json();
+      if (!isCurrent()) return;
+      if (resp.ok && typeof result?.ok !== 'boolean') throw new Error('Unrecognized passcode response.');
+      if (!resp.ok || result.ok !== true) {
+        alertEl.textContent = result?.error || 'Passcode change failed.';
+        alertEl.className = 'alert alert-err show';
+        return;
+      }
+      savePasscode.releasePendingControls();
+      savePasscode.pending = false;
+      closeModal();
+      if (result.passcode) {
+        openModal('V2 Passcode — Reveal Once',
+          `<div style="font-size:12px;line-height:1.6;">Give this passcode directly to <b>${esc(staff.name)}</b>. It will not be shown again.</div>
+           <div style="margin-top:14px;"><input type="text" id="m-issued-passcode" value="${esc(result.passcode)}" readonly onclick="this.select()" style="width:100%;font-family:'Fira Mono',monospace;font-size:18px;letter-spacing:0.12em;text-align:center;"></div>
+           <button type="button" id="m-issued-passcode-copy" class="btn btn-ghost btn-sm" style="margin-top:10px;">Copy Staff Pass Code</button>
+           <div id="m-issued-passcode-copy-status" role="status" style="font-size:11px;margin-top:6px;"></div>`,
+          null,
+          '<button class="btn btn-ghost btn-sm" onclick="closeModal()">Close</button>');
+        const issuedInput = document.getElementById('m-issued-passcode');
+        const copyButton = document.getElementById('m-issued-passcode-copy');
+        const copyStatus = document.getElementById('m-issued-passcode-copy-status');
+        const ownsReveal = () => document.getElementById('m-issued-passcode') === issuedInput &&
+          document.getElementById('modal-overlay').classList.contains('open');
+        copyButton.onclick = async () => {
+          if (!ownsReveal()) return;
+          try {
+            await navigator.clipboard.writeText(issuedInput.value);
+            if (ownsReveal()) copyStatus.textContent = 'Staff Pass Code copied.';
+          } catch {
+            if (!ownsReveal()) return;
+            issuedInput.select();
+            copyStatus.textContent = 'Copy unavailable. Select the code above and copy it manually.';
+          }
+        };
+      } else {
+        toast(action === 'revoke' ? 'V2 Staff passcode revoked' : 'V2 Staff passcode updated', 't-ok');
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      alertEl.textContent = sent
+        ? 'The change may have completed. Verify access or deliberately reset again. Do not assume the old passcode still works. No automatic retry was made.'
+        : (error?.message || 'Unable to start the passcode change. Please try again.');
+      alertEl.className = 'alert alert-err show';
+    } finally {
+      savePasscode.pending = false;
+      if (isCurrent()) savePasscode.releasePendingControls();
+    }
+  };
+  openModal('V2 Staff Passcode',
+    `<div style="font-size:13px;line-height:1.55;">
+       <div style="margin-bottom:10px;">Set or reset the personal Staff Pass Code for <b>${esc(staff.name)}</b>. Creating a Night does not change it.</div>
+       <div style="margin-bottom:10px;">Staff ID: <b>${esc(staff.staff_login_id || 'Unavailable')}</b></div>
+       <div style="font-size:11px;color:var(--muted);">The server stores only a salted hash. The generated passcode is revealed once after saving; it is never written to browser diagnostics or reports.</div>
+     </div>
+     <div class="field" style="margin-top:14px;"><label>Action</label>
+       <select id="m-passcode-action" onkeydown="if(event.key==='Enter' &amp;&amp; !event.isComposing){event.preventDefault();modalOK();}"><option value="set">Set / replace passcode</option><option value="rotate">Reset passcode (old code stops working)</option><option value="revoke">Revoke passcode</option></select>
+     </div>
+     <div class="field" id="m-passcode-value-wrap"><label>Optional passcode (8–64 letters/digits; blank = server-generated)</label><input type="password" id="m-passcode-value" autocomplete="new-password" onkeydown="if(event.key==='Enter' &amp;&amp; !event.isComposing){event.preventDefault();modalOK();}"></div>
+     <div id="m-passcode-alert" class="alert"></div>`,
+    savePasscode
+  );
+  actionEl = document.getElementById('m-passcode-action');
+  actionEl.value = ['set', 'rotate', 'revoke'].includes(initialAction) ? initialAction : 'set';
+  valueEl = document.getElementById('m-passcode-value');
+  alertEl = document.getElementById('m-passcode-alert');
+};
+
+async function staffPrimaryRoleRequest(payload) {
+  const cfg = getConfig();
+  if (!cfg) throw new Error('Supabase configuration is missing.');
+  const { data: { session } } = await SB.auth.getSession();
+  if (!session?.access_token) throw new Error('Admin session expired. Sign in again.');
+  const resp = await fetch(cfg.url + '/functions/v1/staff-primary-role-admin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': cfg.key || '',
+      'Authorization': 'Bearer ' + session.access_token
+    },
+    body: JSON.stringify(payload)
+  });
+  let result; try { result = await resp.json(); } catch { result = null; }
+  if (!resp.ok || !result?.ok) throw new Error(result?.error || 'Primary Role request failed.');
+  return result;
+}
+
+window.loadStaffPrimaryRoleOptions = async function(staffId) {
+  const nightId = document.getElementById('m-primary-night')?.value || '';
+  const select = document.getElementById('m-primary-assignment');
+  const alertEl = document.getElementById('m-primary-alert');
+  if (!select || !alertEl || !nightId) return;
+  select.disabled = true;
+  select.innerHTML = '<option value="">Loading…</option>';
+  alertEl.textContent = 'Loading assignments…';
+  alertEl.className = 'alert alert-info show';
+  try {
+    const result = await staffPrimaryRoleRequest({
+      venue_id: SESSION.venueId,
+      night_id: nightId,
+      staff_id: staffId,
+      action: 'get'
+    });
+    const assignments = Array.isArray(result.assignments) ? result.assignments : [];
+    select.innerHTML = '<option value="">No explicit Primary Role</option>' + assignments.map(a => {
+      const bars = Array.isArray(a.allowed_bar_ids) ? a.allowed_bar_ids.length : 0;
+      return `<option value="${esc(a.id)}" ${a.id === result.selected_assignment_id ? 'selected' : ''}>${esc(a.role)} · ${bars} allowed bar${bars === 1 ? '' : 's'}</option>`;
+    }).join('');
+    select.disabled = false;
+    if (assignments.length === 0) {
+      alertEl.textContent = 'No non-revoked assignment exists for this Staff member in the selected Night.';
+      alertEl.className = 'alert alert-err show';
+    } else if (assignments.length === 1) {
+      alertEl.textContent = 'One eligible assignment is used automatically. An explicit selection is optional.';
+      alertEl.className = 'alert alert-info show';
+    } else if (!result.selected_assignment_id) {
+      alertEl.textContent = 'Multiple roles exist. Staff login is blocked until a Primary Role is selected.';
+      alertEl.className = 'alert alert-err show';
+    } else {
+      alertEl.textContent = 'The selected assignment alone defines the Staff session role and allowed bars.';
+      alertEl.className = 'alert alert-info show';
+    }
+  } catch (error) {
+    select.innerHTML = '<option value="">Unavailable</option>';
+    alertEl.textContent = error.message || 'Primary Role configuration could not be loaded.';
+    alertEl.className = 'alert alert-err show';
+  }
+};
+
+window.openStaffPrimaryRoleById = function(id) {
+  const staff = SESSION.cache.staff.find((row) => row.id === id);
+  if (!staff) return;
+  const nights = SESSION.cache.nights || [];
+  const defaultNight = nights.find(n => n.active !== false) || nights[0];
+  openModal('V2 Primary Role',
+    `<div style="font-size:13px;line-height:1.55;margin-bottom:12px;">
+       Manager selection for <b>${esc(staff.name)}</b>. If two eligible roles exist in one Night, login fails closed until one exact assignment is selected. Permissions are never combined.
+     </div>
+     <div class="field"><label>Night</label>
+       <select id="m-primary-night" onchange="loadStaffPrimaryRoleOptions('${esc(id)}')">${nights.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNight?.id ? 'selected' : ''}>${esc(n.name)} (${esc(n.date || '')})</option>`).join('')}</select>
+     </div>
+     <div class="field"><label>Primary Role assignment</label>
+       <select id="m-primary-assignment" disabled><option value="">Loading…</option></select>
+     </div>
+     <div id="m-primary-alert" class="alert alert-info show">Loading assignments…</div>`,
+    async () => {
+      const nightId = document.getElementById('m-primary-night')?.value || '';
+      const assignmentId = document.getElementById('m-primary-assignment')?.value || '';
+      const alertEl = document.getElementById('m-primary-alert');
+      if (!nightId) { toast('Select a Night', 't-err'); return; }
+      try {
+        if (alertEl) { alertEl.textContent = 'Saving…'; alertEl.className = 'alert alert-info show'; }
+        await staffPrimaryRoleRequest({
+          venue_id: SESSION.venueId,
+          night_id: nightId,
+          staff_id: id,
+          assignment_id: assignmentId || undefined,
+          action: assignmentId ? 'set' : 'clear'
+        });
+        closeModal();
+        toast(assignmentId ? 'V2 Primary Role updated' : 'V2 Primary Role cleared', 't-ok');
+      } catch (error) {
+        if (alertEl) {
+          alertEl.textContent = error.message || 'Primary Role change failed.';
+          alertEl.className = 'alert alert-err show';
+        }
+      }
+    }
+  );
+  if (defaultNight) setTimeout(() => loadStaffPrimaryRoleOptions(id), 0);
+};
+
 function openAddStaff() {
   openModal('Add Staff',
     `<div class="fg fg-2">
@@ -7179,22 +7413,7 @@ function openAddStaff() {
 window.editStaffById = async function(id) {
   const s = SESSION.cache.staff.find(x => x.id === id);
   if(!s) return;
-  openModal('Edit Staff',
-    `<div class="fg fg-2">
-       <div class="field"><label>Nick Name</label><input type="text" id="m-name" value="${esc(s.name)}"></div>
-       <div class="field"><label>Legal Name</label><input type="text" id="m-legal" value="${esc(s.legal_name||'')}"></div>
-     </div>
-     <div class="field"><label>Roles (select all that apply)</label>${staffRoleCheckboxes(s.role)}</div>
-     <div class="fg fg-2">
-       <div class="field"><label>Email</label><input type="email" id="m-email" value="${esc(s.email||'')}"></div>
-       <div class="field"><label>Phone</label><input type="tel" id="m-phone" value="${esc(s.phone||'')}"></div>
-     </div>
-     <div class="field"><label>Emergency Contact</label><input type="text" id="m-emergency" value="${esc(s.emergency_contact||'')}"></div>
-     <div class="field"><label>Notes</label><input type="text" id="m-notes" value="${esc(s.notes||'')}"></div>
-     <div class="field"><label>Status</label>
-       <select id="m-active"><option value="true" ${s.active!==false?'selected':''}>Active</option><option value="false" ${s.active===false?'selected':''}>Inactive</option></select>
-     </div>`,
-    async () => {
+  const saveStaff = async () => {
       const name = document.getElementById('m-name').value.trim();
       const role = getCheckedRoles();
       const active = document.getElementById('m-active').value === 'true';
@@ -7210,8 +7429,72 @@ window.editStaffById = async function(id) {
       }).eq('id', id);
       if(error) { toast(error.message,'t-err'); return; }
       closeModal(); await preload(); loadSetup(); toast('Staff updated','t-ok');
-    }
+  };
+  openModal('Edit Staff',
+    `<div class="fg fg-2">
+       <div class="field"><label>Nick Name</label><input type="text" id="m-name" value="${esc(s.name)}"></div>
+       <div class="field"><label>Legal Name</label><input type="text" id="m-legal" value="${esc(s.legal_name||'')}"></div>
+     </div>
+     <div class="field">
+       <label for="m-staff-login-id">Permanent Staff ID (read-only)</label>
+       <div style="display:flex;gap:8px;align-items:center;">
+         <input type="text" id="m-staff-login-id" value="${esc(s.staff_login_id || '')}" placeholder="Unavailable in loaded record" readonly aria-describedby="m-staff-login-id-help" onclick="this.select()" style="flex:1;min-width:0;">
+         <button type="button" class="btn btn-ghost btn-sm" onclick="copyStaffLoginId('${esc(s.id)}')" ${s.staff_login_id ? '' : 'disabled'}>Copy Staff ID</button>
+       </div>
+       <div id="m-staff-login-id-help" style="font-size:11px;color:var(--muted);line-height:1.55;margin-top:6px;">${s.staff_login_id ? 'Use this permanent ID with the personal Staff Pass Code and Night Code. Name/role edits, Night creation and passcode resets do not change this ID.' : 'No Staff ID is available in this loaded record. Refresh Staff details before sharing login information.'}</div>
+     </div>
+     <div class="field">
+       <label>Personal Staff Pass Code</label>
+       <div id="m-staff-passcode-status" role="status" style="font-size:12px;">Checking personal passcode status…</div>
+       <div style="display:flex;gap:8px;margin-top:8px;">
+         <button type="button" id="m-staff-passcode-set" class="btn btn-ghost btn-sm" disabled>Set initial passcode</button>
+         <button type="button" id="m-staff-passcode-reset" class="btn btn-ghost btn-sm" disabled>Reset personal passcode</button>
+       </div>
+       <div style="font-size:11px;color:var(--muted);line-height:1.55;margin-top:6px;">Save any staff-detail edits before managing this reusable personal credential. It stays the same across authorized Nights. A newly issued code can be copied once after saving.</div>
+     </div>
+     <div style="font-size:11px;color:var(--muted);line-height:1.55;margin-bottom:14px;">Legacy Access Code is Night-specific; it remains separate from the permanent Staff ID and personal Staff Pass Code.</div>
+     <div class="field"><label>Roles (select all that apply)</label>${staffRoleCheckboxes(s.role)}</div>
+     <div class="fg fg-2">
+       <div class="field"><label>Email</label><input type="email" id="m-email" value="${esc(s.email||'')}"></div>
+       <div class="field"><label>Phone</label><input type="tel" id="m-phone" value="${esc(s.phone||'')}"></div>
+     </div>
+     <div class="field"><label>Emergency Contact</label><input type="text" id="m-emergency" value="${esc(s.emergency_contact||'')}"></div>
+     <div class="field"><label>Notes</label><input type="text" id="m-notes" value="${esc(s.notes||'')}"></div>
+     <div class="field"><label>Status</label>
+       <select id="m-active"><option value="true" ${s.active!==false?'selected':''}>Active</option><option value="false" ${s.active===false?'selected':''}>Inactive</option></select>
+     </div>`,
+    saveStaff
   );
+  const statusEl = document.getElementById('m-staff-passcode-status');
+  const setButton = document.getElementById('m-staff-passcode-set');
+  const resetButton = document.getElementById('m-staff-passcode-reset');
+  const isCurrentEdit = () => SESSION.modalCb === saveStaff &&
+    document.getElementById('m-staff-passcode-status') === statusEl;
+  const editableIds = ['m-name', 'm-legal', 'm-email', 'm-phone', 'm-emergency', 'm-notes', 'm-active'];
+  const detailsSnapshot = () => JSON.stringify([getCheckedRoles(), ...editableIds.map((key) => document.getElementById(key)?.value)]);
+  const originalDetails = detailsSnapshot();
+  const managePasscode = (action) => {
+    if (!isCurrentEdit()) return;
+    if (detailsSnapshot() !== originalDetails) {
+      toast('Save or cancel staff-detail changes before managing the personal passcode.', 't-info');
+      return;
+    }
+    window.openStaffPasscodeById(id, action);
+  };
+  setButton.onclick = () => { if (!setButton.disabled) managePasscode('set'); };
+  resetButton.onclick = () => { if (!resetButton.disabled) managePasscode('rotate'); };
+  try {
+    const status = await staffPasscodeStatusRequest(id);
+    if (!isCurrentEdit()) return;
+    statusEl.textContent = status.passcode_configured
+      ? 'Personal passcode is set. Its current value cannot be displayed.'
+      : 'No active personal passcode is set.';
+    setButton.disabled = status.passcode_configured;
+    resetButton.disabled = !status.passcode_configured;
+  } catch {
+    if (!isCurrentEdit()) return;
+    statusEl.textContent = 'Personal passcode status unavailable. Set/Reset controls are disabled; no credential was changed.';
+  }
 };
 
 function openAddStation() {
@@ -7644,6 +7927,20 @@ async function toggleNight(id, active) {
   await preload(); loadNights(); toast(active ? 'Night reopened' : 'Night closed', 't-ok');
 }
 
+async function copyStaffLoginId(id) {
+  const staff = SESSION.cache.staff.find((row) => row.id === id);
+  const loginId = typeof staff?.staff_login_id === 'string' ? staff.staff_login_id : '';
+  if (!loginId) { toast('Staff ID unavailable in the loaded record.', 't-info'); return; }
+  const input = document.getElementById('m-staff-login-id');
+  try {
+    await navigator.clipboard.writeText(loginId);
+    toast('Staff ID copied', 't-ok');
+  } catch {
+    if (input && document.getElementById('m-staff-login-id') === input && input.value === loginId) input.select();
+    toast('Copy unavailable. Staff ID: ' + loginId, 't-info');
+  }
+}
+
 async function copyCode(code) {
   try {
     await navigator.clipboard.writeText(code);
@@ -7856,8 +8153,8 @@ async function loadInventory() {
       const stPlacements = placements.filter(p => p.station_id === st.id);
       if (!stPlacements.length) return;
 
-      const bt = stPlacements[0]?.['staff!placements_bartender_id_fkey'];
-      const bb = stPlacements[0]?.['staff!placements_barback_id_fkey'];
+      const bt = stPlacements[0]?.bartender;
+      const bb = stPlacements[0]?.barback;
 
       html += `<div class="click-station">
         <div class="click-station-head">
