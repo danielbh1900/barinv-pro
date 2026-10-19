@@ -1426,15 +1426,17 @@ th.sortable span { font-size:10px; }
 
 /* Staff Dispatch UI adapter: scoped to the Staff workspace only. */
 /* Persistent Staff section identity and Returning-only interaction clarity. */
-#staff-dashboard .staff-active-section { position:fixed; top:0; left:0; right:0; z-index:80; min-height:calc(68px + env(safe-area-inset-top,0px)); padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px; background:var(--s1); color:var(--text); border-bottom:4px solid var(--border2); box-shadow:0 2px 8px rgba(0,0,0,.12); }
-#staff-dashboard .staff-active-section-inner { width:min(100%,1280px); margin:0 auto; }
-#staff-dashboard .staff-active-section-caption { display:block; font-size:12px; line-height:16px; font-weight:600; }
-#staff-dashboard #staff-active-section-name { display:block; font-size:24px; line-height:30px; font-weight:800; }
-#staff-dashboard .staff-active-section-space { height:calc(68px + env(safe-area-inset-top,0px)); }
-#staff-dashboard .staff-active-section[data-section="opening"] { border-bottom-color:#ba8b00; }
-#staff-dashboard .staff-active-section[data-section="taking"] { border-bottom-color:#e67e00; }
-#staff-dashboard .staff-active-section[data-section="returning"] { border-bottom-color:#2f9b68; }
-#staff-dashboard .staff-active-section[data-section="transfer"] { border-bottom-color:#7b4bc1; }
+#staff-dashboard { --staff-section-height:100px; --staff-section-safe-top:env(safe-area-inset-top,0px); }
+#staff-dashboard .staff-active-section { position:fixed; top:0; left:0; right:0; z-index:80; display:flex; align-items:center; height:calc(var(--staff-section-height) + var(--staff-section-safe-top)); padding:calc(12px + var(--staff-section-safe-top)) max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px)); background:var(--s1); color:var(--text); border-bottom:4px solid var(--border2); box-shadow:0 2px 8px rgba(0,0,0,.12); }
+#staff-dashboard .staff-active-section-inner { display:flex; flex-direction:column; gap:4px; width:min(100%,1280px); margin:0 auto; }
+#staff-dashboard .staff-active-section-caption { display:block; font-size:12px; line-height:16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+#staff-dashboard #staff-active-section-name { display:block; color:inherit !important; font-size:32px; line-height:40px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+#staff-dashboard .staff-active-section-space { height:calc(var(--staff-section-height) + var(--staff-section-safe-top)); flex-shrink:0; }
+#staff-dashboard [id^="staff-shell-"]:not(#staff-shell-dispatch) :is(input,select,textarea,button,[tabindex]) { scroll-margin-top:calc(var(--staff-section-height) + var(--staff-section-safe-top) + 12px); }
+#staff-dashboard .staff-active-section[data-section="opening"] { background:#e6b22e; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
+#staff-dashboard .staff-active-section[data-section="taking"] { background:#e88918; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
+#staff-dashboard .staff-active-section[data-section="returning"] { background:#2f9b68; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
+#staff-dashboard .staff-active-section[data-section="transfer"] { background:#7b4bc1; color:#fff; border-bottom-color:rgba(0,0,0,.18); }
 #staff-dashboard .staff-returning-help { font-size:13px; line-height:1.5; margin:0 0 14px; color:var(--text); }
 #staff-dashboard .staff-item-card.staff-returning-eligible { border-left:4px solid #2f9b68; }
 #staff-dashboard .staff-return-eligibility-label { margin:5px 0; color:var(--text); font-size:11px; font-weight:800; letter-spacing:.04em; }
