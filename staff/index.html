@@ -4551,13 +4551,17 @@ function staffReturningItemForCandidate(candidate) {
   return { ...item, name: candidate?.name || item.name || '' };
 }
 
-function staffRenderItemFilter(mode, candidates, itemResolver = null) {
+function staffRenderItemFilter(mode, candidates, itemResolver = null, returningLookup = null) {
   const state = staffItemFilterState(mode);
-  const filtered = staffItemFilterCandidates(candidates, state.query, state.category, itemResolver);
+  const lookup = mode === 'returning' ? returningLookup : null;
+  const filtered = lookup ? lookup.visibleCandidates : staffItemFilterCandidates(candidates, state.query, state.category, itemResolver);
   const mount = document.getElementById('staff-item-filter-' + mode);
   if (!mount) return filtered;
-  const categories = staffItemFilterCategories(candidates, itemResolver);
-  mount.innerHTML = `<section class="staff-item-filter" aria-label="Filter Staff Items"><div class="staff-item-filter-row"><div class="staff-item-search-wrap"><input class="staff-item-search-input" id="staff-item-search-${esc(mode)}" type="search" inputmode="search" autocomplete="off" value="${esc(state.query)}" placeholder="Search item, group, SKU, barcode, size..." aria-label="Search eligible ${esc(mode)} Items" oninput="staffItemSearchChanged('${esc(mode)}',this)"><button class="btn btn-ghost staff-item-search-clear" type="button" aria-label="Clear Item search" title="Clear search" onclick="staffItemSearchClear('${esc(mode)}')" ${state.query ? '' : 'disabled'}>×</button></div><button class="btn btn-ghost btn-sm staff-item-filter-scan" type="button" onclick="staffScannerOpen('${esc(mode)}')">SCAN</button><div class="staff-item-filter-count" aria-live="polite">${filtered.length} ${filtered.length === 1 ? 'ITEM' : 'ITEMS'}</div></div><div class="staff-item-category-rail" role="group" aria-label="Eligible Item categories"><button class="staff-item-category-chip ${state.category ? '' : 'is-active'}" type="button" onclick="staffItemCategorySelect('${esc(mode)}','')">ALL</button>${categories.map(category => `<button class="staff-item-category-chip ${state.category === category.key ? 'is-active' : ''}" type="button" data-category="${esc(category.key)}" onclick="staffItemCategorySelect('${esc(mode)}',this.dataset.category)">${esc(category.label)}</button>`).join('')}</div>${filtered.length ? '' : '<div class="staff-item-filter-empty">No matching items</div>'}</section>`;
+  const categories = lookup ? lookup.categories : staffItemFilterCategories(candidates, itemResolver);
+  const countText = lookup ? lookup.countText : `${filtered.length} ${filtered.length === 1 ? 'ITEM' : 'ITEMS'}`;
+  const searchLabel = lookup ? 'Search authorized catalog and returnable Items' : `Search eligible ${mode} Items`;
+  const placeholder = lookup ? 'Find item by name, SKU, barcode, size...' : 'Search item, group, SKU, barcode, size...';
+  mount.innerHTML = `<section class="staff-item-filter" aria-label="Filter Staff Items"><div class="staff-item-filter-row"><div class="staff-item-search-wrap"><input class="staff-item-search-input" id="staff-item-search-${esc(mode)}" type="search" inputmode="search" autocomplete="off" value="${esc(state.query)}" placeholder="${esc(placeholder)}" aria-label="${esc(searchLabel)}" oninput="staffItemSearchChanged('${esc(mode)}',this)"><button class="btn btn-ghost staff-item-search-clear" type="button" aria-label="Clear Item search" title="Clear search" onclick="staffItemSearchClear('${esc(mode)}')" ${state.query ? '' : 'disabled'}>×</button></div><button class="btn btn-ghost btn-sm staff-item-filter-scan" type="button" onclick="staffScannerOpen('${esc(mode)}')">SCAN</button><div class="staff-item-filter-count" aria-live="polite">${esc(countText)}</div></div><div class="staff-item-category-rail" role="group" aria-label="${lookup ? 'Authorized catalog and returnable Item categories' : 'Eligible Item categories'}"><button class="staff-item-category-chip ${state.category ? '' : 'is-active'}" type="button" onclick="staffItemCategorySelect('${esc(mode)}','')">ALL</button>${categories.map(category => `<button class="staff-item-category-chip ${state.category === category.key ? 'is-active' : ''}" type="button" data-category="${esc(category.key)}" onclick="staffItemCategorySelect('${esc(mode)}',this.dataset.category)">${esc(category.label)}</button>`).join('')}</div>${lookup || filtered.length ? '' : '<div class="staff-item-filter-empty">No matching items</div>'}</section>`;
   return filtered;
 }
 
@@ -6269,6 +6273,7 @@ function renderStaffTaking() {
   const grid = document.getElementById('staff-taking-grid');
   const preview = document.getElementById('staff-taking-preview');
   if (!context || !barEl || !summary || !grid || !preview) return;
+  STAFF_TAKING_LOOKUP_DOM_CONTEXT = staffTakingLookupDraftContextKey();
   const visibleItems = staffRenderItemFilter('taking', items);
   if (STAFF_SCALE_CONTEXT.mode !== 'taking' || !items.some(item => String(item.id) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'taking', itemId: String(items[0]?.id || '') };
   staffScaleRenderWidget('taking');
@@ -6352,22 +6357,192 @@ let STAFF_RETURNING_STATE = {};
 let STAFF_RETURNING_SAVING = false;
 let STAFF_RETURNING_ERROR = '';
 
+// Display-only lookup provenance. It never supplies Return movement candidates.
+let STAFF_ITEM_LOOKUP_SESSION_REF = null;
+let STAFF_ITEM_LOOKUP_SESSION_TOKEN = 0;
+let STAFF_TAKING_ITEMS_LOAD = { status: 'idle', contextKey: '', requestToken: 0, error: '' };
+let STAFF_RETURNING_HISTORY_LOAD = { status: 'idle', contextKey: '', requestToken: 0, error: '' };
+let STAFF_RETURNING_RELOAD_TOKEN = 0;
+let STAFF_TAKING_LOOKUP_DOM_CONTEXT = '';
+
+function staffItemLookupContextKey() {
+  const user = SESSION.user;
+  if (SESSION.type !== 'barback' || APP_MODE !== 'staff' || !SESSION.venueId || !user?.nightId || !user.staff_id || !user.assignment_id || !Array.isArray(user.allowed_bar_ids) || !Array.isArray(SESSION.cache.authorizedBars)) return '';
+  if (STAFF_ITEM_LOOKUP_SESSION_REF !== user) {
+    STAFF_ITEM_LOOKUP_SESSION_REF = user;
+    STAFF_ITEM_LOOKUP_SESSION_TOKEN += 1;
+  }
+  const allowed = (user.allowed_bar_ids || []).map(String).sort();
+  const bars = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => String(bar.id)).sort();
+  return JSON.stringify([STAFF_ITEM_LOOKUP_SESSION_TOKEN, SESSION.venueId, user.nightId, user.staff_id, user.assignment_id, user.session_id || '', allowed, bars]);
+}
+
+function staffReturningHistoryContextKey() {
+  const scope = staffItemLookupContextKey();
+  const source = String(STAFF_RETURNING_SOURCE_BAR || '');
+  const authorized = !!scope && staffReturningBars().some(bar => String(bar.id) === source) &&
+    (SESSION.user?.allowed_bar_ids || []).some(id => String(id) === source);
+  return scope && source && authorized ? JSON.stringify([scope, source]) : '';
+}
+
+function staffItemLookupStaleError() {
+  const error = new Error('Staff lookup context changed. Please review the current view again.');
+  error.staffLookupStale = true;
+  return error;
+}
+
+function staffReturningHistoryState() {
+  const contextKey = staffReturningHistoryContextKey();
+  return contextKey && STAFF_RETURNING_HISTORY_LOAD.contextKey === contextKey
+    ? STAFF_RETURNING_HISTORY_LOAD
+    : { status: 'idle', contextKey, error: '' };
+}
+
+function staffReturningRenderIfVisible() {
+  const view = document.getElementById('staff-shell-returning');
+  if (view && view.style.display !== 'none') renderStaffReturning();
+}
+
+function staffTakingLookupDraftContextKey() {
+  const scope = staffItemLookupContextKey();
+  return scope ? JSON.stringify([scope, (STAFF_TAKING_SELECTED_BARS || []).map(String).sort()]) : '';
+}
+
+function staffTakingLookupCaptureDrafts(taking) {
+  const contextKey = staffTakingLookupDraftContextKey();
+  const grid = document.getElementById('staff-taking-grid');
+  if (!contextKey || contextKey !== STAFF_TAKING_LOOKUP_DOM_CONTEXT || !grid) return null;
+  const fields = Array.from(grid.querySelectorAll('input[id^="staff-taking-qty-"], input[id^="staff-taking-weight-"]'))
+    .map(input => ({ id: input.id, value: input.value }));
+  const active = document.activeElement;
+  const focus = active?.id && taking.contains(active)
+    ? { id: active.id, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection }
+    : null;
+  return { contextKey, fields, focus };
+}
+
+function staffTakingLookupRestoreDrafts(draft, taking) {
+  if (!draft || draft.contextKey !== staffTakingLookupDraftContextKey() || draft.contextKey !== STAFF_TAKING_LOOKUP_DOM_CONTEXT) return;
+  const grid = document.getElementById('staff-taking-grid');
+  if (!grid) return;
+  for (const field of draft.fields) {
+    const input = document.getElementById(field.id);
+    // Only controls retained by the freshly rendered eligible catalog survive.
+    if (input?.isConnected && grid.contains(input) && !input.disabled && !input.readOnly) input.value = field.value;
+  }
+  const focus = draft.focus && document.getElementById(draft.focus.id);
+  if (!focus?.isConnected || !taking.contains(focus) || focus.disabled || focus.readOnly || !focus.getClientRects().length) return;
+  try { focus.focus({ preventScroll: true }); } catch { focus.focus(); }
+  if (Number.isInteger(draft.focus.start) && Number.isInteger(draft.focus.end)) {
+    try { focus.setSelectionRange(draft.focus.start, draft.focus.end, draft.focus.direction || 'none'); } catch {}
+  }
+}
+
+function staffItemLookupRenderVisibleViews() {
+  staffReturningRenderIfVisible();
+  const taking = document.getElementById('staff-shell-taking');
+  if (taking && taking.style.display !== 'none') {
+    const draft = staffTakingLookupCaptureDrafts(taking);
+    renderStaffTaking();
+    staffTakingLookupRestoreDrafts(draft, taking);
+  }
+  const transfer = document.getElementById('staff-shell-transfer');
+  if (transfer && transfer.style.display !== 'none') renderStaffTransfer();
+}
+
+function staffReturningLookupModel(candidates) {
+  const state = staffItemFilterState('returning');
+  const history = staffReturningHistoryState();
+  const scope = staffItemLookupContextKey();
+  const catalogStatus = scope && STAFF_TAKING_ITEMS_LOAD.contextKey === scope ? STAFF_TAKING_ITEMS_LOAD.status : 'idle';
+  const catalogReady = catalogStatus === 'ready';
+  const catalog = catalogReady ? (SESSION.cache.takingItems || []).filter(item => item && item.active !== false) : [];
+  const searching = !!staffItemSearchNormalize(state.query) || !!state.category;
+  const catalogMatches = searching ? staffItemFilterCandidates(catalog, state.query, state.category) : [];
+  const eligibleById = new Map(candidates.map(candidate => [String(candidate.itemId), candidate]));
+  const visibleCandidates = staffItemFilterCandidates(candidates, state.query, state.category, staffReturningItemForCandidate);
+  // Existing eligible IDs may also match already-authorized catalog metadata.
+  // Keep the original history candidate; catalog data cannot create eligibility.
+  for (const item of catalogMatches) {
+    const candidate = eligibleById.get(String(item.id));
+    if (candidate && !visibleCandidates.some(row => String(row.itemId) === String(item.id))) visibleCandidates.push(candidate);
+  }
+  const informationalItems = catalogMatches.filter(item => !eligibleById.has(String(item.id)));
+  const categories = staffItemFilterCategories([...candidates.map(staffReturningItemForCandidate), ...catalog]);
+  const catalogCount = catalogReady ? `${informationalItems.length} CATALOG INFO` :
+    catalogStatus === 'loading' ? 'CATALOG LOADING' : catalogStatus === 'error' ? 'CATALOG LOAD ERROR' : 'CATALOG UNVERIFIED';
+  const countText = history.status === 'ready'
+    ? `${visibleCandidates.length} OF ${candidates.length} RETURNABLE · ${catalogCount}`
+    : `${history.status === 'loading' ? 'RETURN HISTORY LOADING' : 'RETURN ELIGIBILITY UNVERIFIED'} · ${catalogCount}`;
+  return { history, catalogStatus, catalogReady, searching, visibleCandidates, informationalItems, categories, countText };
+}
+
+function staffReturningLookupMarkup(lookup) {
+  const reason = lookup.history.status === 'ready'
+    ? 'Not returnable from this Bar: no remaining quantity in approved history.'
+    : 'Return eligibility is unverified until approved history loads successfully.';
+  const info = lookup.informationalItems.map(item => `<div class="staff-returning-catalog-info panel" data-info-item-id="${esc(item.id)}" style="padding:14px;margin-bottom:10px;"><div class="staff-item-name">${esc(item.name || item.id)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-meta">CATALOG INFORMATION ONLY</div><div class="staff-item-meta">${esc(reason)}</div></div>`).join('');
+  const catalogStatusText = lookup.catalogStatus === 'loading' ? 'Authorized catalog lookup is loading.' :
+    lookup.catalogStatus === 'error' ? 'Authorized catalog lookup could not be loaded.' : 'Authorized catalog lookup is unverified.';
+  const catalogMessage = lookup.catalogReady ? '' : `<div class="empty-text staff-returning-catalog-unavailable" data-catalog-state="${esc(lookup.catalogStatus)}">${esc(catalogStatusText)} A missing search result does not establish that an Item is absent.</div>`;
+  const noMatch = lookup.searching && lookup.catalogReady && !lookup.visibleCandidates.length && !lookup.informationalItems.length
+    ? `<div class="empty-text staff-returning-search-empty">${lookup.history.status === 'ready' ? 'No matching items in the authorized catalog or current returnable history.' : 'No matching items in the authorized catalog. Return eligibility remains unverified.'}</div>` : '';
+  const pending = lookup.history.status === 'loading' || (STAFF_TAKING_ITEMS_LOAD.contextKey === staffItemLookupContextKey() && STAFF_TAKING_ITEMS_LOAD.status === 'loading');
+  return `${catalogMessage}${noMatch}${info}<button class="btn btn-ghost btn-sm" id="staff-returning-reload" type="button" onclick="staffReturningReloadHistory()" ${pending ? 'disabled' : ''}>Reload approved history and catalog</button>`;
+}
+
 async function hydrateStaffReturningHistory() {
   const user = SESSION.user || {};
   const barIds = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => bar.id);
-  if (!SESSION.venueId || !user.nightId || !barIds.length) {
-    SESSION.cache.returningHistory = [];
+  const contextKey = staffReturningHistoryContextKey();
+  const requestToken = STAFF_RETURNING_HISTORY_LOAD.requestToken + 1;
+  STAFF_RETURNING_HISTORY_LOAD = { status: 'loading', contextKey, requestToken, error: '' };
+  SESSION.cache.returningHistory = [];
+  staffReturningRenderIfVisible();
+  if (!contextKey || !SESSION.venueId || !user.nightId || !barIds.length) {
+    STAFF_RETURNING_HISTORY_LOAD = { status: 'idle', contextKey, requestToken, error: '' };
+    staffReturningRenderIfVisible();
     return [];
   }
-  const { data, error } = await SB.from('events')
-    .select('venue_id, night_id, bar_id, item_id, action, status, qty, notes, items(id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url)')
-    .eq('venue_id', SESSION.venueId)
-    .eq('night_id', user.nightId)
-    .in('bar_id', barIds)
-    .eq('status', 'APPROVED');
-  if (error) throw new Error('Approved return history could not be loaded.');
-  SESSION.cache.returningHistory = Array.isArray(data) ? data : [];
-  return SESSION.cache.returningHistory;
+  const ownsRequest = () => STAFF_RETURNING_HISTORY_LOAD.requestToken === requestToken &&
+    STAFF_RETURNING_HISTORY_LOAD.contextKey === contextKey && staffReturningHistoryContextKey() === contextKey;
+  try {
+    const { data, error } = await SB.from('events')
+      .select('venue_id, night_id, bar_id, item_id, action, status, qty, notes, items(id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url)')
+      .eq('venue_id', SESSION.venueId)
+      .eq('night_id', user.nightId)
+      .in('bar_id', barIds)
+      .eq('status', 'APPROVED');
+    if (!ownsRequest()) throw staffItemLookupStaleError();
+    if (error) throw new Error('Approved return history could not be loaded.');
+    SESSION.cache.returningHistory = Array.isArray(data) ? data : [];
+    STAFF_RETURNING_HISTORY_LOAD = { status: 'ready', contextKey, requestToken, error: '' };
+    staffReturningRenderIfVisible();
+    return SESSION.cache.returningHistory;
+  } catch (error) {
+    if (!ownsRequest()) throw staffItemLookupStaleError();
+    SESSION.cache.returningHistory = [];
+    STAFF_RETURNING_HISTORY_LOAD = { status: 'error', contextKey, requestToken, error: 'Approved return history could not be loaded.' };
+    staffReturningRenderIfVisible();
+    throw error;
+  }
+}
+
+async function staffReturningReloadHistory() {
+  if (!staffOperationalGuard()) return;
+  const contextKey = staffReturningHistoryContextKey();
+  const operation = ++STAFF_RETURNING_RELOAD_TOKEN;
+  staffReturningSetError('');
+  const loads = [hydrateStaffReturningHistory(), hydrateStaffTakingItems()];
+  const outcomes = await Promise.allSettled(loads);
+  if (operation !== STAFF_RETURNING_RELOAD_TOKEN || contextKey !== staffReturningHistoryContextKey()) return;
+  for (const outcome of outcomes) {
+    if (outcome.status === 'rejected' && !outcome.reason?.staffLookupStale) {
+      staffReturningSetError(outcome.reason?.message || 'Staff lookup could not be refreshed.');
+      break;
+    }
+  }
+  staffReturningRenderIfVisible();
 }
 
 function staffReturningSetError(message, ok = false) {
@@ -6383,6 +6558,7 @@ function staffReturningBars() {
 }
 
 function staffReturningCandidates() {
+  if (staffReturningHistoryState().status !== 'ready') return [];
   const user = SESSION.user || {};
   const sourceBar = String(STAFF_RETURNING_SOURCE_BAR || '');
   const candidates = new Map();
@@ -6460,6 +6636,7 @@ function staffReturningValidateState() {
 
 function renderStaffReturning() {
   const bars = staffReturningBars();
+  if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
   const source = bars.find(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR));
   const candidates = staffReturningCandidates();
   const context = document.getElementById('staff-returning-context');
@@ -6469,26 +6646,33 @@ function renderStaffReturning() {
   const preview = document.getElementById('staff-returning-preview');
   const user = SESSION.user || {};
   if (!context || !select || !summary || !grid || !preview) return;
-  const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate);
-  if (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
+  const lookup = staffReturningLookupModel(candidates);
+  const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate, lookup);
+  if (lookup.history.status === 'ready' && (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId))) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
-  if (!source && bars.length) STAFF_RETURNING_SOURCE_BAR = String(bars[0].id);
   select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
   const requested = rows.reduce((sum, row) => sum + row.qty, 0);
-  summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${source ? esc(source.name) : '—'}</div><div class="stat-lbl">SOURCE BAR</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(available)}</div><div class="stat-lbl">AVAILABLE</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${staffFormatQuantity(requested)}</div><div class="stat-lbl">RETURN QTY</div></div>`;
+  summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${source ? esc(source.name) : '—'}</div><div class="stat-lbl">SOURCE BAR</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${lookup.history.status === 'ready' ? staffFormatQuantity(available) : '—'}</div><div class="stat-lbl">AVAILABLE</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${lookup.history.status === 'ready' ? staffFormatQuantity(requested) : '—'}</div><div class="stat-lbl">RETURN QTY</div></div>`;
   if (!source || !bars.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No authorized source Bars are available.</div></div>';
+  } else if (lookup.history.status === 'loading') {
+    grid.innerHTML = '<div class="empty staff-returning-loading"><div class="empty-text">Loading approved return history. Return eligibility is not yet verified.</div></div>';
+  } else if (lookup.history.status === 'idle') {
+    grid.innerHTML = '<div class="empty staff-returning-unverified"><div class="empty-text">Approved return history has not been loaded for this context. Reload to verify return eligibility.</div></div>';
+  } else if (lookup.history.status === 'error') {
+    grid.innerHTML = '<div class="empty staff-returning-load-error"><div class="empty-text">Approved return history could not be loaded. Return eligibility is unverified; reload to try again.</div></div>';
   } else if (!candidates.length) {
-    grid.innerHTML = '<div class="empty"><div class="empty-text">No approved delivered items are available to return for the selected bar.</div></div>';
+    grid.innerHTML = '<div class="empty staff-returning-no-eligible"><div class="empty-text">No approved delivered items are available to return for the selected bar.</div></div>';
   } else if (!visibleCandidates.length) {
-    grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
+    grid.innerHTML = `<div class="empty"><div class="empty-text">${lookup.informationalItems.length ? 'No matching returnable items. Catalog matches below are informational only.' : 'No matching returnable items for the current search and category.'}</div></div>`;
   } else {
     grid.innerHTML = visibleCandidates.map(candidate => { const value = STAFF_RETURNING_STATE[candidate.itemId]; const qty = value && typeof value === 'object' ? value.qty : value ?? 0; const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate.itemId))?.items || {}; const profile = staffScaleProfile(item); const measurement = value && typeof value === 'object' ? value.measurement : null; return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(candidate.name || candidate.itemId)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">Available from approved history: ${esc(staffFormatQuantity(candidate.remaining))}</div><input type="number" min="0" max="${esc(staffFormatQuantity(candidate.remaining))}" step="any" value="${esc(staffFormatQuantity(qty))}" aria-label="Return ${esc(candidate.name || candidate.itemId)} from ${esc(source?.name || 'Bar')}" onchange="staffReturningInput('${esc(candidate.itemId)}',this.value)" style="width:100px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;">${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-returning-weight-${esc(candidate.itemId)}" placeholder="grams" aria-label="Measured return grams ${esc(candidate.name || candidate.itemId)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffReturningApplyWeight('${esc(candidate.itemId)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('returning','${esc(candidate.itemId)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}` : ''}</div>`; }).join('');
   }
   staffDispatchDecorateReturningCards(visibleCandidates, source);
+  grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.candidate.name || row.candidate.itemId)}</td><td>${esc(source?.name || row.candidate.barId)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(row.candidate.itemId))?.items || {}, row.measurement))}` : ''}</td><td>MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
   staffReturningSetError(STAFF_RETURNING_ERROR);
 }
@@ -6501,7 +6685,7 @@ async function staffReturningSourceChanged(barId) {
   STAFF_RETURNING_STATE = {};
   STAFF_RETURNING_ERROR = '';
   try { await hydrateStaffReturningHistory(); renderStaffReturning(); }
-  catch (error) { staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
+  catch (error) { if (!error?.staffLookupStale) staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
 }
 
 async function openStaffReturning() {
@@ -6511,7 +6695,7 @@ async function openStaffReturning() {
   STAFF_RETURNING_ERROR = '';
   showStaffShellView('returning');
   try { await hydrateStaffReturningHistory(); renderStaffReturning(); }
-  catch (error) { staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
+  catch (error) { if (!error?.staffLookupStale) staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
 }
 
 async function saveStaffReturning() {
@@ -6876,13 +7060,33 @@ async function hydrateStaffOpeningItems() {
 }
 
 async function hydrateStaffTakingItems() {
-  const { data, error } = await SB.from('items')
-    .select('id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url')
-    .eq('active', true)
-    .order('name');
-  if (error) throw new Error('Taking Items could not be loaded.');
-  SESSION.cache.takingItems = (data || []).filter(item => item && item.active !== false);
-  return SESSION.cache.takingItems;
+  const contextKey = staffItemLookupContextKey();
+  const requestToken = STAFF_TAKING_ITEMS_LOAD.requestToken + 1;
+  const preserveCatalog = !!contextKey && STAFF_TAKING_ITEMS_LOAD.contextKey === contextKey &&
+    (STAFF_TAKING_ITEMS_LOAD.status === 'ready' || STAFF_TAKING_ITEMS_LOAD.hasVerifiedCache === true);
+  STAFF_TAKING_ITEMS_LOAD = { status: 'loading', contextKey, requestToken, error: '', hasVerifiedCache: preserveCatalog };
+  if (!preserveCatalog) SESSION.cache.takingItems = [];
+  staffItemLookupRenderVisibleViews();
+  const ownsRequest = () => !!contextKey && STAFF_TAKING_ITEMS_LOAD.requestToken === requestToken &&
+    STAFF_TAKING_ITEMS_LOAD.contextKey === contextKey && staffItemLookupContextKey() === contextKey;
+  try {
+    const { data, error } = await SB.from('items')
+      .select('id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url')
+      .eq('active', true)
+      .order('name');
+    if (!ownsRequest()) throw staffItemLookupStaleError();
+    if (error) throw new Error('Taking Items could not be loaded.');
+    SESSION.cache.takingItems = (data || []).filter(item => item && item.active !== false);
+    STAFF_TAKING_ITEMS_LOAD = { status: 'ready', contextKey, requestToken, error: '', hasVerifiedCache: true };
+    staffItemLookupRenderVisibleViews();
+    return SESSION.cache.takingItems;
+  } catch (error) {
+    if (!ownsRequest()) throw staffItemLookupStaleError();
+    if (!preserveCatalog) SESSION.cache.takingItems = [];
+    STAFF_TAKING_ITEMS_LOAD = { status: 'error', contextKey, requestToken, error: 'Taking Items could not be loaded.', hasVerifiedCache: preserveCatalog };
+    staffItemLookupRenderVisibleViews();
+    throw error;
+  }
 }
 
 async function hydrateStaffSession({ session, claims, loginResult = null, typedName = null }) {
