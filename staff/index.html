@@ -1498,6 +1498,7 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-item-search-clear { position:absolute; top:50%; right:5px; transform:translateY(-50%); width:34px; min-width:34px; min-height:34px; padding:0; border-radius:8px; }
 #staff-dashboard .staff-item-search-clear:disabled { opacity:.35; cursor:default; }
 #staff-dashboard .staff-item-filter-count { white-space:nowrap; color:#5f503b; font:700 10px/1.2 'Fira Mono',monospace; letter-spacing:.06em; }
+#staff-dashboard #staff-item-filter-returning .staff-item-filter-count { grid-column:1 / -1; min-width:0; white-space:normal; overflow-wrap:anywhere; }
 #staff-dashboard .staff-item-filter-scan { min-height:44px; white-space:nowrap; }
 #staff-dashboard .staff-item-category-rail { display:flex; gap:7px; max-width:100%; min-width:0; margin-top:10px; padding:1px 0 5px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-inline:contain; scrollbar-width:thin; }
 #staff-dashboard .staff-item-category-chip { flex:0 0 auto; min-height:38px; padding:7px 11px; border:1px solid #cab588; border-radius:999px; background:#fdf9f0; color:#5f503b; font:700 10px/1 'Fira Mono',monospace; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
@@ -3181,7 +3182,7 @@ th.sortable span { font-size:10px; }
       <div class="field" style="margin-bottom:14px;"><label>Source Bar</label><select id="staff-returning-source-bar" onchange="staffReturningSourceChanged(this.value)"></select></div>
       <div id="staff-returning-summary" class="fg fg-3" style="margin-bottom:16px;"></div>
       <div id="staff-returning-error" class="alert alert-err"></div>
-      <p id="staff-returning-interaction-help" class="staff-returning-help"><strong>Returnable items:</strong> edit Return quantity or use the weighing controls, then review Preview and choose Save / Submit. <strong>Catalog information:</strong> read-only; these cards have no return controls.</p>
+      <p id="staff-returning-interaction-help" class="staff-returning-help"><strong>Returnable items:</strong> edit Return quantity or use the weighing controls, then review Preview and choose Save / Submit. <strong>Delivered history:</strong> only approved Bar-applicable deliveries for this Bar and Night are shown. Fully returned Items remain read-only. Bar reconciliation/closure is not confirmed here.</p>
       <div id="staff-item-filter-returning"></div>
       <div id="staff-returning-grid"></div>
       <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
@@ -4580,7 +4581,7 @@ function staffItemFilterState(mode) {
 }
 
 function staffReturningItemForCandidate(candidate) {
-  const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate?.itemId))?.items || {};
+  const item = candidate?.item || SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate?.itemId))?.items || {};
   return { ...item, name: candidate?.name || item.name || '' };
 }
 
@@ -4592,9 +4593,9 @@ function staffRenderItemFilter(mode, candidates, itemResolver = null, returningL
   if (!mount) return filtered;
   const categories = lookup ? lookup.categories : staffItemFilterCategories(candidates, itemResolver);
   const countText = lookup ? lookup.countText : `${filtered.length} ${filtered.length === 1 ? 'ITEM' : 'ITEMS'}`;
-  const searchLabel = lookup ? 'Search authorized catalog and returnable Items' : `Search eligible ${mode} Items`;
+  const searchLabel = lookup ? 'Search approved delivered Items for this Bar and Night' : `Search eligible ${mode} Items`;
   const placeholder = lookup ? 'Find item by name, SKU, barcode, size...' : 'Search item, group, SKU, barcode, size...';
-  mount.innerHTML = `<section class="staff-item-filter" aria-label="Filter Staff Items"><div class="staff-item-filter-row"><div class="staff-item-search-wrap"><input class="staff-item-search-input" id="staff-item-search-${esc(mode)}" type="search" inputmode="search" autocomplete="off" value="${esc(state.query)}" placeholder="${esc(placeholder)}" aria-label="${esc(searchLabel)}" oninput="staffItemSearchChanged('${esc(mode)}',this)"><button class="btn btn-ghost staff-item-search-clear" type="button" aria-label="Clear Item search" title="Clear search" onclick="staffItemSearchClear('${esc(mode)}')" ${state.query ? '' : 'disabled'}>×</button></div><button class="btn btn-ghost btn-sm staff-item-filter-scan" type="button" onclick="staffScannerOpen('${esc(mode)}')">SCAN</button><div class="staff-item-filter-count" aria-live="polite">${esc(countText)}</div></div><div class="staff-item-category-rail" role="group" aria-label="${lookup ? 'Authorized catalog and returnable Item categories' : 'Eligible Item categories'}"><button class="staff-item-category-chip ${state.category ? '' : 'is-active'}" type="button" onclick="staffItemCategorySelect('${esc(mode)}','')">ALL</button>${categories.map(category => `<button class="staff-item-category-chip ${state.category === category.key ? 'is-active' : ''}" type="button" data-category="${esc(category.key)}" onclick="staffItemCategorySelect('${esc(mode)}',this.dataset.category)">${esc(category.label)}</button>`).join('')}</div>${lookup || filtered.length ? '' : '<div class="staff-item-filter-empty">No matching items</div>'}</section>`;
+  mount.innerHTML = `<section class="staff-item-filter" aria-label="Filter Staff Items"><div class="staff-item-filter-row"><div class="staff-item-search-wrap"><input class="staff-item-search-input" id="staff-item-search-${esc(mode)}" type="search" inputmode="search" autocomplete="off" value="${esc(state.query)}" placeholder="${esc(placeholder)}" aria-label="${esc(searchLabel)}" oninput="staffItemSearchChanged('${esc(mode)}',this)"><button class="btn btn-ghost staff-item-search-clear" type="button" aria-label="Clear Item search" title="Clear search" onclick="staffItemSearchClear('${esc(mode)}')" ${state.query ? '' : 'disabled'}>×</button></div><button class="btn btn-ghost btn-sm staff-item-filter-scan" type="button" onclick="staffScannerOpen('${esc(mode)}')">SCAN</button><div class="staff-item-filter-count" aria-live="polite">${esc(countText)}</div></div><div class="staff-item-category-rail" role="group" aria-label="${lookup ? 'Approved delivered Item categories' : 'Eligible Item categories'}"><button class="staff-item-category-chip ${state.category ? '' : 'is-active'}" type="button" onclick="staffItemCategorySelect('${esc(mode)}','')">ALL</button>${categories.map(category => `<button class="staff-item-category-chip ${state.category === category.key ? 'is-active' : ''}" type="button" data-category="${esc(category.key)}" onclick="staffItemCategorySelect('${esc(mode)}',this.dataset.category)">${esc(category.label)}</button>`).join('')}</div>${lookup || filtered.length ? '' : '<div class="staff-item-filter-empty">No matching items</div>'}</section>`;
   return filtered;
 }
 
@@ -6197,7 +6198,16 @@ function staffDispatchResetItem(mode, itemId) {
   if (!staffOperationalGuard()) return;
   const id = String(itemId);
   if (mode === 'taking') { delete STAFF_TAKING_STATE[id]; renderStaffTaking(); }
-  else if (mode === 'returning') { delete STAFF_RETURNING_STATE[id]; renderStaffReturning(); }
+  else if (mode === 'returning') {
+    delete STAFF_RETURNING_STATE[id];
+    for (const kind of ['qty', 'weight']) {
+      const fieldId = 'staff-returning-' + kind + '-' + id;
+      delete STAFF_RETURNING_DOM_DRAFT.fields[fieldId];
+      const input = document.getElementById(fieldId);
+      if (input) input.value = kind === 'qty' ? '0' : '';
+    }
+    renderStaffReturning();
+  }
   else if (mode === 'transfer') { STAFF_TRANSFER_STATE.measurement = null; STAFF_TRANSFER_STATE.qty = 1; renderStaffTransfer(); }
 }
 
@@ -6281,14 +6291,14 @@ function staffDispatchDecorateReturningCards(candidates, source) {
   Array.from(grid.children).forEach((card, index) => {
     const candidate = candidates[index];
     if (!candidate || !card.classList.contains('panel')) return;
-    const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate.itemId))?.items || {};
+    const item = staffReturningItemForCandidate(candidate);
     const value = STAFF_RETURNING_STATE[candidate.itemId];
     const qty = value && typeof value === 'object' ? value.qty : value || 0;
     card.classList.add('staff-item-card', 'staff-item-card-dispatch', 'staff-returning-eligible');
     card.dataset.returnEligibility = 'eligible';
     card.dataset.staffItemId = String(candidate.itemId);
     Array.from(card.children).slice(0, 2).forEach(child => { child.style.display = 'none'; });
-    card.insertAdjacentHTML('afterbegin', `<div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(candidate.name || candidate.itemId)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-return-eligibility-label">RETURNABLE</div><div class="staff-item-net">Available to return: ${esc(staffFormatQuantity(candidate.remaining))}</div>${value?.measurement ? `<div class="staff-item-net">${esc(staffScaleMeasurementSummary(item, value.measurement))}</div>` : ''}</div></div><div class="staff-item-chips"><span class="staff-item-chip staff-item-chip-taken">TAKEN ${esc(staffFormatQuantity(candidate.delivered || 0))}</span><span class="staff-item-chip staff-item-chip-returned">RETURNED ${esc(staffFormatQuantity(candidate.returned || 0))}</span><span class="staff-item-chip staff-item-chip-selected">SELECTED ${esc(staffFormatQuantity(qty))}</span></div>`);
+    card.insertAdjacentHTML('afterbegin', `<div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(candidate.name || candidate.itemId)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-return-eligibility-label">RETURNABLE</div><div class="staff-item-net">Available to return: ${esc(staffFormatQuantity(candidate.remaining))}</div>${value?.measurement ? `<div class="staff-item-net">${esc(staffScaleMeasurementSummary(item, value.measurement))}</div>` : ''}</div></div><div class="staff-item-chips"><span class="staff-item-chip staff-item-chip-taken">DELIVERED ${esc(staffFormatQuantity(candidate.delivered || 0))}</span><span class="staff-item-chip staff-item-chip-returned">RETURNED ${esc(staffFormatQuantity(candidate.returned || 0))}</span><span class="staff-item-chip staff-item-chip-selected">SELECTED ${esc(staffFormatQuantity(qty))}</span></div>`);
     const quantity = card.querySelector('input[type="number"]');
     staffDispatchInstallStepper(card, quantity, `<button class="btn btn-ghost btn-sm" type="button" aria-label="Decrease Return quantity" onclick="staffReturningAdjust('${esc(candidate.itemId)}',-1)">−</button>`, `<button class="btn btn-ghost btn-sm" type="button" aria-label="Increase Return quantity" onclick="staffReturningAdjust('${esc(candidate.itemId)}',1)">+</button>`);
     if (quantity) {
@@ -6395,6 +6405,7 @@ let STAFF_RETURNING_STATE = {};
 let STAFF_RETURNING_SAVING = false;
 let STAFF_RETURNING_ERROR = '';
 let STAFF_RETURNING_ERROR_OK = false;
+let STAFF_RETURNING_DOM_DRAFT = { contextKey: '', fields: {}, focus: null };
 
 // Display-only lookup provenance. It never supplies Return movement candidates.
 let STAFF_ITEM_LOOKUP_SESSION_REF = null;
@@ -6489,51 +6500,60 @@ function staffItemLookupRenderVisibleViews() {
   if (transfer && transfer.style.display !== 'none') renderStaffTransfer();
 }
 
+// Returning requires explicit persisted Bar applicability; never infer from Item presentation.
+function staffReturningBarApplicable(item) {
+  return item?.service_mode === 'regular_bar' || item?.service_mode === 'all_bars';
+}
+
 function staffReturningLookupModel(candidates) {
   const state = staffItemFilterState('returning');
   const history = staffReturningHistoryState();
-  const scope = staffItemLookupContextKey();
-  const catalogStatus = scope && STAFF_TAKING_ITEMS_LOAD.contextKey === scope ? STAFF_TAKING_ITEMS_LOAD.status : 'idle';
-  const catalogReady = catalogStatus === 'ready';
-  const catalog = catalogReady ? (SESSION.cache.takingItems || []).filter(item => item && item.active !== false) : [];
+  const historyItems = staffReturningHistoryItems();
+  const visibleHistoryItems = staffItemFilterCandidates(historyItems, state.query, state.category, staffReturningItemForCandidate);
+  const eligibleIds = new Set(candidates.map(candidate => String(candidate.itemId)));
+  const visibleCandidates = visibleHistoryItems.filter(candidate => eligibleIds.has(String(candidate.itemId)));
+  const completedItems = visibleHistoryItems.filter(candidate => !candidate.quantityError && candidate.remaining === 0);
+  const unverifiedItems = visibleHistoryItems.filter(candidate => candidate.quantityError);
+  const categories = staffItemFilterCategories(historyItems, staffReturningItemForCandidate);
   const searching = !!staffItemSearchNormalize(state.query) || !!state.category;
-  const catalogMatches = searching ? staffItemFilterCandidates(catalog, state.query, state.category) : [];
-  const eligibleById = new Map(candidates.map(candidate => [String(candidate.itemId), candidate]));
-  const visibleCandidates = staffItemFilterCandidates(candidates, state.query, state.category, staffReturningItemForCandidate);
-  // Existing eligible IDs may also match already-authorized catalog metadata.
-  // Keep the original history candidate; catalog data cannot create eligibility.
-  for (const item of catalogMatches) {
-    const candidate = eligibleById.get(String(item.id));
-    if (candidate && !visibleCandidates.some(row => String(row.itemId) === String(item.id))) visibleCandidates.push(candidate);
-  }
-  const informationalItems = catalogMatches.filter(item => !eligibleById.has(String(item.id)));
-  const categories = staffItemFilterCategories([...candidates.map(staffReturningItemForCandidate), ...catalog]);
-  const catalogCount = catalogReady ? `${informationalItems.length} CATALOG INFO` :
-    catalogStatus === 'loading' ? 'CATALOG LOADING' : catalogStatus === 'error' ? 'CATALOG LOAD ERROR' : 'CATALOG UNVERIFIED';
+  const approvedDeliveryEventCount = staffReturningApprovedEvents().filter(event =>
+    ['DELIVERED', 'TAKEN'].includes(String(event.action || '').toUpperCase())).length;
+  const pendingDeliveryStatus = history.pendingDeliveryStatus || 'unverified';
+  const pendingDeliveryCount = pendingDeliveryStatus === 'ready' ? history.pendingDeliveryCount : null;
+  const classificationUnverified = staffReturningApprovedEvents().some(event =>
+    ['DELIVERED', 'TAKEN'].includes(String(event.action || '').toUpperCase()) &&
+    !['regular_bar', 'all_bars', 'vip_only'].includes(event.items?.service_mode));
   const countText = history.status === 'ready'
-    ? `${visibleCandidates.length} OF ${candidates.length} RETURNABLE · ${catalogCount}`
-    : `${history.status === 'loading' ? 'RETURN HISTORY LOADING' : 'RETURN ELIGIBILITY UNVERIFIED'} · ${catalogCount}`;
-  return { history, catalogStatus, catalogReady, searching, visibleCandidates, informationalItems, categories, countText };
+    ? `${visibleHistoryItems.length} OF ${historyItems.length} DELIVERED ITEMS · ${visibleCandidates.length} RETURNABLE · ${completedItems.length} FULLY RETURNED${unverifiedItems.length ? ` · ${unverifiedItems.length} NEED REVIEW` : ''}`
+    : history.status === 'loading' ? 'APPROVED HISTORY LOADING' : 'APPROVED HISTORY UNVERIFIED';
+  return { history, historyItems, visibleHistoryItems, visibleCandidates, completedItems, unverifiedItems, approvedDeliveryEventCount, pendingDeliveryStatus, pendingDeliveryCount, classificationUnverified, categories, searching, countText };
 }
 
 function staffReturningLookupMarkup(lookup) {
-  const reason = lookup.history.status === 'ready'
-    ? 'Not returnable from this Bar: no remaining quantity in approved history.'
-    : 'Return eligibility is unverified until approved history loads successfully.';
-  const info = lookup.informationalItems.map(item => `<div class="staff-returning-catalog-info panel staff-item-card" data-return-eligibility="informational" data-info-item-id="${esc(item.id)}" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name || item.id)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div></div></div><div class="staff-return-eligibility-label">CATALOG INFORMATION ONLY</div><div class="staff-item-meta">${esc(reason)}</div></div>`).join('');
-  const catalogStatusText = lookup.catalogStatus === 'loading' ? 'Authorized catalog lookup is loading.' :
-    lookup.catalogStatus === 'error' ? 'Authorized catalog lookup could not be loaded.' : 'Authorized catalog lookup is unverified.';
-  const catalogMessage = lookup.catalogReady ? '' : `<div class="empty-text staff-returning-catalog-unavailable" data-catalog-state="${esc(lookup.catalogStatus)}">${esc(catalogStatusText)} A missing search result does not establish that an Item is absent.</div>`;
-  const noMatch = lookup.searching && lookup.catalogReady && !lookup.visibleCandidates.length && !lookup.informationalItems.length
-    ? `<div class="empty-text staff-returning-search-empty">${lookup.history.status === 'ready' ? 'No matching items in the authorized catalog or current returnable history.' : 'No matching items in the authorized catalog. Return eligibility remains unverified.'}</div>` : '';
-  const pending = lookup.history.status === 'loading' || (STAFF_TAKING_ITEMS_LOAD.contextKey === staffItemLookupContextKey() && STAFF_TAKING_ITEMS_LOAD.status === 'loading');
-  return `${catalogMessage}${noMatch}${info}<button class="btn btn-ghost btn-sm" id="staff-returning-reload" type="button" onclick="staffReturningReloadHistory()" ${pending ? 'disabled' : ''}>Reload approved history and catalog</button>`;
+  const auditCards = [...lookup.completedItems, ...lookup.unverifiedItems].map(candidate => {
+    const item = staffReturningItemForCandidate(candidate);
+    const unverified = !!candidate.quantityError;
+    const amount = value => unverified ? '—' : staffFormatQuantity(value);
+    return `<div class="staff-returning-history-audit panel staff-item-card" data-return-eligibility="${unverified ? 'unverified' : 'completed'}" data-history-item-id="${esc(candidate.itemId)}" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(candidate.name || candidate.itemId)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div></div></div><div class="staff-return-eligibility-label">${unverified ? 'QUANTITY NEEDS MANAGER REVIEW' : 'FULLY RETURNED · HISTORY ONLY'}</div><div class="staff-item-chips"><span class="staff-item-chip staff-item-chip-taken">DELIVERED ${esc(amount(candidate.delivered))}</span><span class="staff-item-chip staff-item-chip-returned">RETURNED ${esc(amount(candidate.returned))}</span><span class="staff-item-chip">REMAINING ${esc(amount(candidate.remaining))}</span></div><div class="staff-item-meta">${unverified ? 'Approved history has invalid measurement metadata or inconsistent quantities. Return selection is blocked until reviewed.' : 'No remaining returnable quantity. This history is read-only; it does not establish that this Bar is reconciled or closed.'}</div></div>`;
+  }).join('');
+  const classificationMessage = lookup.classificationUnverified ? '<div class="empty-text staff-returning-classification-unverified">Some approved delivery history has no verified Bar item classification. Those Items are not selectable; ask a Manager to review their metadata.</div>' : '';
+  const pendingMessage = lookup.history.status === 'ready'
+    ? lookup.pendingDeliveryStatus !== 'ready'
+      ? '<div class="empty-text staff-returning-pending-unverified">Pending delivery status is unavailable. This does not change eligibility from verified approved history.</div>'
+      : lookup.pendingDeliveryCount > 0 && lookup.approvedDeliveryEventCount > 0
+        ? '<div class="empty-text staff-returning-pending-approval">Additional delivery records are awaiting approval. Only verified approved delivery balances are returnable.</div>' : ''
+    : '';
+  const pending = lookup.history.status === 'loading';
+  return `${classificationMessage}${pendingMessage}${auditCards}<button class="btn btn-ghost btn-sm" id="staff-returning-reload" type="button" onclick="staffReturningReloadHistory()" ${pending ? 'disabled' : ''}>Reload approved history</button>`;
 }
 
 async function hydrateStaffReturningHistory() {
   const user = SESSION.user || {};
   const barIds = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => bar.id);
   const contextKey = staffReturningHistoryContextKey();
+  const venueId = SESSION.venueId;
+  const nightId = user.nightId;
+  const sourceBar = String(STAFF_RETURNING_SOURCE_BAR || '');
   const requestToken = STAFF_RETURNING_HISTORY_LOAD.requestToken + 1;
   STAFF_RETURNING_HISTORY_LOAD = { status: 'loading', contextKey, requestToken, error: '' };
   SESSION.cache.returningHistory = [];
@@ -6546,16 +6566,37 @@ async function hydrateStaffReturningHistory() {
   const ownsRequest = () => STAFF_RETURNING_HISTORY_LOAD.requestToken === requestToken &&
     STAFF_RETURNING_HISTORY_LOAD.contextKey === contextKey && staffReturningHistoryContextKey() === contextKey;
   try {
-    const { data, error } = await SB.from('events')
-      .select('venue_id, night_id, bar_id, item_id, action, status, qty, notes, items(id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url)')
-      .eq('venue_id', SESSION.venueId)
-      .eq('night_id', user.nightId)
+    const { data, error, count } = await SB.from('events')
+      .select('venue_id, night_id, bar_id, item_id, action, status, qty, notes, items(id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url)', { count: 'exact' })
+      .eq('venue_id', venueId)
+      .eq('night_id', nightId)
       .in('bar_id', barIds)
       .eq('status', 'APPROVED');
     if (!ownsRequest()) throw staffItemLookupStaleError();
     if (error) throw new Error('Approved return history could not be loaded.');
-    SESSION.cache.returningHistory = Array.isArray(data) ? data : [];
-    STAFF_RETURNING_HISTORY_LOAD = { status: 'ready', contextKey, requestToken, error: '' };
+    // An incomplete body must not become an apparently empty or partial balance.
+    if (!Array.isArray(data) || !Number.isSafeInteger(count) || count < 0 || count !== data.length) {
+      throw new Error('Complete approved return history is unavailable.');
+    }
+    let pendingDeliveryStatus = 'error';
+    let pendingDeliveryCount = null;
+    try {
+      // Display-only evidence: pending records never supply Return candidates.
+      const pending = await SB.from('events').select('id', { head: true, count: 'exact' })
+        .eq('venue_id', venueId).eq('night_id', nightId).eq('bar_id', sourceBar)
+        .eq('status', 'PENDING').in('action', ['DELIVERED', 'TAKEN']);
+      if (!ownsRequest()) throw staffItemLookupStaleError();
+      if (!pending.error && Number.isSafeInteger(pending.count) && pending.count >= 0) {
+        pendingDeliveryStatus = 'ready';
+        pendingDeliveryCount = pending.count;
+      }
+    } catch (error) {
+      if (!ownsRequest() || error?.staffLookupStale) throw staffItemLookupStaleError();
+      // Keep valid approved balances usable, but never invent a zero pending count.
+    }
+    if (!ownsRequest()) throw staffItemLookupStaleError();
+    SESSION.cache.returningHistory = data;
+    STAFF_RETURNING_HISTORY_LOAD = { status: 'ready', contextKey, requestToken, error: '', approvedRowCount: count, pendingDeliveryStatus, pendingDeliveryCount };
     staffReturningRenderIfVisible();
     return SESSION.cache.returningHistory;
   } catch (error) {
@@ -6572,7 +6613,7 @@ async function staffReturningReloadHistory() {
   const contextKey = staffReturningHistoryContextKey();
   const operation = ++STAFF_RETURNING_RELOAD_TOKEN;
   staffReturningSetError('');
-  const loads = [hydrateStaffReturningHistory(), hydrateStaffTakingItems()];
+  const loads = [hydrateStaffReturningHistory()];
   const outcomes = await Promise.allSettled(loads);
   if (operation !== STAFF_RETURNING_RELOAD_TOKEN || contextKey !== staffReturningHistoryContextKey()) return;
   for (const outcome of outcomes) {
@@ -6597,27 +6638,61 @@ function staffReturningBars() {
   return (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false);
 }
 
-function staffReturningCandidates() {
+// Mirror the existing inventory effect's gross/tare/full units; never use
+// event.qty=1 as a fallback for an unverified measured bottle.
+function staffReturningEventQuantity(event) {
+  const qty = Number(event.qty);
+  if (!Number.isFinite(qty) || qty <= 0) return null;
+  const notes = String(event.notes || '');
+  if (!/\[(WEIGHT_G|TARE_WEIGHT_G|FULL_WEIGHT_G|REMAINING_PERCENT|LIQUID_WEIGHT_G|REMAINING_ML)=/.test(notes)) return qty;
+  const read = key => {
+    const value = notes.match(new RegExp('\\[' + key + '=([^\\]\\r\\n]*)\\]'))?.[1]?.trim();
+    return value && /^[+]?[0-9]+(?:\.[0-9]+)?$/.test(value) ? Number(value) : NaN;
+  };
+  const weight = read('WEIGHT_G'), tare = read('TARE_WEIGHT_G'), full = read('FULL_WEIGHT_G');
+  if (qty !== 1 || ![weight, tare, full].every(Number.isFinite) || full <= tare || weight < tare || weight > full) return null;
+  return (weight - tare) / (full - tare);
+}
+
+function staffReturningApprovedEvents() {
   if (staffReturningHistoryState().status !== 'ready') return [];
   const user = SESSION.user || {};
   const sourceBar = String(STAFF_RETURNING_SOURCE_BAR || '');
-  const candidates = new Map();
-  for (const event of SESSION.cache.returningHistory || []) {
-    if (!event || String(event.venue_id) !== String(SESSION.venueId) || String(event.night_id) !== String(user.nightId) || String(event.bar_id) !== sourceBar || String(event.status).toUpperCase() !== 'APPROVED') continue;
-    const qty = Number(event.qty);
-    if (!event.item_id || !Number.isFinite(qty) || qty <= 0) continue;
-    const key = String(event.item_id);
-    const current = candidates.get(key) || { itemId: event.item_id, barId: event.bar_id, name: event.items?.name || '', delivered: 0, returned: 0 };
+  return (SESSION.cache.returningHistory || []).filter(event => event &&
+    String(event.venue_id) === String(SESSION.venueId) && String(event.night_id) === String(user.nightId) &&
+    String(event.bar_id) === sourceBar && String(event.status).toUpperCase() === 'APPROVED');
+}
+
+function staffReturningHistoryItems() {
+  const history = new Map();
+  for (const event of staffReturningApprovedEvents()) {
     const action = String(event.action || '').toUpperCase();
-    if (action === 'DELIVERED' || action === 'TAKEN') current.delivered += qty;
+    if (!event.item_id || !['DELIVERED', 'TAKEN', 'RETURNED'].includes(action)) continue;
+    const key = String(event.item_id);
+    const current = history.get(key) || { itemId: event.item_id, barId: event.bar_id, name: '', delivered: 0, returned: 0, hasDelivery: false, quantityError: false, item: null };
+    if (event.items && String(event.items.id) === key) {
+      current.item = event.items;
+      current.name = event.items.name || current.name;
+    }
+    if (action !== 'RETURNED') current.hasDelivery = true;
+    const qty = staffReturningEventQuantity(event);
+    if (qty == null) current.quantityError = true;
     else if (action === 'RETURNED') current.returned += qty;
-    if (!current.name && event.items?.name) current.name = event.items.name;
-    candidates.set(key, current);
+    else current.delivered += qty;
+    history.set(key, current);
   }
-  return Array.from(candidates.values()).map(candidate => ({
-    ...candidate,
-    remaining: Math.max(0, candidate.delivered - candidate.returned)
-  })).filter(candidate => candidate.remaining > 0);
+  return Array.from(history.values()).filter(row => row.hasDelivery && staffReturningBarApplicable(row.item)).map(row => {
+    const tolerance = Number.EPSILON * Math.max(1, row.delivered, row.returned) * 8;
+    const difference = row.delivered - row.returned;
+    return { ...row,
+      quantityError: row.quantityError || !Number.isFinite(row.delivered) || !Number.isFinite(row.returned) || difference < -tolerance,
+      remaining: difference > tolerance ? difference : 0
+    };
+  });
+}
+
+function staffReturningCandidates() {
+  return staffReturningHistoryItems().filter(candidate => !candidate.quantityError && candidate.remaining > 0);
 }
 
 function staffReturningInput(itemId, value) {
@@ -6642,9 +6717,11 @@ function staffReturningApplyWeight(itemId, rawWeight = null) {
   const candidate = staffReturningCandidates().find(row => String(row.itemId) === String(itemId));
   const input = document.getElementById('staff-returning-weight-' + itemId);
   try {
-    const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(itemId))?.items || {};
+    const item = staffReturningItemForCandidate(candidate);
     const measurement = { ...staffScaleCalculate(item, rawWeight == null ? input?.value : rawWeight), source: rawWeight == null ? 'manual' : 'ble' };
-    if (!candidate || measurement.qty > candidate.remaining + 0.0001) throw new Error(`Measured return cannot exceed ${candidate?.remaining || 0} available.`);
+    const exactQty = staffReturningEventQuantity({ qty: 1, notes: staffScaleNote(measurement) });
+    const tolerance = Number.EPSILON * Math.max(1, candidate?.remaining || 0) * 8;
+    if (!candidate || exactQty == null || exactQty > candidate.remaining + tolerance) throw new Error(`Measured return cannot exceed ${candidate?.remaining || 0} available.`);
     STAFF_RETURNING_STATE[String(itemId)] = { qty: measurement.qty, measurement };
     staffReturningSetError('Measured partial return applied. Review the measured preview before Save.', true);
     try { StaffVoiceGuide.announce('weight', { itemName: item?.name }); } catch (_) {}
@@ -6665,11 +6742,13 @@ function staffReturningValidateState() {
   for (const [itemId, raw] of Object.entries(STAFF_RETURNING_STATE)) {
     const qty = Number(raw && typeof raw === 'object' ? raw.qty : raw);
     const candidate = candidates.get(String(itemId));
-    if (!candidate || !Number.isFinite(qty) || qty < 0 || qty > candidate.remaining) throw new Error('Return history or quantity changed. Please review Returning again.');
+    if (!candidate || !Number.isFinite(qty) || qty < 0 || (!(raw && typeof raw === 'object' && raw.measurement) && qty > candidate.remaining)) throw new Error('Return history or quantity changed. Please review Returning again.');
     if (raw && typeof raw === 'object' && raw.measurement) {
-      const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(itemId))?.items || {};
+      const item = staffReturningItemForCandidate(candidate);
       const measured = staffScaleCalculate(item, raw.measurement.weightG);
-      if (Math.abs(measured.qty - qty) > 0.0001 || measured.qty > candidate.remaining + 0.0001) throw new Error('Measured return state changed. Please reweigh the Item.');
+      const exactQty = staffReturningEventQuantity({ qty: 1, notes: staffScaleNote(measured) });
+      const tolerance = Number.EPSILON * Math.max(1, candidate.remaining) * 8;
+      if (Math.abs(measured.qty - qty) > 0.0001 || exactQty == null || exactQty > candidate.remaining + tolerance) throw new Error('Measured return state changed. Please reweigh the Item.');
     }
   }
 }
@@ -6685,7 +6764,53 @@ function staffReturningRenderSubmitState() {
   button.setAttribute('aria-describedby', 'staff-returning-interaction-help');
 }
 
+function staffReturningCaptureDrafts() {
+  const contextKey = staffReturningHistoryContextKey();
+  if (STAFF_RETURNING_DOM_DRAFT.contextKey !== contextKey) {
+    if (STAFF_RETURNING_DOM_DRAFT.contextKey) STAFF_RETURNING_STATE = {}; // Never reuse a draft in a different session/Night/Bar scope.
+    STAFF_RETURNING_DOM_DRAFT = { contextKey, fields: {}, focus: null };
+    return; // The existing DOM belongs to the prior scope; never recapture it.
+  }
+  const grid = document.getElementById('staff-returning-grid');
+  if (!contextKey || !grid) return;
+  for (const input of grid.querySelectorAll('input[id^="staff-returning-qty-"], input[id^="staff-returning-weight-"]')) {
+    const itemId = input.id.replace(/^staff-returning-(qty|weight)-/, '');
+    const applied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
+    if (input.dataset.returningApplied === applied) STAFF_RETURNING_DOM_DRAFT.fields[input.id] = { value: input.value, applied };
+    else delete STAFF_RETURNING_DOM_DRAFT.fields[input.id];
+  }
+  const active = document.activeElement;
+  if (active?.id && grid.contains(active)) STAFF_RETURNING_DOM_DRAFT.focus = { id: active.id, start: active.selectionStart, end: active.selectionEnd };
+  else if (grid.querySelector('input')) STAFF_RETURNING_DOM_DRAFT.focus = null;
+}
+
+function staffReturningRestoreDrafts() {
+  if (STAFF_RETURNING_DOM_DRAFT.contextKey !== staffReturningHistoryContextKey()) return;
+  const grid = document.getElementById('staff-returning-grid');
+  if (!grid) return;
+  for (const input of grid.querySelectorAll('input[id^="staff-returning-qty-"], input[id^="staff-returning-weight-"]')) {
+    const itemId = input.id.replace(/^staff-returning-(qty|weight)-/, '');
+    const applied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
+    const draft = STAFF_RETURNING_DOM_DRAFT.fields[input.id];
+    if (draft?.applied === applied) input.value = draft.value;
+    input.dataset.returningApplied = applied;
+  }
+  const focus = STAFF_RETURNING_DOM_DRAFT.focus;
+  const input = focus && document.getElementById(focus.id);
+  if (input?.isConnected && grid.contains(input) && input.getClientRects().length) {
+    try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+    if (Number.isInteger(focus.start) && Number.isInteger(focus.end)) try { input.setSelectionRange(focus.start, focus.end); } catch {}
+  }
+}
+
+function staffReturningHasDrafts() {
+  staffReturningCaptureDrafts();
+  return Object.values(STAFF_RETURNING_STATE).some(value => Number(value && typeof value === 'object' ? value.qty : value) > 0) ||
+    Object.entries(STAFF_RETURNING_DOM_DRAFT.fields).some(([id, field]) => id.startsWith('staff-returning-weight-') ? field.value.trim() !== '' : Number(field.value) > 0);
+}
+
 function renderStaffReturning() {
+  staffReturningCaptureDrafts();
   const bars = staffReturningBars();
   if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
   const source = bars.find(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR));
@@ -6714,25 +6839,37 @@ function renderStaffReturning() {
   } else if (lookup.history.status === 'idle') {
     grid.innerHTML = '<div class="empty staff-returning-unverified"><div class="empty-text">Approved return history has not been loaded for this context. Reload to verify return eligibility.</div></div>';
   } else if (lookup.history.status === 'error') {
-    grid.innerHTML = '<div class="empty staff-returning-load-error"><div class="empty-text">Approved return history could not be loaded. Return eligibility is unverified; reload to try again.</div></div>';
-  } else if (!candidates.length) {
-    grid.innerHTML = '<div class="empty staff-returning-no-eligible"><div class="empty-text">No approved delivered items are available to return for the selected bar.</div></div>';
+    grid.innerHTML = '<div class="empty staff-returning-load-error"><div class="empty-text">Complete approved return history is unavailable. Return eligibility is unverified; reload to try again.</div></div>';
+  } else if (!lookup.historyItems.length) {
+    const message = lookup.approvedDeliveryEventCount > 0
+      ? 'Approved delivery records exist, but no Items have verified Bar-applicable metadata. Ask a Manager to review the delivery metadata.'
+      : lookup.pendingDeliveryStatus !== 'ready'
+        ? 'No approved delivery records were found for this Bar and Night. Pending delivery status is unverified; reload or ask a Manager to check.'
+        : lookup.pendingDeliveryCount > 0
+          ? 'Delivery records for this Bar and Night are awaiting approval. A Manager must review them before they can become returnable. No physical return is recorded here.'
+          : 'No approved or pending delivery records were found for this Bar and Night. Verify the delivery context with a Manager; the general catalog is not returnable.';
+    grid.innerHTML = `<div class="empty staff-returning-no-eligible"><div class="empty-text">${message}</div></div>`;
+  } else if (!lookup.visibleHistoryItems.length) {
+    grid.innerHTML = '<div class="empty staff-returning-search-empty"><div class="empty-text">No matching approved delivered Items for this Bar and Night. Search does not include the general catalog.</div></div>';
   } else if (!visibleCandidates.length) {
-    grid.innerHTML = `<div class="empty"><div class="empty-text">${lookup.informationalItems.length ? 'No matching returnable items. Catalog matches below are informational only.' : 'No matching returnable items for the current search and category.'}</div></div>`;
+    grid.innerHTML = '';
   } else {
-    grid.innerHTML = visibleCandidates.map(candidate => { const value = STAFF_RETURNING_STATE[candidate.itemId]; const qty = value && typeof value === 'object' ? value.qty : value ?? 0; const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate.itemId))?.items || {}; const profile = staffScaleProfile(item); const measurement = value && typeof value === 'object' ? value.measurement : null; return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(candidate.name || candidate.itemId)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">Available from approved history: ${esc(staffFormatQuantity(candidate.remaining))}</div><input type="number" min="0" max="${esc(staffFormatQuantity(candidate.remaining))}" step="any" value="${esc(staffFormatQuantity(qty))}" aria-label="Return ${esc(candidate.name || candidate.itemId)} from ${esc(source?.name || 'Bar')}" onchange="staffReturningInput('${esc(candidate.itemId)}',this.value)" style="width:100px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;">${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-returning-weight-${esc(candidate.itemId)}" placeholder="grams" aria-label="Measured return grams ${esc(candidate.name || candidate.itemId)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffReturningApplyWeight('${esc(candidate.itemId)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('returning','${esc(candidate.itemId)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}` : ''}</div>`; }).join('');
+    grid.innerHTML = visibleCandidates.map(candidate => { const value = STAFF_RETURNING_STATE[candidate.itemId]; const qty = value && typeof value === 'object' ? value.qty : value ?? 0; const item = staffReturningItemForCandidate(candidate); const profile = staffScaleProfile(item); const measurement = value && typeof value === 'object' ? value.measurement : null; return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(candidate.name || candidate.itemId)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">Available from approved history: ${esc(staffFormatQuantity(candidate.remaining))}</div><input type="number" min="0" max="${esc(staffFormatQuantity(candidate.remaining))}" step="any" value="${esc(staffFormatQuantity(qty))}" aria-label="Return ${esc(candidate.name || candidate.itemId)} from ${esc(source?.name || 'Bar')}" onchange="staffReturningInput('${esc(candidate.itemId)}',this.value)" style="width:100px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;">${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-returning-weight-${esc(candidate.itemId)}" placeholder="grams" aria-label="Measured return grams ${esc(candidate.name || candidate.itemId)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffReturningApplyWeight('${esc(candidate.itemId)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('returning','${esc(candidate.itemId)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}` : ''}</div>`; }).join('');
   }
   staffDispatchDecorateReturningCards(visibleCandidates, source);
   grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.candidate.name || row.candidate.itemId)}</td><td>${esc(source?.name || row.candidate.barId)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(row.candidate.itemId))?.items || {}, row.measurement))}` : ''}</td><td>MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.candidate.name || row.candidate.itemId)}</td><td>${esc(source?.name || row.candidate.barId)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(staffReturningItemForCandidate(row.candidate), row.measurement))}` : ''}</td><td>MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
   staffReturningSetError(STAFF_RETURNING_ERROR, STAFF_RETURNING_ERROR_OK);
   staffReturningRenderSubmitState();
+  staffReturningRestoreDrafts();
 }
 
 async function staffReturningSourceChanged(barId) {
   if (!staffOperationalGuard()) return;
   const allowed = new Set(staffReturningBars().map(bar => String(bar.id)));
   if (!allowed.has(String(barId))) { staffReturningSetError('That source Bar is outside the Staff scope.'); renderStaffReturning(); return; }
+  if (String(barId) === String(STAFF_RETURNING_SOURCE_BAR)) return;
+  if (staffReturningHasDrafts()) { staffReturningSetError('Returning has unsaved quantities or grams. Review them, or explicitly Reset and clear the inputs before changing Bar.'); renderStaffReturning(); return; }
   STAFF_RETURNING_SOURCE_BAR = String(barId);
   STAFF_RETURNING_STATE = {};
   STAFF_RETURNING_ERROR = '';
@@ -6742,6 +6879,7 @@ async function staffReturningSourceChanged(barId) {
 
 async function openStaffReturning() {
   if (!staffOperationalGuard()) return;
+  if (staffReturningHasDrafts()) { showStaffShellView('returning'); staffReturningSetError('Your unsaved Returning draft is preserved. Review it before switching Bar.'); return; }
   STAFF_RETURNING_STATE = {};
   STAFF_RETURNING_SOURCE_BAR = String(staffReturningBars()[0]?.id || '');
   STAFF_RETURNING_ERROR = '';
