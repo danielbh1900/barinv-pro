@@ -1425,6 +1425,24 @@ th.sortable span { font-size:10px; }
 }
 
 /* Staff Dispatch UI adapter: scoped to the Staff workspace only. */
+/* Persistent Staff section identity and Returning-only interaction clarity. */
+#staff-dashboard .staff-active-section { position:fixed; top:0; left:0; right:0; z-index:80; min-height:calc(68px + env(safe-area-inset-top,0px)); padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px; background:var(--s1); color:var(--text); border-bottom:4px solid var(--border2); box-shadow:0 2px 8px rgba(0,0,0,.12); }
+#staff-dashboard .staff-active-section-inner { width:min(100%,1280px); margin:0 auto; }
+#staff-dashboard .staff-active-section-caption { display:block; font-size:12px; line-height:16px; font-weight:600; }
+#staff-dashboard #staff-active-section-name { display:block; font-size:24px; line-height:30px; font-weight:800; }
+#staff-dashboard .staff-active-section-space { height:calc(68px + env(safe-area-inset-top,0px)); }
+#staff-dashboard .staff-active-section[data-section="opening"] { border-bottom-color:#ba8b00; }
+#staff-dashboard .staff-active-section[data-section="taking"] { border-bottom-color:#e67e00; }
+#staff-dashboard .staff-active-section[data-section="returning"] { border-bottom-color:#2f9b68; }
+#staff-dashboard .staff-active-section[data-section="transfer"] { border-bottom-color:#7b4bc1; }
+#staff-dashboard .staff-returning-help { font-size:13px; line-height:1.5; margin:0 0 14px; color:var(--text); }
+#staff-dashboard .staff-item-card.staff-returning-eligible { border-left:4px solid #2f9b68; }
+#staff-dashboard .staff-return-eligibility-label { margin:5px 0; color:var(--text); font-size:11px; font-weight:800; letter-spacing:.04em; }
+#staff-dashboard .staff-item-stepper > .staff-returning-qty-label { grid-column:1 / -1; font-size:12px; font-weight:700; color:var(--text); }
+#staff-dashboard .staff-item-chip.staff-item-chip-selected { color:var(--text); background:var(--s2); border-color:var(--border2); }
+#staff-dashboard .staff-item-card.staff-returning-catalog-info { border-style:dashed; cursor:default; }
+#staff-dashboard #staff-returning-save:disabled { opacity:.55; cursor:not-allowed; }
+
 #staff-dashboard { --bg:#f6efe0; --s1:#fdf9f0; --s2:#efe5d2; --s3:#e6dac3; --border:#d8c7a4; --border2:#cab588; --a:#e67e00; --a2:#00a884; --a3:#ff3b30; --a4:#5856d6; --text:#241c12; --muted:#857a66; --dim:#cab588; background:#f6efe0 !important; color:#241c12; overflow-x:hidden; }
 #staff-dashboard .staff-workspace-wrap { width:min(100%,1280px); margin:0 auto; min-width:0; }
 #staff-dashboard .panel { background:#fdf9f0; border-color:#d8c7a4; color:#241c12; min-width:0; max-width:100%; }
@@ -3049,6 +3067,8 @@ th.sortable span { font-size:10px; }
 
 <div id="staff-dashboard" style="display:none;min-height:100vh;padding:24px;background:var(--bg);">
   <div class="staff-workspace-wrap">
+    <div id="staff-active-section" class="staff-active-section" data-section="dashboard" role="status" aria-live="polite" aria-atomic="true"><div class="staff-active-section-inner"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div></div>
+    <div class="staff-active-section-space" aria-hidden="true"></div>
     <div class="panel" style="padding:24px;margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
         <div><div class="login-logo" style="font-size:30px;">BARINV</div><div class="login-subtitle" style="margin-bottom:20px;">Staff workspace</div></div>
@@ -3161,10 +3181,12 @@ th.sortable span { font-size:10px; }
       <div class="field" style="margin-bottom:14px;"><label>Source Bar</label><select id="staff-returning-source-bar" onchange="staffReturningSourceChanged(this.value)"></select></div>
       <div id="staff-returning-summary" class="fg fg-3" style="margin-bottom:16px;"></div>
       <div id="staff-returning-error" class="alert alert-err"></div>
+      <p id="staff-returning-interaction-help" class="staff-returning-help"><strong>Returnable items:</strong> edit Return quantity or use the weighing controls, then review Preview and choose Save / Submit. <strong>Catalog information:</strong> read-only; these cards have no return controls.</p>
       <div id="staff-item-filter-returning"></div>
       <div id="staff-returning-grid"></div>
       <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
+        <p class="staff-returning-help">Save / Submit sends only the eligible quantities in Preview. Searching does not clear your selection.</p>
         <div id="staff-returning-preview"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:16px;">
@@ -3932,7 +3954,17 @@ function renderStaffDashboard() {
   }
 }
 
+function staffSetActiveSection(view) {
+  const labels = { dashboard: 'Staff actions', dispatch: 'Dispatch', opening: 'Opening', taking: 'Taking', transfer: 'Transfer', returning: 'Returning', scan: 'Quick Scan', history: 'My History', help: 'Help' };
+  const key = Object.prototype.hasOwnProperty.call(labels, view) ? view : 'dashboard';
+  const strip = document.getElementById('staff-active-section');
+  const name = document.getElementById('staff-active-section-name');
+  if (strip) strip.dataset.section = key;
+  if (name && name.textContent !== labels[key]) name.textContent = labels[key];
+}
+
 function showStaffDashboard() {
+  staffSetActiveSection('dashboard');
   if (STAFF_SCALE_ACTIVE_MODE && STAFF_SCALE_ACTIVE_MODE !== 'dashboard') staffScaleClearConfirmedMeasurements();
   STAFF_SCALE_ACTIVE_MODE = 'dashboard';
   ['dashboard', 'dispatch', 'opening', 'taking', 'returning', 'transfer', 'scan', 'history', 'help'].forEach(view => {
@@ -3951,6 +3983,7 @@ function showStaffLanding() {
 
 function showStaffShellView(view) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
+  staffSetActiveSection(view);
   const scaleMode = ['taking', 'returning', 'transfer'].includes(view) ? view : '';
   const nextScaleView = view === 'dashboard' ? 'dashboard' : scaleMode;
   if (STAFF_SCALE_ACTIVE_MODE && STAFF_SCALE_ACTIVE_MODE !== nextScaleView) staffScaleClearConfirmedMeasurements();
@@ -4119,10 +4152,10 @@ function renderStaffOpening() {
   } else if (!visibleItems.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
   } else {
-    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(staffBarIdentityText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
+    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(staffBarIdentityDisplayText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
     Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
   }
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityText(row.bar))}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityDisplayText(row.bar))}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
   staffOpeningSetError(STAFF_OPENING_ERROR);
 }
 
@@ -6157,7 +6190,7 @@ function staffDispatchAuthorizedBars() {
 
 function staffDispatchSwitchMarkup(mode, selectedId) {
   const bars = staffDispatchAuthorizedBars();
-  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
+  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
 }
 
 function staffDispatchResetItem(mode, itemId) {
@@ -6251,15 +6284,20 @@ function staffDispatchDecorateReturningCards(candidates, source) {
     const item = SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(candidate.itemId))?.items || {};
     const value = STAFF_RETURNING_STATE[candidate.itemId];
     const qty = value && typeof value === 'object' ? value.qty : value || 0;
-    card.classList.add('staff-item-card', 'staff-item-card-dispatch');
+    card.classList.add('staff-item-card', 'staff-item-card-dispatch', 'staff-returning-eligible');
+    card.dataset.returnEligibility = 'eligible';
     card.dataset.staffItemId = String(candidate.itemId);
     Array.from(card.children).slice(0, 2).forEach(child => { child.style.display = 'none'; });
-    card.insertAdjacentHTML('afterbegin', `<div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(candidate.name || candidate.itemId)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">AVAILABLE ${esc(staffFormatQuantity(candidate.remaining))}</div>${value?.measurement ? `<div class="staff-item-net">${esc(staffScaleMeasurementSummary(item, value.measurement))}</div>` : ''}</div></div><div class="staff-item-chips"><span class="staff-item-chip staff-item-chip-taken">TAKEN ${esc(staffFormatQuantity(candidate.delivered || 0))}</span><span class="staff-item-chip staff-item-chip-returned">RETURNED ${esc(staffFormatQuantity(candidate.returned || 0))}</span><span class="staff-item-chip staff-item-chip-comp">COMP 0</span></div>`);
+    card.insertAdjacentHTML('afterbegin', `<div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(candidate.name || candidate.itemId)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-return-eligibility-label">RETURNABLE</div><div class="staff-item-net">Available to return: ${esc(staffFormatQuantity(candidate.remaining))}</div>${value?.measurement ? `<div class="staff-item-net">${esc(staffScaleMeasurementSummary(item, value.measurement))}</div>` : ''}</div></div><div class="staff-item-chips"><span class="staff-item-chip staff-item-chip-taken">TAKEN ${esc(staffFormatQuantity(candidate.delivered || 0))}</span><span class="staff-item-chip staff-item-chip-returned">RETURNED ${esc(staffFormatQuantity(candidate.returned || 0))}</span><span class="staff-item-chip staff-item-chip-selected">SELECTED ${esc(staffFormatQuantity(qty))}</span></div>`);
     const quantity = card.querySelector('input[type="number"]');
     staffDispatchInstallStepper(card, quantity, `<button class="btn btn-ghost btn-sm" type="button" aria-label="Decrease Return quantity" onclick="staffReturningAdjust('${esc(candidate.itemId)}',-1)">−</button>`, `<button class="btn btn-ghost btn-sm" type="button" aria-label="Increase Return quantity" onclick="staffReturningAdjust('${esc(candidate.itemId)}',1)">+</button>`);
+    if (quantity) {
+      quantity.id = 'staff-returning-qty-' + candidate.itemId;
+      quantity.parentElement?.insertAdjacentHTML('afterbegin', `<label class="staff-returning-qty-label" for="${esc(quantity.id)}">Return quantity</label>`);
+    }
     const weightInput = card.querySelector(`input[id^="staff-returning-weight-"]`);
     if (weightInput?.parentElement) weightInput.parentElement.classList.add('staff-card-scale');
-    card.insertAdjacentHTML('beforeend', `<div class="staff-item-actions"><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',1)">RETURN</button><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',5)">+5 RET</button><button class="btn btn-sm staff-action-transfer" type="button" onclick="openStaffTransferForItem('${esc(candidate.itemId)}')">TRANSFER</button><button class="btn btn-sm staff-action-reset" type="button" onclick="staffDispatchResetItem('returning','${esc(candidate.itemId)}')">RESET</button></div>${staffDispatchSwitchMarkup('returning', STAFF_RETURNING_SOURCE_BAR)}`);
+    card.insertAdjacentHTML('beforeend', `<div class="staff-item-actions"><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',1)">+1 RETURN</button><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',5)">+5 RETURN</button><button class="btn btn-sm staff-action-transfer" type="button" onclick="openStaffTransferForItem('${esc(candidate.itemId)}')">TRANSFER</button><button class="btn btn-sm staff-action-reset" type="button" onclick="staffDispatchResetItem('returning','${esc(candidate.itemId)}')">RESET</button></div>${staffDispatchSwitchMarkup('returning', STAFF_RETURNING_SOURCE_BAR)}`);
   });
 }
 
@@ -6299,7 +6337,7 @@ function renderStaffTaking() {
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityText(row.bar))}</td><td>${esc(row.action)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityDisplayText(row.bar))}</td><td>${esc(row.action)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
   staffTakingSetError(STAFF_TAKING_ERROR);
 }
 
@@ -6356,6 +6394,7 @@ let STAFF_RETURNING_SOURCE_BAR = '';
 let STAFF_RETURNING_STATE = {};
 let STAFF_RETURNING_SAVING = false;
 let STAFF_RETURNING_ERROR = '';
+let STAFF_RETURNING_ERROR_OK = false;
 
 // Display-only lookup provenance. It never supplies Return movement candidates.
 let STAFF_ITEM_LOOKUP_SESSION_REF = null;
@@ -6481,7 +6520,7 @@ function staffReturningLookupMarkup(lookup) {
   const reason = lookup.history.status === 'ready'
     ? 'Not returnable from this Bar: no remaining quantity in approved history.'
     : 'Return eligibility is unverified until approved history loads successfully.';
-  const info = lookup.informationalItems.map(item => `<div class="staff-returning-catalog-info panel" data-info-item-id="${esc(item.id)}" style="padding:14px;margin-bottom:10px;"><div class="staff-item-name">${esc(item.name || item.id)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-meta">CATALOG INFORMATION ONLY</div><div class="staff-item-meta">${esc(reason)}</div></div>`).join('');
+  const info = lookup.informationalItems.map(item => `<div class="staff-returning-catalog-info panel staff-item-card" data-return-eligibility="informational" data-info-item-id="${esc(item.id)}" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name || item.id)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div></div></div><div class="staff-return-eligibility-label">CATALOG INFORMATION ONLY</div><div class="staff-item-meta">${esc(reason)}</div></div>`).join('');
   const catalogStatusText = lookup.catalogStatus === 'loading' ? 'Authorized catalog lookup is loading.' :
     lookup.catalogStatus === 'error' ? 'Authorized catalog lookup could not be loaded.' : 'Authorized catalog lookup is unverified.';
   const catalogMessage = lookup.catalogReady ? '' : `<div class="empty-text staff-returning-catalog-unavailable" data-catalog-state="${esc(lookup.catalogStatus)}">${esc(catalogStatusText)} A missing search result does not establish that an Item is absent.</div>`;
@@ -6547,6 +6586,7 @@ async function staffReturningReloadHistory() {
 
 function staffReturningSetError(message, ok = false) {
   STAFF_RETURNING_ERROR = message || '';
+  STAFF_RETURNING_ERROR_OK = Boolean(STAFF_RETURNING_ERROR && ok);
   const el = document.getElementById('staff-returning-error');
   if (!el) return;
   el.textContent = STAFF_RETURNING_ERROR;
@@ -6634,6 +6674,17 @@ function staffReturningValidateState() {
   }
 }
 
+function staffReturningRenderSubmitState() {
+  const button = document.getElementById('staff-returning-save');
+  if (!button) return;
+  let validSelection = false;
+  if (staffReturningHistoryState().status === 'ready') {
+    try { staffReturningValidateState(); validSelection = staffReturningRows().length > 0; } catch {}
+  }
+  button.disabled = STAFF_RETURNING_SAVING || !validSelection;
+  button.setAttribute('aria-describedby', 'staff-returning-interaction-help');
+}
+
 function renderStaffReturning() {
   const bars = staffReturningBars();
   if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
@@ -6650,7 +6701,7 @@ function renderStaffReturning() {
   const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate, lookup);
   if (lookup.history.status === 'ready' && (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId))) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
-  select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
+  select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
@@ -6674,7 +6725,8 @@ function renderStaffReturning() {
   staffDispatchDecorateReturningCards(visibleCandidates, source);
   grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.candidate.name || row.candidate.itemId)}</td><td>${esc(source?.name || row.candidate.barId)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(SESSION.cache.returningHistory?.find(event => String(event.item_id) === String(row.candidate.itemId))?.items || {}, row.measurement))}` : ''}</td><td>MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
-  staffReturningSetError(STAFF_RETURNING_ERROR);
+  staffReturningSetError(STAFF_RETURNING_ERROR, STAFF_RETURNING_ERROR_OK);
+  staffReturningRenderSubmitState();
 }
 
 async function staffReturningSourceChanged(barId) {
@@ -6722,7 +6774,7 @@ async function saveStaffReturning() {
     staffReturningSetError(error?.message || 'Returning save failed.');
   } finally {
     STAFF_RETURNING_SAVING = false;
-    if (button) button.disabled = false;
+    staffReturningRenderSubmitState();
   }
 }
 
@@ -6800,8 +6852,8 @@ function renderStaffTransfer() {
     STAFF_TRANSFER_STATE.destinationBar = String(bars.find(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar))?.id || '');
   }
   if (!items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = String(items[0].id);
-  if (source) source.innerHTML = bars.map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityText(bar))}</option>`).join('');
-  if (destination) destination.innerHTML = bars.filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityText(bar))}</option>`).join('');
+  if (source) source.innerHTML = bars.map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (destination) destination.innerHTML = bars.filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
   const selectedItemIsVisible = visibleItems.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (item) {
     item.innerHTML = visibleItems.length
@@ -7012,12 +7064,27 @@ function staffBarIdentityText(bar) {
   return `${context.barCode} — ${context.barDisplayName} · ${bartenders}`;
 }
 
+function staffBarDisplayNamesEqual(context) {
+  const normalize = value => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return normalize(context.barCode) === normalize(context.barDisplayName);
+}
+
+// UI-only formatter. Persisted Transfer notes keep staffBarIdentityText unchanged.
+function staffBarIdentityDisplayText(bar) {
+  const context = staffBarDisplayContext(bar);
+  const title = staffBarDisplayNamesEqual(context) ? context.barCode : `${context.barCode} — ${context.barDisplayName}`;
+  const bartenders = context.bartenderNames.length
+    ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
+    : 'No bartender assigned';
+  return `${title} · ${bartenders}`;
+}
+
 function staffBarIdentityHtml(bar) {
   const context = staffBarDisplayContext(bar);
   const bartenders = context.bartenderNames.length
     ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
     : 'No bartender assigned';
-  return `<span class="staff-bar-identity"><span class="staff-bar-code">${esc(context.barCode)}</span><span class="staff-bar-display-name">${esc(context.barDisplayName)}</span><span class="staff-bar-bartenders">${esc(bartenders)}</span></span>`;
+  return `<span class="staff-bar-identity"><span class="staff-bar-code">${esc(context.barCode)}</span>${staffBarDisplayNamesEqual(context) ? '' : `<span class="staff-bar-display-name">${esc(context.barDisplayName)}</span>`}<span class="staff-bar-bartenders">${esc(bartenders)}</span></span>`;
 }
 
 async function hydrateStaffAuthorizedBars(claims) {
