@@ -1586,6 +1586,23 @@ th.sortable span { font-size:10px; }
 <button id="bluefy-diag-tab" type="button" onclick="toggleBluefyDiagnostics()" aria-label="Open Bluefy diagnostics">DEBUG</button>
 <section id="bluefy-diag-panel" aria-label="Bluefy runtime diagnostics">
   <div id="bluefy-diag-head"><span id="bluefy-diag-title">BLUEFY DIAGNOSTICS</span><button type="button" onclick="toggleBluefyDiagnostics()" aria-label="Close diagnostics">X</button></div>
+  <!-- STAFF_SCALE_CAPTURE_UI_START — opt-in, scale-only, RAM-only. -->
+  <section id="staff-scale-capture" aria-label="Optional scale capture" style="padding:10px;border:1px solid #777;margin:8px 0;">
+    <strong>SCALE CAPTURE · OPTIONAL</strong>
+    <p style="font-size:12px;">Read-only capture. Do not use Apply, Use, Save or Submit while collecting. Unknown payload bytes are masked.</p>
+    <button id="staff-scale-capture-start" type="button" onclick="staffScaleCaptureStart()">START RAW CAPTURE</button>
+    <button id="staff-scale-capture-stop" type="button" onclick="staffScaleCaptureStop()" disabled>STOP / CLEAR</button>
+    <div id="staff-scale-capture-status" role="status" aria-live="polite">Scale capture is off. No notifications are retained.</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <label>Physical scale reading <input id="staff-scale-capture-physical" type="number" min="0" max="5500" step="any" inputmode="decimal" placeholder="physical grams" style="width:110px;"></label>
+      <label>Unit <select id="staff-scale-capture-unit"><option value="g">g</option></select></label>
+    </div>
+    <label style="display:block;font-size:12px;margin:8px 0;"><input id="staff-scale-capture-stable" type="checkbox"> I confirm the physical display is stable and reads the number above in g.</label>
+    <button id="staff-scale-capture-pair" type="button" onclick="staffScaleCapturePair()" disabled>RECORD MATCHED READING</button>
+    <button id="staff-scale-capture-copy" type="button" onclick="staffScaleCaptureCopy()" disabled>COPY SCALE CAPTURE</button>
+    <textarea id="staff-scale-capture-export" readonly hidden aria-label="Scale-only capture export" style="width:100%;min-height:120px;font-size:11px;"></textarea>
+  </section>
+  <!-- STAFF_SCALE_CAPTURE_UI_END -->
   <pre id="bluefy-diag-output">Waiting for a scan or scale event.</pre>
   <div id="bluefy-diag-actions">
     <button type="button" onclick="clearBluefyDiagnostics()">CLEAR</button>
@@ -3112,6 +3129,7 @@ th.sortable span { font-size:10px; }
         <button class="btn btn-ghost btn-lg" onclick="showStaffShellView('help')">HELP</button>
       </div>
     </div>
+    <div id="staff-opening-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-dispatch" class="panel" style="display:none;padding:20px;">
       <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">← Dashboard</button>
       <div class="panel-title" style="margin:18px 0 6px;">Dispatch</div>
@@ -3173,6 +3191,7 @@ th.sortable span { font-size:10px; }
         <button class="btn btn-a" id="staff-taking-save" onclick="saveStaffTaking()">Save / Submit</button>
       </div>
     </div>
+    <div id="staff-returning-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-returning" class="panel" style="display:none;padding:20px;">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
@@ -3687,6 +3706,139 @@ async function copyBluefyDiagnostics() {
     document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); toast('Diagnostics copied', 't-ok');
   } catch (_) { toast('Copy unavailable', 't-warn'); }
 }
+// STAFF_SCALE_CAPTURE_START — opt-in RAM-only, pre-decode, fixed allowlisted layout.
+const STAFF_SCALE_CAPTURE_LIMITS = Object.freeze({ frames: 40, pairs: 12, freshMs: 1000, durationMs: 120000 });
+const STAFF_SCALE_CAPTURE = { active: false, startedAt: 0, frames: [], pairs: [], latest: null, lastPaired: null, connectionToken: null, deviceRef: null, message: 'Scale capture is off. No notifications are retained.' };
+const STAFF_SCALE_CAPTURE_CONNECTION = { attempt: null, current: null };
+function staffScaleCaptureConnectionBegin(token) {
+  try { if (staffScaleCaptureScope()) STAFF_SCALE_CAPTURE_CONNECTION.attempt = token; } catch (_) {}
+}
+function staffScaleCaptureConnectionReady(token, device) {
+  try { if (staffScaleCaptureScope() && STAFF_SCALE_CAPTURE_CONNECTION.attempt === token && BLE_SCALE.device === device) STAFF_SCALE_CAPTURE_CONNECTION.current = token; } catch (_) {}
+}
+function staffScaleCaptureScope() {
+  try { return APP_MODE === 'staff' && window.location.href === 'https://danielbh1900.github.io/barinv-pro/staff/index.html?cb=staff'; } catch (_) { return false; }
+}
+function staffScaleCaptureCurrent() {
+  try {
+    if (!STAFF_SCALE_CAPTURE.active) return false;
+    const elapsed = Date.now() - STAFF_SCALE_CAPTURE.startedAt;
+    if (!staffScaleCaptureScope() || !BLE_SCALE.connected || STAFF_SCALE_CAPTURE.connectionToken !== STAFF_SCALE_CAPTURE_CONNECTION.current || STAFF_SCALE_CAPTURE.deviceRef !== BLE_SCALE.device || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > STAFF_SCALE_CAPTURE_LIMITS.durationMs) {
+      STAFF_SCALE_CAPTURE.active = false; STAFF_SCALE_CAPTURE.latest = null;
+      STAFF_SCALE_CAPTURE.message = 'Capture paused: connection, page or time limit changed. Start a new capture when ready.';
+      return false;
+    }
+    return true;
+  } catch (_) { return false; }
+}
+function staffScaleCaptureRender() {
+  try {
+    const state = STAFF_SCALE_CAPTURE, current = staffScaleCaptureCurrent();
+    const status = document.getElementById('staff-scale-capture-status');
+    const latest = state.latest;
+    if (status) status.textContent = state.message + ' Frames: ' + state.frames.length + '. Matched: ' + state.pairs.length +
+      (latest ? '. Latest decoded: ' + (latest.decodedGrams == null ? latest.parseOutcome : latest.decodedGrams + ' g') : '');
+    const pair = document.getElementById('staff-scale-capture-pair'), copy = document.getElementById('staff-scale-capture-copy'), stop = document.getElementById('staff-scale-capture-stop');
+    if (pair) pair.disabled = !current;
+    if (copy) copy.disabled = !state.frames.length;
+    if (stop) stop.disabled = !current && !state.frames.length && !state.pairs.length;
+  } catch (_) {}
+}
+function staffScaleCaptureStart() {
+  try {
+    if (!staffScaleCaptureScope() || !BLE_SCALE.connected || !BLE_SCALE.device || !STAFF_SCALE_CAPTURE_CONNECTION.current) { STAFF_SCALE_CAPTURE.message = 'Capture did not start. Use the canonical Staff page with an already connected scale.'; staffScaleCaptureRender(); return false; }
+    const state = STAFF_SCALE_CAPTURE;
+    state.active = true; state.connectionToken = STAFF_SCALE_CAPTURE_CONNECTION.current; state.deviceRef = BLE_SCALE.device; state.startedAt = Date.now(); state.frames = []; state.pairs = []; state.latest = null; state.lastPaired = null;
+    state.message = 'Capturing in memory for up to 2 minutes. Enter only a stable physical reading in g.';
+    const area = document.getElementById('staff-scale-capture-export'); if (area) { area.value = ''; area.hidden = true; }
+    const stable = document.getElementById('staff-scale-capture-stable'); if (stable) stable.checked = false;
+    staffScaleCaptureRender(); return true;
+  } catch (_) { return false; }
+}
+function staffScaleCaptureStop() {
+  try {
+    const state = STAFF_SCALE_CAPTURE;
+    state.active = false; state.frames = []; state.pairs = []; state.latest = null; state.lastPaired = null; state.startedAt = 0;
+    state.connectionToken = null; state.deviceRef = null;
+    state.message = 'Capture stopped and cleared from this page.';
+    const area = document.getElementById('staff-scale-capture-export'); if (area) { area.value = ''; area.hidden = true; }
+    const input = document.getElementById('staff-scale-capture-physical'); if (input) input.value = '';
+    const stable = document.getElementById('staff-scale-capture-stable'); if (stable) stable.checked = false;
+    staffScaleCaptureRender();
+  } catch (_) {}
+}
+function staffScaleCaptureInvalidate() {
+  try { STAFF_SCALE_CAPTURE_CONNECTION.current = null; STAFF_SCALE_CAPTURE.active = false; STAFF_SCALE_CAPTURE.latest = null; STAFF_SCALE_CAPTURE.connectionToken = null; STAFF_SCALE_CAPTURE.deviceRef = null; STAFF_SCALE_CAPTURE.message = 'Capture paused after disconnect. Start a new capture after reconnecting.'; staffScaleCaptureRender(); } catch (_) {}
+}
+function staffScaleCaptureNotify(token, device, service, characteristic, view) {
+  try {
+    if (!STAFF_SCALE_CAPTURE.active || token !== STAFF_SCALE_CAPTURE.connectionToken || token !== STAFF_SCALE_CAPTURE_CONNECTION.current || device !== STAFF_SCALE_CAPTURE.deviceRef || device !== BLE_SCALE.device) return null;
+    if (!staffScaleCaptureCurrent()) return null;
+    STAFF_SCALE_CAPTURE.latest = null;
+    const uuid = (value, short) => typeof value === 'string' && (value.toLowerCase() === short || value.toLowerCase() === '0000' + short + '-0000-1000-8000-00805f9b34fb');
+    if (!uuid(service, 'fff0') || !uuid(characteristic, 'fff1') || !ArrayBuffer.isView(view) || view.byteLength !== 18 || typeof view.getUint8 !== 'function') return null;
+    const header = [0x10,0x12,0x00,0x6c,0x01,0x02,0x05,0x01];
+    if (!header.every((byte, index) => view.getUint8(index) === byte)) return null;
+    let sum = 0; for (let i = 0; i < 17; i++) sum = (sum + view.getUint8(i)) & 255;
+    const frame = { timestampMs: Date.now(), byte8: view.getUint8(8), byte9: view.getUint8(9), byte10: view.getUint8(10), byte15: view.getUint8(15), byte16: view.getUint8(16), checksumValid: sum === view.getUint8(17), decodedGrams: null, parseOutcome: 'pending' };
+    STAFF_SCALE_CAPTURE.frames.push(frame);
+    if (STAFF_SCALE_CAPTURE.frames.length > STAFF_SCALE_CAPTURE_LIMITS.frames) STAFF_SCALE_CAPTURE.frames.shift();
+    STAFF_SCALE_CAPTURE.latest = frame; staffScaleCaptureRender(); return frame;
+  } catch (_) { return null; }
+}
+function staffScaleCaptureDecoded(frame, completed, decoded) {
+  try {
+    if (!frame) return;
+    const grams = decoded?.grams;
+    frame.decodedGrams = completed && typeof grams === 'number' && Number.isFinite(grams) && grams >= 0 && grams <= 5500 ? grams : null;
+    frame.parseOutcome = !completed ? 'threw' : frame.decodedGrams == null ? 'rejected' : 'accepted';
+    staffScaleCaptureRender();
+  } catch (_) {}
+}
+function staffScaleCaptureFrameExport(frame) {
+  const hex = value => value.toString(16).padStart(2, '0');
+  return { service: 'fff0', characteristic: 'fff1', timestampMs: frame.timestampMs, length: 18,
+    maskedHex: '10 12 00 6c 01 02 05 01 ' + [frame.byte8,frame.byte9,frame.byte10].map(hex).join(' ') + ' ** ** ** ** ' + [frame.byte15,frame.byte16].map(hex).join(' ') + ' **',
+    byte8: frame.byte8, byte9: frame.byte9, byte10: frame.byte10, byte15: frame.byte15, byte16: frame.byte16,
+    checksumValid: frame.checksumValid === true, decodedGrams: frame.decodedGrams, parseOutcome: frame.parseOutcome };
+}
+function staffScaleCaptureExport() {
+  try {
+    return { schema: 'barinv-scale-capture-v1', redactedByteOffsets: [11,12,13,14,17], flagInterpretation: 'Bytes 8, 15 and 16 are uninterpreted. Masked hex is not a complete checksum-valid frame.',
+      frames: STAFF_SCALE_CAPTURE.frames.map(staffScaleCaptureFrameExport),
+      pairs: STAFF_SCALE_CAPTURE.pairs.map(pair => ({ physicalGrams: pair.physicalGrams, physicalUnit: 'g', operatorConfirmedStable: true, matchedAtMs: pair.matchedAtMs, frame: staffScaleCaptureFrameExport(pair.frame) })) };
+  } catch (_) { return { schema: 'barinv-scale-capture-v1', redactedByteOffsets: [11,12,13,14,17], frames: [], pairs: [] }; }
+}
+function staffScaleCapturePair() {
+  try {
+    const state = STAFF_SCALE_CAPTURE, input = document.getElementById('staff-scale-capture-physical'), unit = document.getElementById('staff-scale-capture-unit'), stable = document.getElementById('staff-scale-capture-stable');
+    const text = String(input?.value ?? '').trim(), physical = Number(text), frame = state.latest, age = frame ? Date.now() - frame.timestampMs : NaN;
+    if (!staffScaleCaptureCurrent() || !/^(?:\d+\.?\d*|\.\d+)$/.test(text) || !Number.isFinite(physical) || physical < 0 || physical > 5500 || unit?.value !== 'g' || stable?.checked !== true) {
+      state.message = 'No match recorded. Enter the stable physical display value, select g and confirm stability.'; staffScaleCaptureRender(); return false;
+    }
+    if (!frame || !Number.isFinite(age) || age < 0 || age > STAFF_SCALE_CAPTURE_LIMITS.freshMs || !frame.checksumValid || frame.parseOutcome !== 'accepted' || BLE_SCALE.lastWeight !== frame.decodedGrams || state.lastPaired === frame) {
+      state.message = 'No match recorded. Wait for a new fresh decoded notification, then confirm the physical reading again.'; staffScaleCaptureRender(); return false;
+    }
+    state.pairs.push({ physicalGrams: physical, matchedAtMs: Date.now(), frame: { ...frame } });
+    if (state.pairs.length > STAFF_SCALE_CAPTURE_LIMITS.pairs) state.pairs.shift();
+    state.lastPaired = frame; stable.checked = false;
+    state.message = 'Recorded ' + physical + ' g physical / ' + frame.decodedGrams + ' g decoded. This does not apply or submit a movement.';
+    staffScaleCaptureRender(); return true;
+  } catch (_) { return false; }
+}
+async function staffScaleCaptureCopy() {
+  try {
+    const state = STAFF_SCALE_CAPTURE;
+    if (!state.frames.length) { state.message = 'No scale frames to copy.'; staffScaleCaptureRender(); return false; }
+    const text = JSON.stringify(staffScaleCaptureExport(), null, 2);
+    const area = document.getElementById('staff-scale-capture-export');
+    if (area) { area.value = text; area.hidden = false; }
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); state.message = 'Scale-only capture copied. Use STOP / CLEAR when finished.'; staffScaleCaptureRender(); return true; } } catch (_) {}
+    state.message = 'Select and copy the scale-only text shown below. Use STOP / CLEAR when finished.'; staffScaleCaptureRender(); return false;
+  } catch (_) { return false; }
+}
+// STAFF_SCALE_CAPTURE_END
+
 // BLUEFY_WEIGHT_DIAGNOSTICS_END
 
 // ══════════════════════════════════════════════════════
@@ -3913,6 +4065,8 @@ function staffThemeToggle() {
 }
 
 function renderStaffDashboard() {
+  staffOpeningRenderResult();
+  staffReturningRenderResult();
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'none';
@@ -4038,6 +4192,142 @@ function isAdminSession() {
 let STAFF_OPENING_STATE = {};
 let STAFF_OPENING_SAVING = false;
 let STAFF_OPENING_ERROR = '';
+let STAFF_OPENING_ERROR_OK = false;
+
+// STAFF_OPENING_ACK_START — one frozen batch; unknown outcomes use read-only checks.
+let STAFF_OPENING_SUBMISSION = null;
+const STAFF_OPENING_ACK_FIELDS = 'id,client_event_id,venue_id,night_id,bar_id,item_id,qty,action,status,submitted_by,notes,staff_id,source,session_id';
+function staffOpeningContext() {
+  const user = SESSION.user;
+  if (APP_MODE !== 'staff' || SESSION.type !== 'barback' || !SESSION.venueId || !user?.staff_id || !user.assignment_id || !user.nightId || !user.name || !Array.isArray(user.allowed_bar_ids)) return null;
+  return { userRef: user, key: JSON.stringify([SESSION.venueId, user.staff_id, user.assignment_id, user.nightId, user.session_id || '', user.allowed_bar_ids.map(String).sort()]), venueId: SESSION.venueId, nightId: user.nightId };
+}
+function staffOpeningSubmissionIsCurrent(batch) {
+  const context = staffOpeningContext();
+  return !!batch && STAFF_OPENING_SUBMISSION === batch && !!context && context.key === batch.context.key && context.userRef === batch.context.userRef;
+}
+function staffOpeningResetObsoleteSubmission() {
+  if (STAFF_OPENING_SUBMISSION && !staffOpeningSubmissionIsCurrent(STAFF_OPENING_SUBMISSION)) {
+    STAFF_OPENING_SUBMISSION = null;
+    STAFF_OPENING_SAVING = false;
+    staffOpeningRenderResult();
+  }
+}
+function staffOpeningCanEdit() {
+  staffOpeningResetObsoleteSubmission();
+  const batch = STAFF_OPENING_SUBMISSION;
+  if (STAFF_OPENING_SAVING || (batch && batch.phase !== 'rejected')) {
+    staffOpeningSetError(batch?.phase === 'verified' || batch?.phase === 'completed'
+      ? 'This Opening is already saved. Return to Dispatch; no additional write will be sent.'
+      : 'This Opening is pending verification. Use Check status before starting another submission.');
+    return false;
+  }
+  if (batch) STAFF_OPENING_SUBMISSION = null;
+  return true;
+}
+function staffOpeningUpdateSaveButton() {
+  const button = document.getElementById('staff-opening-save');
+  if (!button) return;
+  const batch = staffOpeningSubmissionIsCurrent(STAFF_OPENING_SUBMISSION) ? STAFF_OPENING_SUBMISSION : null;
+  button.disabled = STAFF_OPENING_SAVING;
+  button.textContent = STAFF_OPENING_SAVING ? (batch?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+    : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
+}
+function staffOpeningNewClientId() {
+  const uuid = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return 'staff-opening-' + uuid;
+}
+function staffOpeningAcknowledgment(batch, data) {
+  const expected = new Map(batch.records.map(record => [record.client_event_id, record]));
+  const present = new Set(), verified = new Map(), databaseIds = new Set();
+  let mismatched = 0, unexpected = 0;
+  if (!Array.isArray(data)) return { total: expected.size, acknowledged: 0, missing: expected.size, mismatched: 0, unexpected: 0, statuses: {} };
+  for (const row of data) {
+    const record = expected.get(row?.client_event_id);
+    if (!record) { unexpected += 1; continue; }
+    if (present.has(row.client_event_id)) { mismatched += 1; verified.delete(row.client_event_id); continue; }
+    present.add(row.client_event_id);
+    const matches = typeof row.id === 'string' && !!row.id && !databaseIds.has(row.id) &&
+      row.venue_id === record.venue_id && row.night_id === record.night_id && row.bar_id === record.bar_id && row.item_id === record.item_id &&
+      Number.isFinite(Number(row.qty)) && Number(row.qty) === record.qty && row.action === record.action &&
+      ['PENDING', 'APPROVED', 'REJECTED', 'VOID'].includes(row.status) && row.submitted_by === record.submitted_by &&
+      String(row.notes || '') === record.notes && row.staff_id === null && row.source === null && row.session_id === null;
+    if (!matches) { mismatched += 1; continue; }
+    databaseIds.add(row.id);
+    verified.set(row.client_event_id, row);
+  }
+  const statuses = {};
+  for (const row of verified.values()) statuses[row.status] = (statuses[row.status] || 0) + 1;
+  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses };
+}
+function staffOpeningSavedSummary(batch) {
+  const statuses = Object.entries(batch.ack.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
+  return `Opening saved: ${batch.records.length} rows. ${statuses}.`;
+}
+function staffOpeningRenderResult() {
+  const element = document.getElementById('staff-opening-result');
+  if (!element) return;
+  const batch = STAFF_OPENING_SUBMISSION;
+  if (!staffOpeningSubmissionIsCurrent(batch) || !['verified', 'completed'].includes(batch.phase)) {
+    element.textContent = ''; element.className = 'alert'; return;
+  }
+  element.textContent = staffOpeningSavedSummary(batch) + (batch.completionError ? ' Return to Dispatch is available; the saved rows will not be submitted again.' : '');
+  element.className = 'alert alert-ok show';
+}
+function staffOpeningComplete(batch, forceReturn = false) {
+  if (!staffOpeningSubmissionIsCurrent(batch)) return;
+  batch.phase = 'verified';
+  try {
+    if (JSON.stringify(STAFF_OPENING_STATE) === batch.draftKey) STAFF_OPENING_STATE = {};
+    staffOpeningSetError(staffOpeningSavedSummary(batch), true);
+    staffOpeningRenderResult();
+    const opening = document.getElementById('staff-shell-opening');
+    const dispatch = document.getElementById('staff-shell-dispatch');
+    if (forceReturn || !opening || opening.style.display !== 'none') {
+      showStaffShellView('dispatch');
+      if (!opening || opening.style.display !== 'none' || !dispatch || dispatch.style.display === 'none') throw new Error('Opening completion navigation is not confirmed.');
+    } else if (!dispatch || dispatch.style.display === 'none') {
+      // The operator left Opening while awaiting the response. Keep the saved
+      // result; explicit Return completes navigation without interrupting work.
+      batch.completionError = false;
+      return;
+    }
+    batch.phase = 'completed'; batch.completionError = false;
+    staffOpeningRenderResult();
+  } catch (_) {
+    batch.completionError = true;
+    try { staffOpeningSetError(staffOpeningSavedSummary(batch) + ' Could not return to Dispatch. Use Return to Dispatch; no additional write will be sent.', true); } catch (_) {}
+    try { staffOpeningRenderResult(); } catch (_) {}
+  }
+}
+function staffOpeningShowUnconfirmed(batch, message) {
+  if (!staffOpeningSubmissionIsCurrent(batch)) return;
+  batch.phase = 'unknown';
+  const ack = batch.ack || { total: batch.records.length, acknowledged: 0, missing: batch.records.length, mismatched: 0, unexpected: 0 };
+  staffOpeningSetError(`${message} Verified ${ack.acknowledged}/${ack.total}; missing from acknowledgment ${ack.missing}; mismatched ${ack.mismatched}; unexpected ${ack.unexpected}. Use Check status. No further write will be sent.`);
+}
+async function staffOpeningCheckStatus(batch) {
+  batch.phase = 'checking';
+  staffOpeningUpdateSaveButton();
+  try {
+    const rows = [];
+    // Bounded exact-ID reads. A truncated/missing response never implies success.
+    for (let offset = 0; offset < batch.records.length; offset += 100) {
+      const ids = batch.records.slice(offset, offset + 100).map(record => record.client_event_id);
+      const { data, error } = await SB.from('events').select(STAFF_OPENING_ACK_FIELDS)
+        .eq('venue_id', batch.context.venueId).eq('night_id', batch.context.nightId).in('client_event_id', ids).limit(ids.length + 1);
+      if (!staffOpeningSubmissionIsCurrent(batch)) return;
+      if (error || !Array.isArray(data)) throw new Error('Opening status could not be read.');
+      rows.push(...data);
+    }
+    batch.ack = staffOpeningAcknowledgment(batch, rows);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) staffOpeningComplete(batch);
+    else staffOpeningShowUnconfirmed(batch, 'Opening is not fully verified.');
+  } catch (_) { staffOpeningShowUnconfirmed(batch, 'Opening status is unavailable. The earlier result remains unconfirmed.'); }
+}
+// STAFF_OPENING_ACK_END
+
 
 function staffOpeningKey(itemId, barId) {
   return String(itemId) + '::' + String(barId);
@@ -4088,6 +4378,7 @@ function staffOpeningValidateState() {
 
 function staffOpeningSetError(message, ok = false) {
   STAFF_OPENING_ERROR = message || '';
+  STAFF_OPENING_ERROR_OK = !!ok;
   const el = document.getElementById('staff-opening-error');
   if (!el) return;
   el.textContent = STAFF_OPENING_ERROR;
@@ -4095,7 +4386,7 @@ function staffOpeningSetError(message, ok = false) {
 }
 
 window.staffOpeningAdjust = function(itemId, barId, delta) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffOpeningCanEdit()) return;
   const item = staffOpeningItems().find(candidate => String(candidate.id) === String(itemId));
   const bar = staffOpeningBars().find(candidate => String(candidate.id) === String(barId));
   if (!item || !bar) { staffOpeningSetError('That Opening Item or destination Bar is not authorized.'); return; }
@@ -4107,7 +4398,7 @@ window.staffOpeningAdjust = function(itemId, barId, delta) {
 };
 
 window.staffOpeningInput = function(itemId, barId, value) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffOpeningCanEdit()) return;
   const n = Number(value);
   if (String(value).trim() === '' || !Number.isFinite(n) || n < 0) {
     staffOpeningSetError('Opening quantity must be a finite number that is zero or greater.');
@@ -4119,7 +4410,7 @@ window.staffOpeningInput = function(itemId, barId, value) {
 };
 
 function staffOpeningApplyWeight(itemId, barId, rawWeight = null) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffOpeningCanEdit()) return;
   const item = staffOpeningItems().find(candidate => String(candidate.id) === String(itemId));
   const bar = staffOpeningBars().find(candidate => String(candidate.id) === String(barId));
   const input = document.getElementById('staff-opening-weight-' + itemId + '-' + barId);
@@ -4159,55 +4450,84 @@ function renderStaffOpening() {
     Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
   }
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityDisplayText(row.bar))}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
-  staffOpeningSetError(STAFF_OPENING_ERROR);
+  staffOpeningSetError(STAFF_OPENING_ERROR, STAFF_OPENING_ERROR_OK);
+  staffOpeningUpdateSaveButton();
 }
 
 function openStaffOpening() {
   if (!staffOperationalGuard()) return;
-  STAFF_OPENING_STATE = {};
-  staffOpeningSetError('');
+  staffOpeningResetObsoleteSubmission();
+  if (!STAFF_OPENING_SUBMISSION || STAFF_OPENING_SUBMISSION.phase === 'completed') {
+    STAFF_OPENING_STATE = {};
+    STAFF_OPENING_SUBMISSION = null;
+    staffOpeningSetError('');
+  }
   showStaffShellView('opening');
 }
 
 async function saveStaffOpening() {
+  staffOpeningResetObsoleteSubmission();
   if (STAFF_OPENING_SAVING || !staffOperationalGuard()) return;
+  let batch = STAFF_OPENING_SUBMISSION;
   STAFF_OPENING_SAVING = true;
-  const button = document.getElementById('staff-opening-save');
-  if (button) button.disabled = true;
   try {
-    const user = SESSION.user || {};
-    if (SESSION.type !== 'barback' || APP_MODE !== 'staff' || !SESSION.venueId || !user.nightId || !user.name || !Array.isArray(user.allowed_bar_ids)) throw new Error('Staff Opening context is invalid.');
+    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffOpeningComplete(batch, true); return; }
+    if (batch && batch.phase !== 'rejected') { await staffOpeningCheckStatus(batch); return; }
+    const context = staffOpeningContext();
+    if (!context) throw new Error('Staff Opening context is invalid.');
+    if (!batch) {
+      staffOpeningValidateState();
+      const rows = staffOpeningRows();
+      if (!rows.length) { staffOpeningSetError('No opening stock recorded — all quantities are zero.'); return; }
+      const user = SESSION.user;
+      batch = {
+        context, phase: 'sending', writeStarted: false, draftKey: JSON.stringify(STAFF_OPENING_STATE),
+        records: rows.map(row => ({
+          venue_id: context.venueId, night_id: context.nightId, bar_id: row.bar.id, item_id: row.item.id, qty: row.qty,
+          action: 'DELIVERED', status: 'PENDING', submitted_by: user.name, client_event_id: staffOpeningNewClientId(),
+          notes: ['Opening Stock — Par Wizard', row.measurement ? staffScaleNote(row.measurement) : ''].filter(Boolean).join(' | ')
+        }))
+      };
+      STAFF_OPENING_SUBMISSION = batch;
+    }
+    batch.phase = 'sending';
+    staffOpeningUpdateSaveButton();
+    staffOpeningSetError('Submitting Opening…');
+    const user = SESSION.user;
     await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids });
+    if (!staffOpeningSubmissionIsCurrent(batch)) return;
     await hydrateStaffOpeningItems();
-    if (!staffOpeningBars().length) throw new Error('No authorized active Bars are available for Opening.');
-    staffOpeningValidateState();
-    const rows = staffOpeningRows();
-    if (!rows.length) { staffOpeningSetError('No opening stock recorded — all quantities are zero.'); return; }
+    if (!staffOpeningSubmissionIsCurrent(batch)) return;
     const authorized = new Set(staffOpeningBars().map(bar => String(bar.id)));
     const items = new Set(staffOpeningItems().map(item => String(item.id)));
-    if (rows.some(row => !authorized.has(String(row.bar.id)) || !items.has(String(row.item.id)))) throw new Error('Opening destination or Item is outside the current Staff scope.');
-    // notes: 'Opening Stock — Par Wizard' remains the authoritative opening note semantics.
-    const records = rows.map(row => ({
-      venue_id: SESSION.venueId,
-      night_id: user.nightId,
-      bar_id: row.bar.id,
-      item_id: row.item.id,
-      qty: row.qty,
-      action: 'DELIVERED',
-      status: 'PENDING',
-      submitted_by: user.name,
-      notes: ['Opening Stock — Par Wizard', row.measurement ? staffScaleNote(row.measurement) : ''].filter(Boolean).join(' | ')
-    }));
-    const { error } = await SB.from('events').insert(records);
-    if (error) throw new Error(error.message || 'Opening save failed.');
-    STAFF_OPENING_STATE = {};
-    staffOpeningSetError(`Opening submitted: ${records.length} rows across ${new Set(records.map(record => record.bar_id)).size} authorized Bars.`, true);
-    renderStaffOpening();
+    if (!authorized.size || batch.records.some(record => !authorized.has(String(record.bar_id)) || !items.has(String(record.item_id)))) throw new Error('Opening destination or Item is outside the current Staff scope.');
+    batch.writeStarted = true;
+    const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_OPENING_ACK_FIELDS);
+    if (!staffOpeningSubmissionIsCurrent(batch)) return;
+    if (error) {
+      // Known database rejections abort the bulk statement. Unknown transport/
+      // gateway outcomes and uniqueness conflicts require exact-ID reads.
+      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) {
+        batch.phase = 'rejected'; batch.writeStarted = false;
+        staffOpeningSetError(error.message || 'Opening was rejected. No rows from this batch were accepted.');
+      } else staffOpeningShowUnconfirmed(batch, error.message || 'Opening result is unknown.');
+      return;
+    }
+    batch.ack = staffOpeningAcknowledgment(batch, data);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) staffOpeningComplete(batch);
+    else staffOpeningShowUnconfirmed(batch, 'Opening acknowledgment is incomplete.');
   } catch (error) {
-    staffOpeningSetError(error?.message || 'Opening save failed.');
+    if (batch && !staffOpeningSubmissionIsCurrent(batch)) return;
+    if (batch?.writeStarted) staffOpeningShowUnconfirmed(batch, 'Opening response was not verified.');
+    else {
+      if (batch) batch.phase = 'rejected';
+      staffOpeningSetError(error?.message || 'Opening save failed.');
+    }
   } finally {
-    STAFF_OPENING_SAVING = false;
-    if (button) button.disabled = false;
+    if (!batch || staffOpeningSubmissionIsCurrent(batch)) {
+      STAFF_OPENING_SAVING = false;
+      staffOpeningUpdateSaveButton();
+    }
   }
 }
 
@@ -4232,17 +4552,75 @@ function staffScaleRenderAllWidgets() {
   });
 }
 
+// STAFF_APPLIED_WEIGHT_DISPLAY_START — page-memory display/draft provenance only.
+let STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} };
+function staffTakingWeightDrafts() {
+  const contextKey = staffTakingLookupDraftContextKey();
+  if (!contextKey) { STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} }; return {}; }
+  if (STAFF_TAKING_WEIGHT_DRAFT.contextKey !== contextKey) STAFF_TAKING_WEIGHT_DRAFT = { contextKey, fields: {} };
+  return STAFF_TAKING_WEIGHT_DRAFT.fields;
+}
+function staffTakingWeightDraft(itemId, measurement) {
+  const fields = staffTakingWeightDrafts(), draft = fields[itemId];
+  if (draft && draft.applied !== JSON.stringify(measurement ?? null)) delete fields[itemId];
+  return fields[itemId] || null;
+}
+function staffScaleWeightInputEdited(mode, itemId, input) {
+  input.dataset.staffWeightEdited = '1';
+  input.dataset.staffWeightOrigin = 'manual';
+  if (mode === 'taking') staffTakingWeightDrafts()[itemId] = {
+    value: input.value, applied: JSON.stringify(STAFF_TAKING_STATE[itemId]?.measurement ?? null)
+  };
+}
+// A field can mirror an applied measurement or hold a separate manual draft.
+function staffScaleSyncAppliedWeightDisplay(mode, itemId, measurement) {
+  const id = 'staff-' + mode + '-weight-' + itemId;
+  const input = document.getElementById(id);
+  if (input) {
+    input.value = String(measurement.weightG);
+    input.dataset.staffWeightOrigin = measurement.source === 'ble' ? 'ble' : 'manual';
+    delete input.dataset.staffWeightEdited;
+    if (mode === 'returning') input.dataset.returningApplied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
+  }
+  if (mode === 'returning') delete STAFF_RETURNING_DOM_DRAFT.fields[id];
+  else if (mode === 'taking') delete staffTakingWeightDrafts()[itemId];
+}
+function staffScaleClearBleWeightDisplay(mode, itemId) {
+  const id = 'staff-' + mode + '-weight-' + itemId;
+  const input = document.getElementById(id);
+  const field = mode === 'returning' ? STAFF_RETURNING_DOM_DRAFT.fields[id] : mode === 'taking' ? staffTakingWeightDrafts()[itemId] : null;
+  // Unmarked old raw drafts are preserved; input events mark even same-value edits.
+  const manual = input ? input.dataset.staffWeightEdited === '1' ||
+    (input.value !== '' && input.dataset.staffWeightOrigin !== 'ble') : !!field && field.weightEdited !== false;
+  const value = input ? input.value : field?.value;
+  if (input) {
+    if (!manual && input.dataset.staffWeightOrigin === 'ble') input.value = '';
+    input.dataset.staffWeightOrigin = manual ? 'manual' : '';
+    if (!manual) delete input.dataset.staffWeightEdited;
+  }
+  if (mode === 'returning') {
+    const applied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
+    if (input) input.dataset.returningApplied = applied;
+    if (manual && value !== undefined) STAFF_RETURNING_DOM_DRAFT.fields[id] = { value, applied, weightEdited: true };
+    else delete STAFF_RETURNING_DOM_DRAFT.fields[id];
+  } else if (mode === 'taking') {
+    if (manual && value !== undefined) staffTakingWeightDrafts()[itemId] = { value, applied: JSON.stringify(STAFF_TAKING_STATE[itemId]?.measurement ?? null) };
+    else delete staffTakingWeightDrafts()[itemId];
+  }
+}
+// STAFF_APPLIED_WEIGHT_DISPLAY_END
+
 function staffScaleClearConfirmedMeasurements() {
   Object.keys(STAFF_OPENING_STATE).forEach(key => {
     const state = STAFF_OPENING_STATE[key];
     if (state?.measurement?.source === 'ble') delete STAFF_OPENING_STATE[key];
   });
-  Object.values(STAFF_TAKING_STATE).forEach(state => {
-    if (state?.measurement?.source === 'ble') { state.taken = 0; state.measurement = null; }
+  Object.entries(STAFF_TAKING_STATE).forEach(([itemId, state]) => {
+    if (state?.measurement?.source === 'ble') { state.taken = 0; state.measurement = null; staffScaleClearBleWeightDisplay('taking', itemId); }
   });
   Object.keys(STAFF_RETURNING_STATE).forEach(itemId => {
     const state = STAFF_RETURNING_STATE[itemId];
-    if (state?.measurement?.source === 'ble') delete STAFF_RETURNING_STATE[itemId];
+    if (state?.measurement?.source === 'ble') { delete STAFF_RETURNING_STATE[itemId]; staffScaleClearBleWeightDisplay('returning', itemId); }
   });
   if (STAFF_TRANSFER_STATE?.measurement?.source === 'ble') {
     STAFF_TRANSFER_STATE.measurement = null;
@@ -4258,6 +4636,7 @@ function staffScaleSetError(message) {
 }
 
 function staffScaleDisconnected() {
+  staffScaleCaptureInvalidate();
   STAFF_SCALE_LIVE_WEIGHT = null;
   staffScaleClearConfirmedMeasurements();
   staffScaleRenderAllWidgets();
@@ -4434,6 +4813,7 @@ function staffTakingApplyWeight(itemId, rawWeight = null) {
   try {
     const measurement = { ...staffScaleCalculate(item, rawWeight == null ? input?.value : rawWeight), source: rawWeight == null ? 'manual' : 'ble' };
     STAFF_TAKING_STATE[itemId] = { ...(STAFF_TAKING_STATE[itemId] || { taken: 0, comp: 0, shot: 0 }), taken: measurement.qty, measurement };
+    staffScaleSyncAppliedWeightDisplay('taking', itemId, measurement);
     staffTakingSetError('Measured partial bottle applied. Review the measured preview before Save.', true);
     try { StaffVoiceGuide.announce('weight', { itemName: item?.name }); } catch (_) {}
     renderStaffTaking();
@@ -5803,6 +6183,7 @@ function staffScannerFocusItem(mode, item, barcode = '') {
 
 function staffScannerApplyResolved(match) {
   const mode = STAFF_SCANNER.mode;
+  if (mode === 'returning' && !staffReturningCanEdit()) { staffScannerSetFeedback('Returning submission is awaiting verification. Use its status controls.', 'warn'); return { status: 'SUBMISSION_PENDING' }; }
   const item = match.item || {};
   STAFF_SCANNER.result = match;
   if (mode === 'quick') {
@@ -6199,8 +6580,9 @@ function staffDispatchSwitchMarkup(mode, selectedId) {
 function staffDispatchResetItem(mode, itemId) {
   if (!staffOperationalGuard()) return;
   const id = String(itemId);
-  if (mode === 'taking') { delete STAFF_TAKING_STATE[id]; renderStaffTaking(); }
+  if (mode === 'taking') { delete STAFF_TAKING_STATE[id]; delete staffTakingWeightDrafts()[id]; renderStaffTaking(); }
   else if (mode === 'returning') {
+    if (!staffReturningCanEdit()) return;
     delete STAFF_RETURNING_STATE[id];
     for (const kind of ['qty', 'weight']) {
       const fieldId = 'staff-returning-' + kind + '-' + id;
@@ -6214,7 +6596,7 @@ function staffDispatchResetItem(mode, itemId) {
 }
 
 function staffReturningAdjust(itemId, delta) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffReturningCanEdit()) return;
   const candidate = staffReturningCandidates().find(row => String(row.itemId) === String(itemId));
   if (!candidate) { staffReturningSetError('That Item is not returnable from approved history.'); return; }
   const current = STAFF_RETURNING_STATE[String(itemId)];
@@ -6345,7 +6727,8 @@ function renderStaffTaking() {
       const state = STAFF_TAKING_STATE[item.id] || { taken: 0, comp: 0, shot: 0 };
       const isShot = (item.measurement_mode || 'shot') === 'shot';
       const profile = staffScaleProfile(item);
-      return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(item.name)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">${esc(item.category || item.unit || '')}</div><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><input type="text" id="staff-taking-qty-${esc(item.id)}" value="1" inputmode="text" aria-label="Taking quantity ${esc(item.name)}" style="width:76px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;"><button class="btn btn-a btn-sm" onclick="staffTakingApply('${esc(item.id)}','taken')">+ Taken</button><button class="btn btn-a btn-sm" onclick="staffTakingAdjust('${esc(item.id)}','taken',5)">+5</button><button class="btn btn-ghost btn-sm" onclick="staffTakingApply('${esc(item.id)}','comp')">Comp</button>${isShot ? `<button class="btn btn-ghost btn-sm" onclick="staffTakingApply('${esc(item.id)}','shot')">Shots</button>` : ''}</div>${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-taking-weight-${esc(item.id)}" placeholder="grams" aria-label="Measured grams ${esc(item.name)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffTakingApplyWeight('${esc(item.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('taking','${esc(item.id)}')">USE CURRENT WEIGHT</button></div>` : ''}<div style="font-size:11px;color:var(--muted);margin-top:8px;">Taken: ${staffFormatQuantity(state.taken || 0)} · Comp: ${staffFormatQuantity(state.comp || 0)}${isShot ? ` · Shots: ${staffFormatQuantity(state.shot || 0)}` : ''}${state.measurement ? ` · ${esc(staffScaleMeasurementSummary(item, state.measurement))}` : ''}</div></div>`;
+      const weightDraft = staffTakingWeightDraft(item.id, state.measurement);
+      return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(item.name)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">${esc(item.category || item.unit || '')}</div><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><input type="text" id="staff-taking-qty-${esc(item.id)}" value="1" inputmode="text" aria-label="Taking quantity ${esc(item.name)}" style="width:76px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;"><button class="btn btn-a btn-sm" onclick="staffTakingApply('${esc(item.id)}','taken')">+ Taken</button><button class="btn btn-a btn-sm" onclick="staffTakingAdjust('${esc(item.id)}','taken',5)">+5</button><button class="btn btn-ghost btn-sm" onclick="staffTakingApply('${esc(item.id)}','comp')">Comp</button>${isShot ? `<button class="btn btn-ghost btn-sm" onclick="staffTakingApply('${esc(item.id)}','shot')">Shots</button>` : ''}</div>${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-taking-weight-${esc(item.id)}" value="${esc(String(weightDraft ? weightDraft.value : state.measurement?.weightG ?? ''))}" data-staff-weight-origin="${weightDraft ? 'manual' : state.measurement?.source === 'ble' ? 'ble' : state.measurement ? 'manual' : ''}" data-staff-weight-edited="${weightDraft ? '1' : ''}" oninput="staffScaleWeightInputEdited('taking','${esc(item.id)}',this)" placeholder="grams" aria-label="Measured grams ${esc(item.name)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffTakingApplyWeight('${esc(item.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('taking','${esc(item.id)}')">USE CURRENT WEIGHT</button></div>` : ''}<div style="font-size:11px;color:var(--muted);margin-top:8px;">Taken: ${staffFormatQuantity(state.taken || 0)} · Comp: ${staffFormatQuantity(state.comp || 0)}${isShot ? ` · Shots: ${staffFormatQuantity(state.shot || 0)}` : ''}${state.measurement ? ` · ${esc(staffScaleMeasurementSummary(item, state.measurement))}` : ''}</div></div>`;
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
@@ -6409,6 +6792,220 @@ let STAFF_RETURNING_ERROR = '';
 let STAFF_RETURNING_ERROR_OK = false;
 let STAFF_RETURNING_DOM_DRAFT = { contextKey: '', fields: {}, focus: null };
 
+// STAFF_RETURNING_ACK_START — one frozen batch; unknown outcomes use read-only checks.
+let STAFF_RETURNING_SUBMISSION = null;
+// Uncertain IDs stay available across same-page context changes, never for a new write.
+const STAFF_RETURNING_RETAINED = new Map();
+const STAFF_RETURNING_ACK_FIELDS = 'id,client_event_id,venue_id,night_id,bar_id,item_id,qty,action,status,submitted_by,notes,staff_id,source,session_id';
+function staffReturningContext() {
+  const user = SESSION.user;
+  if (APP_MODE !== 'staff' || SESSION.type !== 'barback' || !SESSION.venueId || !user?.staff_id || !user.assignment_id || !user.nightId || !user.name || !Array.isArray(user.allowed_bar_ids)) return null;
+  if (!STAFF_RETURNING_SOURCE_BAR) return null;
+  return { userRef: user, key: JSON.stringify([SESSION.venueId, user.staff_id, user.assignment_id, user.nightId, user.session_id || '', user.allowed_bar_ids.map(String).sort(), String(STAFF_RETURNING_SOURCE_BAR)]), venueId: SESSION.venueId, staffId: user.staff_id, nightId: user.nightId, sourceBar: String(STAFF_RETURNING_SOURCE_BAR) };
+}
+function staffReturningSubmissionIsCurrent(batch) {
+  const context = staffReturningContext();
+  return !!batch && STAFF_RETURNING_SUBMISSION === batch && !!context && context.key === batch.context.key && context.userRef === batch.context.userRef;
+}
+function staffReturningAttemptKey(context) {
+  return JSON.stringify([context.venueId, context.staffId, context.nightId, context.sourceBar]);
+}
+function staffReturningResetObsoleteSubmission() {
+  const prior = STAFF_RETURNING_SUBMISSION;
+  if (prior && !staffReturningSubmissionIsCurrent(prior)) {
+    if (prior.phase === 'verified' || (prior.writeStarted && prior.phase !== 'completed')) {
+      STAFF_RETURNING_RETAINED.set(staffReturningAttemptKey(prior.context), {
+        ...prior, phase: prior.phase === 'verified' ? 'verified' : 'unknown'
+      });
+    }
+    STAFF_RETURNING_SUBMISSION = null;
+    STAFF_RETURNING_SAVING = false;
+    staffReturningRenderResult();
+  }
+  if (STAFF_RETURNING_SUBMISSION) return;
+  const context = staffReturningContext();
+  if (!context || !context.userRef.allowed_bar_ids.map(String).includes(context.sourceBar) ||
+      !staffReturningBars().some(bar => String(bar.id) === context.sourceBar)) return;
+  const retained = STAFF_RETURNING_RETAINED.get(staffReturningAttemptKey(context));
+  if (retained) {
+    // A new controller generation may only read these IDs. It owns no current draft.
+    STAFF_RETURNING_SUBMISSION = { ...retained, context, writeStarted: true, preserveCurrentDraft: true };
+  }
+}
+
+function staffReturningCanEdit() {
+  staffReturningResetObsoleteSubmission();
+  const batch = STAFF_RETURNING_SUBMISSION;
+  if (STAFF_RETURNING_SAVING || (batch && batch.phase !== 'rejected')) {
+    staffReturningSetError(batch?.phase === 'verified' || batch?.phase === 'completed'
+      ? 'This Returning is already saved. Return to Dispatch; no additional write will be sent.'
+      : 'This Returning is pending verification. Use Check status before starting another submission.');
+    return false;
+  }
+  if (batch) STAFF_RETURNING_SUBMISSION = null;
+  return true;
+}
+function staffReturningLockControls() {
+  const batch = staffReturningSubmissionIsCurrent(STAFF_RETURNING_SUBMISSION) ? STAFF_RETURNING_SUBMISSION : null;
+  const locked = STAFF_RETURNING_SAVING || !!(batch && batch.phase !== 'rejected');
+  const grid = document.getElementById('staff-returning-grid');
+  const source = document.getElementById('staff-returning-source-bar');
+  const controls = [...(grid?.querySelectorAll('input,button,select') || []), ...(source ? [source] : [])];
+  for (const control of controls) {
+    if (locked) {
+      if (control.dataset.returningSubmitDisabled === undefined) control.dataset.returningSubmitDisabled = control.disabled ? '1' : '0';
+      control.disabled = true;
+    } else if (control.dataset.returningSubmitDisabled !== undefined) {
+      control.disabled = control.dataset.returningSubmitDisabled === '1';
+      delete control.dataset.returningSubmitDisabled;
+    }
+  }
+}
+function staffReturningUpdateSaveButton() { staffReturningRenderSubmitState(); }
+function staffReturningSourceLocked() {
+  return staffReturningSubmissionIsCurrent(STAFF_RETURNING_SUBMISSION) && !['rejected', 'completed'].includes(STAFF_RETURNING_SUBMISSION.phase);
+}
+function staffReturningFrozenMeasurementSafe(batch) {
+  for (const [itemId, value] of Object.entries(batch.frozenState)) {
+    if (value?.measurement?.source === 'ble' && JSON.stringify(STAFF_RETURNING_STATE[itemId]) !== JSON.stringify(value)) {
+      throw new Error('The confirmed scale measurement was cleared or changed. Reweigh before submitting Returning.');
+    }
+  }
+}
+function staffReturningValidateFrozen(batch) {
+  const current = STAFF_RETURNING_STATE;
+  try {
+    STAFF_RETURNING_STATE = batch.frozenState;
+    staffReturningValidateState();
+    const rows = staffReturningRows();
+    if (rows.length !== batch.records.length || rows.some(row => String(row.candidate.barId) !== batch.context.sourceBar)) throw new Error('Returning history or source scope changed. Review Returning again.');
+  } finally { STAFF_RETURNING_STATE = current; }
+}
+function staffReturningClearSubmittedDraft(batch) {
+  if (batch.preserveCurrentDraft) return;
+  for (const record of batch.records) {
+    const itemId = String(record.item_id), submitted = batch.frozenState[itemId];
+    const applied = JSON.stringify(submitted ?? null);
+    if (JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null) === applied) delete STAFF_RETURNING_STATE[itemId];
+    const currentApplied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
+    for (const kind of ['qty', 'weight']) {
+      const id = 'staff-returning-' + kind + '-' + itemId;
+      const input = document.getElementById(id);
+      const field = STAFF_RETURNING_DOM_DRAFT.fields[id];
+      const captured = batch.domFields[id];
+      const value = input ? input.value : field?.value;
+      if (value === undefined) continue;
+      const selectedQty = Number(submitted && typeof submitted === 'object' ? submitted.qty : submitted);
+      const manualWeightDraft = kind === 'weight' && (input?.dataset.staffWeightEdited === '1' || field?.weightEdited === true);
+      const consumed = !manualWeightDraft && currentApplied === 'null' && captured && value === captured.value &&
+        (kind === 'qty' ? Number(value) === selectedQty : submitted?.measurement && Number(value) === Number(submitted.measurement.weightG));
+      if (consumed) {
+        delete STAFF_RETURNING_DOM_DRAFT.fields[id];
+        if (input) { input.value = kind === 'qty' ? '0' : ''; input.dataset.returningApplied = currentApplied; }
+      } else {
+        // Unapplied or newer raw text is retained as a draft, never a movement.
+        STAFF_RETURNING_DOM_DRAFT.fields[id] = { value, applied: currentApplied, ...(manualWeightDraft ? { weightEdited: true } : {}) };
+        if (input) input.dataset.returningApplied = currentApplied;
+      }
+    }
+  }
+}
+function staffReturningNewClientId() {
+  const uuid = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return 'staff-returning-' + uuid;
+}
+function staffReturningAcknowledgment(batch, data) {
+  const expected = new Map(batch.records.map(record => [record.client_event_id, record]));
+  const present = new Set(), verified = new Map(), databaseIds = new Set();
+  let mismatched = 0, unexpected = 0;
+  if (!Array.isArray(data)) return { total: expected.size, acknowledged: 0, missing: expected.size, mismatched: 0, unexpected: 0, statuses: {} };
+  for (const row of data) {
+    const record = expected.get(row?.client_event_id);
+    if (!record) { unexpected += 1; continue; }
+    if (present.has(row.client_event_id)) { mismatched += 1; verified.delete(row.client_event_id); continue; }
+    present.add(row.client_event_id);
+    const matches = typeof row.id === 'string' && !!row.id && !databaseIds.has(row.id) &&
+      row.venue_id === record.venue_id && row.night_id === record.night_id && row.bar_id === record.bar_id && row.item_id === record.item_id &&
+      Number.isFinite(Number(row.qty)) && Number(row.qty) === record.qty && row.action === record.action &&
+      ['PENDING', 'APPROVED', 'REJECTED', 'VOID'].includes(row.status) && row.submitted_by === record.submitted_by &&
+      String(row.notes || '') === record.notes && row.staff_id === null && row.source === null && row.session_id === null;
+    if (!matches) { mismatched += 1; continue; }
+    databaseIds.add(row.id);
+    verified.set(row.client_event_id, row);
+  }
+  const statuses = {};
+  for (const row of verified.values()) statuses[row.status] = (statuses[row.status] || 0) + 1;
+  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses };
+}
+function staffReturningSavedSummary(batch) {
+  const statuses = Object.entries(batch.ack.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
+  return `Returning saved: ${batch.records.length} rows. ${statuses}.`;
+}
+function staffReturningRenderResult() {
+  const element = document.getElementById('staff-returning-result');
+  if (!element) return;
+  const batch = STAFF_RETURNING_SUBMISSION;
+  if (!staffReturningSubmissionIsCurrent(batch) || !['verified', 'completed'].includes(batch.phase)) {
+    element.textContent = ''; element.className = 'alert'; return;
+  }
+  element.textContent = staffReturningSavedSummary(batch) + (batch.completionError ? ' Return to Dispatch is available; the saved rows will not be submitted again.' : '');
+  element.className = 'alert alert-ok show';
+}
+function staffReturningComplete(batch, forceReturn = false) {
+  if (!staffReturningSubmissionIsCurrent(batch)) return;
+  batch.phase = 'verified';
+  try {
+    staffReturningClearSubmittedDraft(batch);
+    staffReturningSetError(staffReturningSavedSummary(batch), true);
+    staffReturningRenderResult();
+    const returning = document.getElementById('staff-shell-returning');
+    const dispatch = document.getElementById('staff-shell-dispatch');
+    if (forceReturn || !returning || returning.style.display !== 'none') {
+      showStaffShellView('dispatch');
+      if (!returning || returning.style.display !== 'none' || !dispatch || dispatch.style.display === 'none') throw new Error('Returning completion navigation is not confirmed.');
+    } else if (!dispatch || dispatch.style.display === 'none') {
+      // The operator left Returning while awaiting the response. Keep the saved
+      // result; explicit Return completes navigation without interrupting work.
+      batch.completionError = false;
+      return;
+    }
+    batch.phase = 'completed'; batch.completionError = false;
+    STAFF_RETURNING_RETAINED.delete(staffReturningAttemptKey(batch.context));
+    staffReturningRenderResult();
+  } catch (_) {
+    batch.completionError = true;
+    try { staffReturningSetError(staffReturningSavedSummary(batch) + ' Could not return to Dispatch. Use Return to Dispatch; no additional write will be sent.', true); } catch (_) {}
+    try { staffReturningRenderResult(); } catch (_) {}
+  }
+}
+function staffReturningShowUnconfirmed(batch, message) {
+  if (!staffReturningSubmissionIsCurrent(batch)) return;
+  batch.phase = 'unknown';
+  const ack = batch.ack || { total: batch.records.length, acknowledged: 0, missing: batch.records.length, mismatched: 0, unexpected: 0 };
+  staffReturningSetError(`${message} Verified ${ack.acknowledged}/${ack.total}; missing from acknowledgment ${ack.missing}; mismatched ${ack.mismatched}; unexpected ${ack.unexpected}. Use Check status. No further write will be sent.`);
+}
+async function staffReturningCheckStatus(batch) {
+  batch.phase = 'checking';
+  staffReturningUpdateSaveButton();
+  try {
+    const rows = [];
+    // Bounded exact-ID reads. A truncated/missing response never implies success.
+    for (let offset = 0; offset < batch.records.length; offset += 100) {
+      const ids = batch.records.slice(offset, offset + 100).map(record => record.client_event_id);
+      const { data, error } = await SB.from('events').select(STAFF_RETURNING_ACK_FIELDS)
+        .eq('venue_id', batch.context.venueId).eq('night_id', batch.context.nightId).eq('bar_id', batch.context.sourceBar).in('client_event_id', ids).limit(ids.length + 1);
+      if (!staffReturningSubmissionIsCurrent(batch)) return;
+      if (error || !Array.isArray(data)) throw new Error('Returning status could not be read.');
+      rows.push(...data);
+    }
+    batch.ack = staffReturningAcknowledgment(batch, rows);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) staffReturningComplete(batch);
+    else staffReturningShowUnconfirmed(batch, 'Returning is not fully verified.');
+  } catch (_) { staffReturningShowUnconfirmed(batch, 'Returning status is unavailable. The earlier result remains unconfirmed.'); }
+}
+// STAFF_RETURNING_ACK_END
+
 // Display-only lookup provenance. It never supplies Return movement candidates.
 let STAFF_ITEM_LOOKUP_SESSION_REF = null;
 let STAFF_ITEM_LOOKUP_SESSION_TOKEN = 0;
@@ -6465,7 +7062,15 @@ function staffTakingLookupCaptureDrafts(taking) {
   const grid = document.getElementById('staff-taking-grid');
   if (!contextKey || contextKey !== STAFF_TAKING_LOOKUP_DOM_CONTEXT || !grid) return null;
   const fields = Array.from(grid.querySelectorAll('input[id^="staff-taking-qty-"], input[id^="staff-taking-weight-"]'))
-    .map(input => ({ id: input.id, value: input.value }));
+    .map(input => {
+      const field = { id: input.id, value: input.value };
+      if (input.id.startsWith('staff-taking-weight-')) {
+        const itemId = input.id.slice('staff-taking-weight-'.length);
+        field.weightEdited = input.dataset.staffWeightEdited === '1';
+        field.weightApplied = JSON.stringify(STAFF_TAKING_STATE[itemId]?.measurement ?? null);
+      }
+      return field;
+    });
   const active = document.activeElement;
   const focus = active?.id && taking.contains(active)
     ? { id: active.id, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection }
@@ -6480,7 +7085,16 @@ function staffTakingLookupRestoreDrafts(draft, taking) {
   for (const field of draft.fields) {
     const input = document.getElementById(field.id);
     // Only controls retained by the freshly rendered eligible catalog survive.
-    if (input?.isConnected && grid.contains(input) && !input.disabled && !input.readOnly) input.value = field.value;
+    if (input?.isConnected && grid.contains(input) && !input.disabled && !input.readOnly) {
+      if (field.id.startsWith('staff-taking-weight-')) {
+        const itemId = field.id.slice('staff-taking-weight-'.length);
+        const measurement = STAFF_TAKING_STATE[itemId]?.measurement;
+        if (field.weightApplied !== undefined && field.weightApplied !== JSON.stringify(measurement ?? null)) continue;
+        input.value = field.value;
+        if (field.weightEdited !== false) staffScaleWeightInputEdited('taking', itemId, input);
+        else { delete input.dataset.staffWeightEdited; input.dataset.staffWeightOrigin = measurement?.source === 'ble' ? 'ble' : measurement ? 'manual' : ''; }
+      } else input.value = field.value;
+    }
   }
   const focus = draft.focus && document.getElementById(draft.focus.id);
   if (!focus?.isConnected || !taking.contains(focus) || focus.disabled || focus.readOnly || !focus.getClientRects().length) return;
@@ -6698,7 +7312,7 @@ function staffReturningCandidates() {
 }
 
 function staffReturningInput(itemId, value) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffReturningCanEdit()) return;
   const candidate = staffReturningCandidates().find(row => String(row.itemId) === String(itemId));
   const qty = Number(value);
   if (!candidate || String(value).trim() === '' || !Number.isFinite(qty) || qty < 0) {
@@ -6715,7 +7329,7 @@ function staffReturningInput(itemId, value) {
 }
 
 function staffReturningApplyWeight(itemId, rawWeight = null) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffReturningCanEdit()) return;
   const candidate = staffReturningCandidates().find(row => String(row.itemId) === String(itemId));
   const input = document.getElementById('staff-returning-weight-' + itemId);
   try {
@@ -6725,6 +7339,7 @@ function staffReturningApplyWeight(itemId, rawWeight = null) {
     const tolerance = Number.EPSILON * Math.max(1, candidate?.remaining || 0) * 8;
     if (!candidate || exactQty == null || exactQty > candidate.remaining + tolerance) throw new Error(`Measured return cannot exceed ${candidate?.remaining || 0} available.`);
     STAFF_RETURNING_STATE[String(itemId)] = { qty: measurement.qty, measurement };
+    staffScaleSyncAppliedWeightDisplay('returning', itemId, measurement);
     staffReturningSetError('Measured partial return applied. Review the measured preview before Save.', true);
     try { StaffVoiceGuide.announce('weight', { itemName: item?.name }); } catch (_) {}
     renderStaffReturning();
@@ -6756,14 +7371,20 @@ function staffReturningValidateState() {
 }
 
 function staffReturningRenderSubmitState() {
+  staffReturningResetObsoleteSubmission();
   const button = document.getElementById('staff-returning-save');
   if (!button) return;
+  const batch = staffReturningSubmissionIsCurrent(STAFF_RETURNING_SUBMISSION) ? STAFF_RETURNING_SUBMISSION : null;
+  const readOnly = batch && ['unknown', 'verified', 'completed'].includes(batch.phase);
   let validSelection = false;
-  if (staffReturningHistoryState().status === 'ready') {
+  if (!readOnly && staffReturningHistoryState().status === 'ready') {
     try { staffReturningValidateState(); validSelection = staffReturningRows().length > 0; } catch {}
   }
-  button.disabled = STAFF_RETURNING_SAVING || !validSelection;
+  button.disabled = STAFF_RETURNING_SAVING || (!readOnly && !validSelection);
+  button.textContent = STAFF_RETURNING_SAVING ? (batch?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+    : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
   button.setAttribute('aria-describedby', 'staff-returning-interaction-help');
+  staffReturningLockControls();
 }
 
 function staffReturningCaptureDrafts() {
@@ -6778,7 +7399,11 @@ function staffReturningCaptureDrafts() {
   for (const input of grid.querySelectorAll('input[id^="staff-returning-qty-"], input[id^="staff-returning-weight-"]')) {
     const itemId = input.id.replace(/^staff-returning-(qty|weight)-/, '');
     const applied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
-    if (input.dataset.returningApplied === applied) STAFF_RETURNING_DOM_DRAFT.fields[input.id] = { value: input.value, applied };
+    if (input.dataset.returningApplied === applied) {
+      const field = { value: input.value, applied };
+      if (input.id.startsWith('staff-returning-weight-')) field.weightEdited = input.dataset.staffWeightEdited === '1';
+      STAFF_RETURNING_DOM_DRAFT.fields[input.id] = field;
+    }
     else delete STAFF_RETURNING_DOM_DRAFT.fields[input.id];
   }
   const active = document.activeElement;
@@ -6794,7 +7419,13 @@ function staffReturningRestoreDrafts() {
     const itemId = input.id.replace(/^staff-returning-(qty|weight)-/, '');
     const applied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
     const draft = STAFF_RETURNING_DOM_DRAFT.fields[input.id];
-    if (draft?.applied === applied) input.value = draft.value;
+    if (draft?.applied === applied) {
+      input.value = draft.value;
+      if (input.id.startsWith('staff-returning-weight-')) {
+        if (draft.weightEdited !== false) { input.dataset.staffWeightEdited = '1'; input.dataset.staffWeightOrigin = 'manual'; }
+        else delete input.dataset.staffWeightEdited;
+      }
+    }
     input.dataset.returningApplied = applied;
   }
   const focus = STAFF_RETURNING_DOM_DRAFT.focus;
@@ -6814,7 +7445,7 @@ function staffReturningHasDrafts() {
 function renderStaffReturning() {
   staffReturningCaptureDrafts();
   const bars = staffReturningBars();
-  if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
+  if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR)) && !staffReturningSourceLocked()) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
   const source = bars.find(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR));
   const candidates = staffReturningCandidates();
   const context = document.getElementById('staff-returning-context');
@@ -6856,7 +7487,7 @@ function renderStaffReturning() {
   } else if (!visibleCandidates.length) {
     grid.innerHTML = '';
   } else {
-    grid.innerHTML = visibleCandidates.map(candidate => { const value = STAFF_RETURNING_STATE[candidate.itemId]; const qty = value && typeof value === 'object' ? value.qty : value ?? 0; const item = staffReturningItemForCandidate(candidate); const profile = staffScaleProfile(item); const measurement = value && typeof value === 'object' ? value.measurement : null; return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(candidate.name || candidate.itemId)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">Available from approved history: ${esc(staffFormatQuantity(candidate.remaining))}</div><input type="number" min="0" max="${esc(staffFormatQuantity(candidate.remaining))}" step="any" value="${esc(staffFormatQuantity(qty))}" aria-label="Return ${esc(candidate.name || candidate.itemId)} from ${esc(source?.name || 'Bar')}" onchange="staffReturningInput('${esc(candidate.itemId)}',this.value)" style="width:100px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;">${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-returning-weight-${esc(candidate.itemId)}" placeholder="grams" aria-label="Measured return grams ${esc(candidate.name || candidate.itemId)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffReturningApplyWeight('${esc(candidate.itemId)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('returning','${esc(candidate.itemId)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}` : ''}</div>`; }).join('');
+    grid.innerHTML = visibleCandidates.map(candidate => { const value = STAFF_RETURNING_STATE[candidate.itemId]; const qty = value && typeof value === 'object' ? value.qty : value ?? 0; const item = staffReturningItemForCandidate(candidate); const profile = staffScaleProfile(item); const measurement = value && typeof value === 'object' ? value.measurement : null; return `<div class="panel" style="padding:14px;margin-bottom:10px;"><div style="font-weight:700;font-size:13px;">${esc(candidate.name || candidate.itemId)}</div><div style="font-size:10px;color:var(--muted);margin:4px 0 8px;">Available from approved history: ${esc(staffFormatQuantity(candidate.remaining))}</div><input type="number" min="0" max="${esc(staffFormatQuantity(candidate.remaining))}" step="any" value="${esc(staffFormatQuantity(qty))}" aria-label="Return ${esc(candidate.name || candidate.itemId)} from ${esc(source?.name || 'Bar')}" onchange="staffReturningInput('${esc(candidate.itemId)}',this.value)" style="width:100px;padding:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;">${profile ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;"><span style="font-size:10px;color:var(--muted);">OPEN BOTTLE</span><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-returning-weight-${esc(candidate.itemId)}" value="${esc(String(measurement?.weightG ?? ''))}" data-staff-weight-origin="${measurement?.source === 'ble' ? 'ble' : measurement ? 'manual' : ''}" oninput="staffScaleWeightInputEdited('returning','${esc(candidate.itemId)}',this)" placeholder="grams" aria-label="Measured return grams ${esc(candidate.name || candidate.itemId)}" style="width:92px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);"><button class="btn btn-ghost btn-sm" onclick="staffReturningApplyWeight('${esc(candidate.itemId)}')">Apply grams</button><button class="btn btn-a2 btn-sm" onclick="staffScaleUseCurrentWeight('returning','${esc(candidate.itemId)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}` : ''}</div>`; }).join('');
   }
   staffDispatchDecorateReturningCards(visibleCandidates, source);
   grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
@@ -6868,6 +7499,7 @@ function renderStaffReturning() {
 
 async function staffReturningSourceChanged(barId) {
   if (!staffOperationalGuard()) return;
+  if (staffReturningSourceLocked()) { staffReturningSetError('This Returning submission must be verified before switching source Bar.'); renderStaffReturning(); return; }
   const allowed = new Set(staffReturningBars().map(bar => String(bar.id)));
   if (!allowed.has(String(barId))) { staffReturningSetError('That source Bar is outside the Staff scope.'); renderStaffReturning(); return; }
   if (String(barId) === String(STAFF_RETURNING_SOURCE_BAR)) return;
@@ -6881,6 +7513,14 @@ async function staffReturningSourceChanged(barId) {
 
 async function openStaffReturning() {
   if (!staffOperationalGuard()) return;
+  staffReturningResetObsoleteSubmission();
+  const batch = STAFF_RETURNING_SUBMISSION;
+  if (batch && batch.phase !== 'completed') {
+    showStaffShellView('returning');
+    staffReturningRenderSubmitState();
+    return;
+  }
+  if (batch) { STAFF_RETURNING_SUBMISSION = null; staffReturningRenderResult(); }
   if (staffReturningHasDrafts()) { showStaffShellView('returning'); staffReturningSetError('Your unsaved Returning draft is preserved. Review it before switching Bar.'); return; }
   STAFF_RETURNING_STATE = {};
   STAFF_RETURNING_SOURCE_BAR = String(staffReturningBars()[0]?.id || '');
@@ -6891,30 +7531,64 @@ async function openStaffReturning() {
 }
 
 async function saveStaffReturning() {
+  staffReturningResetObsoleteSubmission();
   if (STAFF_RETURNING_SAVING || !staffOperationalGuard()) return;
+  let batch = STAFF_RETURNING_SUBMISSION;
   STAFF_RETURNING_SAVING = true;
-  const button = document.getElementById('staff-returning-save');
-  if (button) button.disabled = true;
   try {
-    const user = SESSION.user || {};
-    if (SESSION.type !== 'barback' || APP_MODE !== 'staff' || !SESSION.venueId || !user.nightId || !user.name || !STAFF_RETURNING_SOURCE_BAR) throw new Error('Staff Returning context is invalid.');
-    await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids || [] });
-    if (!staffReturningBars().some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) throw new Error('Returning source Bar is outside the current Staff scope.');
-    await hydrateStaffReturningHistory();
-    staffReturningValidateState();
-    const rows = staffReturningRows();
-    if (!rows.length) throw new Error('No Return quantities recorded — all quantities are zero.');
-    const records = rows.map(row => ({ venue_id: SESSION.venueId, night_id: user.nightId, bar_id: row.candidate.barId, item_id: row.candidate.itemId, qty: row.measurement ? 1 : row.qty, action: 'RETURNED', status: 'PENDING', submitted_by: user.name, notes: ['Return to Main Liquor Room', row.measurement ? staffScaleNote(row.measurement) : ''].filter(Boolean).join(' | ') }));
-    const { error } = await SB.from('events').insert(records);
-    if (error) throw new Error(error.message || 'Returning save failed.');
-    STAFF_RETURNING_STATE = {};
-    staffReturningSetError(`Returning submitted: ${records.length} rows from ${records[0].bar_id}.`, true);
-    renderStaffReturning();
-  } catch (error) {
-    staffReturningSetError(error?.message || 'Returning save failed.');
-  } finally {
-    STAFF_RETURNING_SAVING = false;
+    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffReturningComplete(batch, true); return; }
+    if (batch && batch.phase !== 'rejected') { await staffReturningCheckStatus(batch); return; }
+    const context = staffReturningContext();
+    if (!context) throw new Error('Staff Returning context is invalid.');
+    if (!batch) {
+      staffReturningCaptureDrafts();
+      const frozenState = JSON.parse(JSON.stringify(STAFF_RETURNING_STATE));
+      const user = SESSION.user;
+      const records = Object.entries(frozenState).filter(([, value]) => Number(value && typeof value === 'object' ? value.qty : value) > 0).map(([itemId, value]) => {
+        const measurement = value && typeof value === 'object' ? value.measurement || null : null;
+        return { venue_id: context.venueId, night_id: context.nightId, bar_id: context.sourceBar, item_id: itemId,
+          qty: measurement ? 1 : Number(value), action: 'RETURNED', status: 'PENDING', submitted_by: user.name,
+          client_event_id: staffReturningNewClientId(), notes: ['Return to Main Liquor Room', measurement ? staffScaleNote(measurement) : ''].filter(Boolean).join(' | ') };
+      });
+      if (!records.length) throw new Error('No Return quantities recorded — all quantities are zero.');
+      batch = { context, phase: 'sending', writeStarted: false, frozenState, domFields: JSON.parse(JSON.stringify(STAFF_RETURNING_DOM_DRAFT.fields)), records };
+      STAFF_RETURNING_SUBMISSION = batch;
+    }
+    batch.phase = 'sending';
     staffReturningRenderSubmitState();
+    staffReturningSetError('');
+    const user = SESSION.user;
+    await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids || [] });
+    if (!staffReturningSubmissionIsCurrent(batch)) return;
+    if (!staffReturningBars().some(bar => String(bar.id) === batch.context.sourceBar)) throw new Error('Returning source Bar is outside the current Staff scope.');
+    staffReturningFrozenMeasurementSafe(batch);
+    await hydrateStaffReturningHistory();
+    if (!staffReturningSubmissionIsCurrent(batch)) return;
+    staffReturningFrozenMeasurementSafe(batch);
+    staffReturningValidateFrozen(batch);
+    staffReturningFrozenMeasurementSafe(batch);
+    batch.writeStarted = true;
+    const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_RETURNING_ACK_FIELDS);
+    if (!staffReturningSubmissionIsCurrent(batch)) return;
+    if (error) {
+      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) {
+        batch.phase = 'rejected'; batch.writeStarted = false;
+        staffReturningSetError(error.message || 'Returning was rejected. No rows from this batch were accepted.');
+      } else staffReturningShowUnconfirmed(batch, error.message || 'Returning result is unknown.');
+      return;
+    }
+    batch.ack = staffReturningAcknowledgment(batch, data);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) staffReturningComplete(batch);
+    else staffReturningShowUnconfirmed(batch, 'Returning acknowledgment is incomplete.');
+  } catch (error) {
+    if (batch && !staffReturningSubmissionIsCurrent(batch)) return;
+    if (batch?.writeStarted) staffReturningShowUnconfirmed(batch, 'Returning response was not verified.');
+    else { if (batch) batch.phase = 'rejected'; staffReturningSetError(error?.message || 'Returning save failed.'); }
+  } finally {
+    if (!batch || staffReturningSubmissionIsCurrent(batch)) {
+      STAFF_RETURNING_SAVING = false;
+      staffReturningRenderSubmitState();
+    }
   }
 }
 
@@ -15685,6 +16359,8 @@ async function qnksCleanupAfterSetupFailure(device, disconnectHandler, notificat
 }
 
 async function bleScaleConnect(emptyW, shotW, fullShots, onWeight = null, onDisconnect = null, options = {}) {
+  const captureConnectionToken = {};
+  staffScaleCaptureConnectionBegin(captureConnectionToken);
   BLE_SCALE.onWeight = typeof onWeight === 'function' ? onWeight : null;
   BLE_SCALE.onDisconnect = typeof onDisconnect === 'function' ? onDisconnect : null;
   bluefyDiagRecord({ flow: 'SCALE_CONNECT_ATTEMPT', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'UNKNOWN', weighState: 'WAITING_FOR_SCALE' });
@@ -15827,8 +16503,13 @@ async function bleScaleConnect(emptyW, shotW, fullShots, onWeight = null, onDisc
       qnksDebugRecord({ flow: 'FFF1_LOOKUP_RESULT', deviceName: qnksTrace.deviceName, deviceId: qnksTrace.deviceId, fff1Lookup: Object.assign({}, qnksTrace.fff1Lookup, { result: qnksCharacteristic ? 'FOUND' : 'NOT_FOUND', selectedUuid: qnksCharacteristic ? String(qnksCharacteristic.uuid).toLowerCase() : null }), matchResult: qnksCharacteristic ? 'MATCH' : 'ERROR', gattConnected: !!server?.connected });
       if (!qnksCharacteristic) throw new Error('QN-KS FFF1 notify characteristic not found.');
       await qnksCharacteristic.startNotifications();
+      staffScaleCaptureConnectionReady(captureConnectionToken, device);
       qnksNotificationHandler = (event) => {
-        const decoded = bleParseQnksWeight(event.target.value);
+        const captureValue = event.target.value;
+        const captureFrame = staffScaleCaptureNotify(captureConnectionToken, device, qnksService.uuid, qnksCharacteristic.uuid, captureValue);
+        let decoded, captureDecoded = false;
+        try { decoded = bleParseQnksWeight(captureValue); captureDecoded = true; }
+        finally { staffScaleCaptureDecoded(captureFrame, captureDecoded, decoded); }
         qnksDebugNotify(qnksService.uuid, qnksCharacteristic.uuid, event.target.value, decoded);
         if (!qnksFirstNotification) {
           qnksFirstNotification = true;
