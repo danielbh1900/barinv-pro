@@ -16568,7 +16568,7 @@ async function bleScaleConnect(emptyW, shotW, fullShots, onWeight = null, onDisc
 
 function bleParseQnksWeight(dataView) {
   // Proven QN-KS/Chipsea FFF1 frame: 18 bytes, header 10 12 00 6c 01 02 05 01,
-  // unsigned big-endian grams×10 at bytes 9..10, stable flag at byte 16,
+  // unsigned big-endian value at bytes 9..10, stable flag at byte 16,
   // checksum=sum(bytes 0..16)&0xff at byte 17. Invalid/non-weight frames are
   // rejected so they cannot fall through to the generic heuristic parser.
   try {
@@ -16579,7 +16579,9 @@ function bleParseQnksWeight(dataView) {
     for (let i = 0; i <= 16; i++) checksum = (checksum + dataView.getUint8(i)) & 0xff;
     if (checksum !== dataView.getUint8(17)) { bleParseQnksWeight.lastDebugReason = 'checksum'; return null; }
     const raw = (dataView.getUint8(9) << 8) | dataView.getUint8(10);
-    const grams = raw / 10;
+    // Match the existing barback range rule; all other layouts retain ÷10.
+    const divisor = dataView.getUint8(8) === 0xe8 && dataView.getUint8(15) === 0x02 && raw >= 1000 && raw <= 10000 ? 1 : 10;
+    const grams = raw / divisor;
     if (!Number.isFinite(grams) || grams < 0 || grams > 5500) { bleParseQnksWeight.lastDebugReason = 'range'; return null; }
     bleParseQnksWeight.lastDebugReason = `accepted stable=${dataView.getUint8(16) === 1}`;
     return { grams, stable: dataView.getUint8(16) === 1, raw };
