@@ -1450,6 +1450,24 @@ th.sortable span { font-size:10px; }
   #staff-dashboard .staff-section-actions .btn { flex:1 1 0; min-width:0; padding:8px 6px; }
 }
 /* STAFF_WORKSPACE_PRESENTATION_CSS_END */
+/* STAFF_SHARED_SCALE_HEADER_CSS_START */
+#staff-dashboard [id^="staff-scale-widget-"] { display:none !important; }
+#staff-dashboard .staff-section-title-line { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+#staff-dashboard .staff-section-title-line > [role="status"] { min-width:0; }
+#staff-dashboard .staff-scale-header { position:relative; flex:0 0 auto; display:flex; flex-direction:column; align-items:stretch; gap:4px; width:110px; text-align:center; }
+#staff-dashboard .staff-scale-header-live { font-family:'Fira Mono',monospace; font-size:12px; line-height:18px; font-weight:700; white-space:nowrap; }
+#staff-dashboard .staff-scale-header .btn, #staff-dashboard .staff-scale-header summary { width:100%; min-height:44px; margin:0; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:5px 8px; cursor:pointer; }
+#staff-dashboard .staff-scale-connect-state { display:block; font-size:10px; line-height:13px; font-weight:400; }
+#staff-dashboard .staff-scale-header details { position:relative; }
+#staff-dashboard .staff-scale-header summary { list-style:none; border-radius:var(--r); font-size:12px; font-weight:700; }
+#staff-dashboard .staff-scale-header summary::-webkit-details-marker { display:none; }
+#staff-dashboard .staff-scale-header summary::after { content:'Details ▾'; font-size:10px; line-height:13px; font-weight:400; }
+#staff-dashboard .staff-scale-header-popover { position:absolute; top:calc(100% + 8px); right:0; z-index:2; width:min(280px,calc(100vw - 32px)); padding:14px; text-align:left; font-size:13px; line-height:1.4; background:var(--s1); color:var(--text); border:1px solid var(--border2); border-radius:var(--r); box-shadow:0 6px 24px rgba(0,0,0,.25); }
+#staff-dashboard .staff-scale-header-popover p { margin:0 0 10px; }
+#staff-dashboard .staff-scale-header-message { margin:6px 0 0; font-size:12px; line-height:1.35; }
+#staff-dashboard .staff-scale-header-help { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+/* STAFF_SHARED_SCALE_HEADER_CSS_END */
+
 #staff-dashboard .staff-active-section[data-section="opening"] { background:#e6b22e; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
 #staff-dashboard .staff-active-section[data-section="taking"] { background:#e88918; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
 #staff-dashboard .staff-active-section[data-section="returning"] { background:#2f9b68; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
@@ -3106,7 +3124,22 @@ th.sortable span { font-size:10px; }
   <div class="staff-workspace-wrap">
     <div id="staff-active-section" class="staff-active-section" data-section="dashboard">
       <div class="staff-active-section-inner">
-        <div class="staff-section-heading"><div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div><div id="staff-section-night" class="staff-section-night" hidden></div></div>
+        <div class="staff-section-heading">
+          <div class="staff-section-title-line">
+            <div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div>
+            <div id="staff-scale-header" class="staff-scale-header" data-busy="false">
+              <output id="staff-scale-header-live" class="staff-scale-header-live" aria-label="Live scale weight">LIVE — g</output>
+              <button id="staff-scale-header-connect" class="btn" type="button" onclick="staffScaleToggle()" aria-describedby="staff-scale-header-help"><span id="staff-scale-header-connect-state" class="staff-scale-connect-state">Disconnected</span><strong>Connect scale</strong></button>
+              <details id="staff-scale-header-details" hidden>
+                <summary class="btn" aria-label="Connected scale details">Connected</summary>
+                <div class="staff-scale-header-popover"><p>Live readings never apply or submit automatically. Use the weight at the intended Item, then review Preview.</p><button id="staff-scale-header-disconnect" class="btn" type="button" onclick="staffScaleHeaderDisconnect()">Disconnect scale</button></div>
+              </details>
+              <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
+            </div>
+          </div>
+          <div id="staff-section-night" class="staff-section-night" hidden></div>
+          <p id="staff-scale-header-message" class="staff-scale-header-message" role="status" aria-live="polite" hidden></p>
+        </div>
         <nav class="staff-section-actions" aria-label="Staff workspace navigation">
           <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
           <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
@@ -3256,7 +3289,7 @@ th.sortable span { font-size:10px; }
         <div class="field"><label>To</label><select id="staff-transfer-destination-bar" onchange="staffTransferDestinationChanged(this.value)"></select></div>
         <div class="field"><label>Item</label><select id="staff-transfer-item" onchange="staffTransferItemChanged(this.value)"></select></div>
         <div class="field"><label>Quantity (whole units)</label><input id="staff-transfer-qty" type="number" min="1" step="1" value="1" onchange="staffTransferQtyChanged(this.value)"></div>
-        <div class="field"><label>Opened bottle grams</label><input id="staff-transfer-weight" type="number" min="0" step="any" placeholder="Manual grams"><button class="btn btn-ghost btn-sm" type="button" onclick="staffTransferApplyWeight()">Apply measured grams</button></div>
+        <div class="field"><label>Opened bottle grams</label><input id="staff-transfer-weight" type="number" min="0" step="any" placeholder="Manual grams"><button class="btn btn-ghost btn-sm" type="button" onclick="staffTransferApplyWeight()">Apply measured grams</button><button id="staff-transfer-use-current" class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseTransferCurrentWeight()" disabled>USE CURRENT WEIGHT</button></div>
       </div>
       <div id="staff-transfer-error" class="alert alert-err"></div>
       <div class="panel staff-review-panel" id="staff-review-transfer" tabindex="-1" aria-label="Transfer preview" style="margin-top:16px;padding:14px;background:var(--s2);">
@@ -4765,11 +4798,61 @@ function staffScaleClearConfirmedMeasurements() {
   }
 }
 
+// STAFF_SHARED_SCALE_HEADER_START — static UI leaves; existing BLE callbacks own state.
+function staffScaleHeaderMessage(message) {
+  const el = document.getElementById('staff-scale-header-message');
+  if (!el) return;
+  const text = String(message || '');
+  if (el.textContent !== text) el.textContent = text;
+  el.hidden = !text;
+  if (typeof staffWorkspaceMeasure === 'function') staffWorkspaceMeasure();
+}
+function staffScaleHeaderRender() {
+  const header = document.getElementById('staff-scale-header');
+  if (!header) return;
+  const supported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
+  const connected = !!BLE_SCALE.connected && !!BLE_SCALE.device?.gatt?.connected;
+  const busy = header.dataset.busy === 'true';
+  const live = document.getElementById('staff-scale-header-live');
+  const text = 'LIVE ' + (STAFF_SCALE_LIVE_WEIGHT == null ? '—' : String(STAFF_SCALE_LIVE_WEIGHT)) + ' g';
+  if (live && live.textContent !== text) live.textContent = text;
+  const connect = document.getElementById('staff-scale-header-connect');
+  const state = document.getElementById('staff-scale-header-connect-state');
+  if (connect) { connect.hidden = connected; connect.disabled = busy || !supported; }
+  if (state) state.textContent = busy ? 'Connecting…' : 'Disconnected';
+  const details = document.getElementById('staff-scale-header-details');
+  if (details) { details.hidden = !connected; if (!connected) details.open = false; }
+  const disconnect = document.getElementById('staff-scale-header-disconnect');
+  if (disconnect) disconnect.disabled = busy || !connected;
+  const transferUse = document.getElementById('staff-transfer-use-current');
+  if (transferUse) transferUse.disabled = !(Number(STAFF_SCALE_LIVE_WEIGHT) > 0);
+  const message = document.getElementById('staff-scale-header-message');
+  if (!supported && !message?.textContent) staffScaleHeaderMessage('Bluetooth is unavailable in this browser. Use Bluefy for the scale, or enter grams manually.');
+}
+function staffScaleHeaderDisconnect() {
+  if (!BLE_SCALE.connected || !BLE_SCALE.device?.gatt?.connected) {
+    staffScaleHeaderMessage('Scale is not connected. Retry Connect or use manual grams.');
+    staffScaleHeaderRender();
+    return;
+  }
+  return staffScaleToggle();
+}
+function staffScaleUseTransferCurrentWeight() {
+  const itemId = String(document.getElementById('staff-transfer-item')?.value || '');
+  if (!itemId || itemId !== String(STAFF_TRANSFER_STATE.itemId || '')) {
+    staffScaleSetError('Choose the visible Transfer Item before using the current weight.');
+    return;
+  }
+  staffScaleUseCurrentWeight('transfer', itemId);
+}
+// STAFF_SHARED_SCALE_HEADER_END
+
 function staffScaleSetError(message) {
   const mode = STAFF_SCALE_CONTEXT.mode || STAFF_SCALE_ACTIVE_MODE;
   if (mode === 'taking') staffTakingSetError(message);
   else if (mode === 'returning') staffReturningSetError(message);
   else if (mode === 'transfer') staffTransferSetError(message);
+  if (typeof staffScaleHeaderMessage === 'function') staffScaleHeaderMessage(message);
 }
 
 function staffScaleDisconnected() {
@@ -4789,10 +4872,27 @@ function staffScaleWeightReceived(weight) {
 
 function staffScaleToggle() {
   if (typeof navigator === 'undefined' || !navigator.bluetooth) {
-    staffScaleSetError('Bluetooth scale requires Chrome/Chromium. Manual grams remain available.');
+    staffScaleSetError('Bluetooth is unavailable in this browser. Use Bluefy for the scale, or enter grams manually.');
     return;
   }
-  bleScaleConnect(0, 0, 0, staffScaleWeightReceived, staffScaleDisconnected, { preferQnks: true });
+  const header = document.getElementById('staff-scale-header');
+  if (header?.dataset.busy === 'true') return;
+  const disconnecting = !!BLE_SCALE.connected && !!BLE_SCALE.device?.gatt?.connected;
+  if (header) header.dataset.busy = 'true';
+  if (typeof staffScaleHeaderMessage === 'function') staffScaleHeaderMessage('');
+  if (typeof staffScaleHeaderRender === 'function') staffScaleHeaderRender();
+  let operation;
+  // No await precedes this existing chooser entry: preserve the user gesture.
+  try { operation = bleScaleConnect(0, 0, 0, staffScaleWeightReceived, staffScaleDisconnected, { preferQnks: true }); }
+  catch (error) { operation = Promise.reject(error); }
+  return Promise.resolve(operation).then(() => {
+    if (!disconnecting && !BLE_SCALE.connected && typeof staffScaleHeaderMessage === 'function') staffScaleHeaderMessage('Scale not connected. Retry Connect or use manual grams.');
+  }).catch(() => {
+    if (typeof staffScaleHeaderMessage === 'function') staffScaleHeaderMessage('Scale not connected. Retry Connect or use manual grams.');
+  }).finally(() => {
+    if (header) header.dataset.busy = 'false';
+    if (typeof staffScaleHeaderRender === 'function') staffScaleHeaderRender();
+  });
 }
 
 function staffScaleUseCurrentWeight(mode = STAFF_SCALE_CONTEXT.mode, itemId = STAFF_SCALE_CONTEXT.itemId) {
@@ -4814,6 +4914,7 @@ function staffScaleUseCurrentWeight(mode = STAFF_SCALE_CONTEXT.mode, itemId = ST
 function staffScaleRenderWidget(mode) {
   const el = document.getElementById('staff-scale-widget-' + mode);
   if (!el) return;
+  if (typeof staffScaleHeaderRender === 'function') staffScaleHeaderRender();
   const supported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
   const connected = !!BLE_SCALE.connected;
   const contextReady = mode === 'opening' ? true : STAFF_SCALE_CONTEXT.mode === mode && !!STAFF_SCALE_CONTEXT.itemId;
