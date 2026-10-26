@@ -1426,13 +1426,30 @@ th.sortable span { font-size:10px; }
 
 /* Staff Dispatch UI adapter: scoped to the Staff workspace only. */
 /* Persistent Staff section identity and Returning-only interaction clarity. */
-#staff-dashboard { --staff-section-height:100px; --staff-section-safe-top:env(safe-area-inset-top,0px); }
-#staff-dashboard .staff-active-section { position:fixed; top:0; left:0; right:0; z-index:80; display:flex; align-items:center; height:calc(var(--staff-section-height) + var(--staff-section-safe-top)); padding:calc(12px + var(--staff-section-safe-top)) max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px)); background:var(--s1); color:var(--text); border-bottom:4px solid var(--border2); box-shadow:0 2px 8px rgba(0,0,0,.12); }
-#staff-dashboard .staff-active-section-inner { display:flex; flex-direction:column; gap:4px; width:min(100%,1280px); margin:0 auto; }
-#staff-dashboard .staff-active-section-caption { display:block; font-size:12px; line-height:16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-#staff-dashboard #staff-active-section-name { display:block; color:inherit !important; font-size:32px; line-height:40px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
-#staff-dashboard .staff-active-section-space { height:calc(var(--staff-section-height) + var(--staff-section-safe-top)); flex-shrink:0; }
-#staff-dashboard [id^="staff-shell-"]:not(#staff-shell-dispatch) :is(input,select,textarea,button,[tabindex]) { scroll-margin-top:calc(var(--staff-section-height) + var(--staff-section-safe-top) + 12px); }
+/* STAFF_WORKSPACE_PRESENTATION_CSS_START */
+#staff-dashboard { --staff-section-height:116px; --staff-section-safe-top:env(safe-area-inset-top,0px); }
+#staff-dashboard .staff-active-section { position:fixed; top:0; left:0; right:0; z-index:80; display:flex; align-items:center; min-height:92px; padding:calc(10px + var(--staff-section-safe-top)) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px)); background:var(--s1); color:var(--text); border-bottom:4px solid var(--border2); box-shadow:0 2px 8px rgba(0,0,0,.12); }
+#staff-dashboard .staff-active-section-inner { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px 20px; width:min(100%,1280px); margin:0 auto; }
+#staff-dashboard .staff-section-heading { flex:1 1 220px; min-width:0; }
+#staff-dashboard .staff-active-section-caption { display:block; font-size:11px; line-height:16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+#staff-dashboard #staff-active-section-name { display:block; color:inherit !important; font-size:clamp(24px,3.5vw,32px); line-height:1.2; font-weight:800; letter-spacing:.04em; text-transform:uppercase; overflow-wrap:anywhere; }
+#staff-dashboard .staff-section-night { margin-top:3px; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+#staff-dashboard .staff-section-actions { display:flex; align-items:stretch; flex-wrap:wrap; gap:8px; }
+#staff-dashboard .staff-active-section .btn { min-height:44px; min-width:44px; padding:8px 12px; color:inherit !important; background:rgba(255,255,255,.12); border:1px solid currentColor; font-size:12px; line-height:1.2; white-space:normal; }
+#staff-dashboard .staff-active-section .btn:focus-visible { outline:3px solid currentColor; outline-offset:3px; }
+#staff-dashboard #staff-section-action { font-weight:800; background:rgba(255,255,255,.24); }
+#staff-dashboard .staff-active-section [hidden] { display:none !important; }
+#staff-dashboard .staff-active-section-space { height:var(--staff-section-height); flex-shrink:0; }
+#staff-dashboard [id^="staff-shell-"] :is(input,select,textarea,button,[tabindex]), #staff-dashboard .staff-review-panel { scroll-margin-top:calc(var(--staff-section-height) + 12px); }
+#staff-dashboard[data-staff-view]:not([data-staff-view="dashboard"]) #staff-workspace-profile { display:none; }
+#staff-dashboard .staff-inline-nav, #staff-dashboard #staff-shell-dispatch > .panel-title { display:none !important; }
+#staff-dashboard #staff-shell-dispatch .fg > button { min-height:64px; }
+@media (max-width:600px) {
+  #staff-dashboard .staff-section-heading { flex-basis:100%; }
+  #staff-dashboard .staff-section-actions { width:100%; }
+  #staff-dashboard .staff-section-actions .btn { flex:1 1 0; min-width:0; padding:8px 6px; }
+}
+/* STAFF_WORKSPACE_PRESENTATION_CSS_END */
 #staff-dashboard .staff-active-section[data-section="opening"] { background:#e6b22e; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
 #staff-dashboard .staff-active-section[data-section="taking"] { background:#e88918; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
 #staff-dashboard .staff-active-section[data-section="returning"] { background:#2f9b68; color:#17130d; border-bottom-color:rgba(0,0,0,.18); }
@@ -3085,11 +3102,20 @@ th.sortable span { font-size:10px; }
 
 <div id="toast"></div>
 
-<div id="staff-dashboard" style="display:none;min-height:100vh;padding:24px;background:var(--bg);">
+<div id="staff-dashboard" data-staff-view="dashboard" style="display:none;min-height:100vh;padding:24px;background:var(--bg);">
   <div class="staff-workspace-wrap">
-    <div id="staff-active-section" class="staff-active-section" data-section="dashboard" role="status" aria-live="polite" aria-atomic="true"><div class="staff-active-section-inner"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div></div>
+    <div id="staff-active-section" class="staff-active-section" data-section="dashboard">
+      <div class="staff-active-section-inner">
+        <div class="staff-section-heading"><div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div><div id="staff-section-night" class="staff-section-night" hidden></div></div>
+        <nav class="staff-section-actions" aria-label="Staff workspace navigation">
+          <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
+          <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
+          <button class="btn" id="staff-section-action" type="button" onclick="staffWorkspaceAction()" hidden disabled>Review</button>
+        </nav>
+      </div>
+    </div>
     <div class="staff-active-section-space" aria-hidden="true"></div>
-    <div class="panel" style="padding:24px;margin-bottom:16px;">
+    <div id="staff-workspace-profile" class="panel" style="padding:24px;margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
         <div><div class="login-logo" style="font-size:30px;">BARINV</div><div class="login-subtitle" style="margin-bottom:20px;">Staff workspace</div></div>
         <div style="display:flex;gap:8px;align-items:center;"><button class="btn btn-ghost btn-sm" id="staff-theme-toggle" type="button" onclick="staffThemeToggle()" aria-label="Switch to dark theme" title="Switch to dark theme">DARK</button><button class="btn btn-ghost btn-sm" onclick="doLogout()">Log Out</button></div>
@@ -3131,17 +3157,17 @@ th.sortable span { font-size:10px; }
     </div>
     <div id="staff-opening-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-dispatch" class="panel" style="display:none;padding:20px;">
-      <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">← Dashboard</button>
+      <button class="btn btn-ghost btn-sm staff-inline-nav" onclick="showStaffShellView('dashboard')">← Dashboard</button>
       <div class="panel-title" style="margin:18px 0 6px;">Dispatch</div>
       <div class="empty-text" style="margin-bottom:16px;">Choose an authorized movement to continue.</div>
       <!-- Phase 2 compatibility marker: Opening is enabled only after Staff scope hydration. <button class="btn btn-dim" disabled>OPENING</button> -->
       <!-- Phase 2 compatibility marker: Taking is enabled only after Staff scope hydration. <button class="btn btn-dim" disabled>TAKING</button> -->
       <!-- Phase 2 compatibility marker: Returning is enabled only after approved history hydration. <button class="btn btn-dim" disabled>RETURNING</button> -->
       <!-- Accumulated test compatibility marker: Transfer is now operational only after Staff scope validation. <button class="btn btn-dim" disabled>TRANSFER</button> -->
-      <div class="fg fg-2"><button class="btn btn-dim" disabled id="staff-dispatch-opening" onclick="openStaffOpening()">OPENING</button><button class="btn btn-dim" disabled id="staff-dispatch-taking" onclick="openStaffTaking()">TAKING</button><button class="btn btn-dim" disabled id="staff-dispatch-returning" onclick="openStaffReturning()">RETURNING</button><button class="btn btn-dim" disabled id="staff-dispatch-transfer" onclick="openStaffTransfer()">TRANSFER</button></div>
+      <div class="fg fg-2"><button class="btn btn-dim" disabled id="staff-dispatch-opening" onclick="staffWorkspaceOpenMovement('opening')">OPENING</button><button class="btn btn-dim" disabled id="staff-dispatch-taking" onclick="staffWorkspaceOpenMovement('taking')">TAKING</button><button class="btn btn-dim" disabled id="staff-dispatch-returning" onclick="staffWorkspaceOpenMovement('returning')">RETURNING</button><button class="btn btn-dim" disabled id="staff-dispatch-transfer" onclick="staffWorkspaceOpenMovement('transfer')">TRANSFER</button></div>
     </div>
     <div id="staff-shell-opening" class="panel" style="display:none;padding:20px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+      <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">Dashboard</button>
       </div>
@@ -3152,7 +3178,7 @@ th.sortable span { font-size:10px; }
       <div id="staff-opening-error" class="alert alert-err"></div>
       <div id="staff-item-filter-opening"></div>
       <div id="staff-opening-grid"></div>
-      <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
+      <div class="panel staff-review-panel" id="staff-review-opening" tabindex="-1" aria-label="Opening preview" style="margin-top:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-opening-preview"></div>
       </div>
@@ -3162,7 +3188,7 @@ th.sortable span { font-size:10px; }
       </div>
     </div>
     <div id="staff-shell-taking" class="panel" style="display:none;padding:20px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+      <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">Dashboard</button>
       </div>
@@ -3182,7 +3208,7 @@ th.sortable span { font-size:10px; }
       <div id="staff-taking-error" class="alert alert-err"></div>
       <div id="staff-item-filter-taking"></div>
       <div id="staff-taking-grid"></div>
-      <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
+      <div class="panel staff-review-panel" id="staff-review-taking" tabindex="-1" aria-label="Taking preview" style="margin-top:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-taking-preview"></div>
       </div>
@@ -3193,7 +3219,7 @@ th.sortable span { font-size:10px; }
     </div>
     <div id="staff-returning-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-returning" class="panel" style="display:none;padding:20px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+      <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">Dashboard</button>
       </div>
@@ -3206,7 +3232,7 @@ th.sortable span { font-size:10px; }
       <p id="staff-returning-interaction-help" class="staff-returning-help"><strong>Returnable items:</strong> edit Return quantity or use the weighing controls, then review Preview and choose Save / Submit. <strong>Delivered history:</strong> only approved Bar-applicable deliveries for this Bar and Night are shown. Fully returned Items remain read-only. Bar reconciliation/closure is not confirmed here.</p>
       <div id="staff-item-filter-returning"></div>
       <div id="staff-returning-grid"></div>
-      <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
+      <div class="panel staff-review-panel" id="staff-review-returning" tabindex="-1" aria-label="Returning preview" style="margin-top:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <p class="staff-returning-help">Save / Submit sends only the eligible quantities in Preview. Searching does not clear your selection.</p>
         <div id="staff-returning-preview"></div>
@@ -3217,7 +3243,7 @@ th.sortable span { font-size:10px; }
       </div>
     </div>
     <div id="staff-shell-transfer" class="panel" style="display:none;padding:20px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+      <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">Dashboard</button>
       </div>
@@ -3233,7 +3259,7 @@ th.sortable span { font-size:10px; }
         <div class="field"><label>Opened bottle grams</label><input id="staff-transfer-weight" type="number" min="0" step="any" placeholder="Manual grams"><button class="btn btn-ghost btn-sm" type="button" onclick="staffTransferApplyWeight()">Apply measured grams</button></div>
       </div>
       <div id="staff-transfer-error" class="alert alert-err"></div>
-      <div class="panel" style="margin-top:16px;padding:14px;background:var(--s2);">
+      <div class="panel staff-review-panel" id="staff-review-transfer" tabindex="-1" aria-label="Transfer preview" style="margin-top:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-transfer-preview"></div>
       </div>
@@ -4118,7 +4144,118 @@ function staffSetActiveSection(view) {
   const name = document.getElementById('staff-active-section-name');
   if (strip) strip.dataset.section = key;
   if (name && name.textContent !== labels[key]) name.textContent = labels[key];
+  if (typeof staffWorkspacePresent === 'function') staffWorkspacePresent(key);
 }
+
+
+// STAFF_WORKSPACE_PRESENTATION_START — UI only; canonical controls own actions.
+const STAFF_WORKSPACE_UI = { observed: false, entries: Object.create(null), frame: 0 };
+function staffWorkspaceScope() {
+  return { user: SESSION.user, key: staffItemLookupContextKey() };
+}
+function staffWorkspaceMeasure() {
+  const root = document.getElementById('staff-dashboard');
+  const strip = document.getElementById('staff-active-section');
+  const height = Math.ceil(strip?.getBoundingClientRect().height || 0);
+  if (root && height > 0 && root.style.getPropertyValue('--staff-section-height') !== height + 'px') root.style.setProperty('--staff-section-height', height + 'px');
+}
+function staffWorkspaceSync() {
+  const root = document.getElementById('staff-dashboard');
+  if (!root) return;
+  const view = root.dataset.staffView || 'dashboard';
+  const night = document.getElementById('staff-section-night');
+  if (night) {
+    const text = [SESSION.user?.nightName, SESSION.user?.nightDate].filter(Boolean).join(' · ') || SESSION.user?.nightId || '—';
+    if (night.textContent !== text) night.textContent = text;
+    night.hidden = view === 'dashboard';
+  }
+  const dashboard = document.getElementById('staff-section-dashboard');
+  const dispatch = document.getElementById('staff-section-dispatch');
+  if (dashboard) dashboard.hidden = view === 'dashboard';
+  if (dispatch) {
+    dispatch.hidden = view === 'dispatch' || ['scan', 'history', 'help'].includes(view);
+    dispatch.disabled = document.getElementById('staff-action-dispatch')?.disabled !== false;
+  }
+  const top = document.getElementById('staff-section-action');
+  const bottom = ['opening', 'taking', 'returning', 'transfer'].includes(view) ? document.getElementById('staff-' + view + '-save') : null;
+  if (top) {
+    top.hidden = !bottom;
+    top.disabled = !bottom || bottom.disabled;
+    const label = bottom?.textContent?.trim() || '';
+    const text = /^save\s*\/\s*submit$/i.test(label) ? 'Review' : label || 'Review';
+    if (top.textContent !== text) top.textContent = text;
+    top.setAttribute('aria-label', text === 'Review' ? 'Review ' + view + ' before Save / Submit' : text);
+  }
+  staffWorkspaceMeasure();
+}
+function staffWorkspaceObserve() {
+  if (STAFF_WORKSPACE_UI.observed) return;
+  STAFF_WORKSPACE_UI.observed = true;
+  const schedule = () => {
+    if (STAFF_WORKSPACE_UI.frame) return;
+    STAFF_WORKSPACE_UI.frame = requestAnimationFrame(() => { STAFF_WORKSPACE_UI.frame = 0; staffWorkspaceSync(); });
+  };
+  if (typeof MutationObserver === 'function') {
+    const observer = new MutationObserver(schedule);
+    ['staff-opening-save', 'staff-taking-save', 'staff-returning-save', 'staff-transfer-save', 'staff-action-dispatch', 'staff-landing-night'].forEach(id => {
+      const node = document.getElementById(id);
+      if (node) observer.observe(node, { attributes: true, attributeFilter: ['disabled'], childList: true, characterData: true, subtree: true });
+    });
+  }
+  const strip = document.getElementById('staff-active-section');
+  if (strip && typeof ResizeObserver === 'function') new ResizeObserver(staffWorkspaceMeasure).observe(strip);
+  window.addEventListener('resize', schedule);
+}
+function staffWorkspacePresent(view) {
+  const root = document.getElementById('staff-dashboard');
+  if (!root) return;
+  root.dataset.staffView = view;
+  if (['opening', 'taking', 'returning', 'transfer'].includes(view)) STAFF_WORKSPACE_UI.entries[view] = staffWorkspaceScope();
+  staffWorkspaceObserve();
+  staffWorkspaceSync();
+  requestAnimationFrame(staffWorkspaceSync);
+}
+function staffWorkspaceNavigate(view) {
+  const current = document.getElementById('staff-dashboard')?.dataset.staffView;
+  if (current === 'scan' && view === 'dashboard') return staffQuickScanExit();
+  showStaffShellView(view);
+  requestAnimationFrame(() => {
+    window.scrollTo(0, 0);
+    const heading = document.getElementById('staff-active-section-name');
+    if (heading) { heading.setAttribute('tabindex', '-1'); heading.focus({ preventScroll: true }); }
+  });
+}
+function staffWorkspaceOpenMovement(mode) {
+  const open = { opening: openStaffOpening, taking: openStaffTaking, returning: openStaffReturning, transfer: openStaffTransfer }[mode];
+  if (!open || !staffOperationalGuard()) return;
+  const current = staffWorkspaceScope();
+  const prior = STAFF_WORKSPACE_UI.entries[mode];
+  const sameScope = !!current.key && prior && prior.user === current.user && prior.key === current.key;
+  const hasDraft = mode === 'opening' ? (STAFF_OPENING_SUBMISSION?.phase !== 'completed' && (!!STAFF_OPENING_SUBMISSION || Object.keys(STAFF_OPENING_STATE).length > 0))
+    : mode === 'taking' ? Object.keys(STAFF_TAKING_STATE).length > 0 || Object.keys(staffTakingWeightDrafts()).length > 0
+    : mode === 'transfer' ? !!STAFF_TRANSFER_STATE.itemId && Number(STAFF_TRANSFER_STATE.qty) > 0 : false;
+  // Returning owns its pending/draft/history restoration. Fresh/changed scopes use original open paths.
+  const result = sameScope && hasDraft && mode !== 'returning' ? showStaffShellView(mode) : open();
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+  return result;
+}
+function staffWorkspaceAction() {
+  const root = document.getElementById('staff-dashboard');
+  const view = root?.dataset.staffView;
+  if (!['opening', 'taking', 'returning', 'transfer'].includes(view)) return;
+  const shell = document.getElementById('staff-shell-' + view);
+  const bottom = document.getElementById('staff-' + view + '-save');
+  if (!root.getClientRects().length || !shell?.getClientRects().length || !bottom || bottom.disabled) return;
+  if (/^save\s*\/\s*submit$/i.test(bottom.textContent.trim())) {
+    const preview = document.getElementById('staff-review-' + view);
+    if (preview) { preview.focus({ preventScroll: true }); preview.scrollIntoView({ block: 'start' }); }
+  } else {
+    // Status checks and completion reuse the same canonical button/handler, never a second write path.
+    bottom.click();
+  }
+  staffWorkspaceSync();
+}
+// STAFF_WORKSPACE_PRESENTATION_END
 
 function showStaffDashboard() {
   staffSetActiveSection('dashboard');
