@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#ff8c00">
@@ -1609,6 +1609,128 @@ th.sortable span { font-size:10px; }
 #staff-dashboard.staff-theme-dark .staff-scan-feedback.is-error { border-color:#ff5f63; color:#ffb5b7; }
 #staff-dashboard.staff-theme-dark #staff-scan-debug-panel { background:#223650; border-color:#607792; color:#eef3fa; }
 #staff-dashboard.staff-theme-dark .staff-scan-result img, #staff-dashboard.staff-theme-dark .staff-scan-result-placeholder { background:#263b58; border-color:#607792; }
+
+/* STAFF_COMPACT_UI_CSS_START — presentation only; existing controls retain ownership. */
+#staff-dashboard { overflow-x:visible; }
+#staff-dashboard .staff-section-title-line { flex-wrap:wrap; gap:8px 12px; }
+#staff-dashboard .staff-section-title-line > [role="status"] { flex:1 1 7.5em; }
+#staff-dashboard .staff-header-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; }
+#staff-dashboard #staff-screen-refresh { min-height:44px; padding:8px 10px; }
+#staff-dashboard #staff-screen-refresh-status { margin:4px 0 0; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }
+#staff-dashboard #staff-workspace-profile { padding:14px; margin-bottom:12px; }
+#staff-dashboard .staff-profile-brand { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; margin-bottom:12px; }
+#staff-dashboard .staff-profile-brand .login-logo { font-size:30px; line-height:1.1; margin:0; letter-spacing:.02em; }
+#staff-dashboard .staff-profile-account { display:flex; flex-wrap:wrap; gap:8px; }
+#staff-dashboard .staff-profile-account .btn { min-height:44px; padding:8px 12px; font-size:12px; letter-spacing:.02em; }
+#staff-dashboard .staff-profile-pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,9em),1fr)); gap:8px 12px; margin-bottom:12px; }
+#staff-dashboard .staff-profile-pair .field { min-width:0; margin:0; }
+#staff-dashboard #staff-workspace-profile .field > label { font-size:12px; letter-spacing:.03em; margin-bottom:4px; }
+#staff-dashboard .staff-profile-pair .form-value { line-height:1.35; overflow-wrap:anywhere; }
+#staff-dashboard #staff-landing-bars { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,12em),1fr)); gap:8px; }
+#staff-dashboard #staff-landing-bars > .badge { display:block !important; margin:0 !important; padding:8px; text-transform:none; letter-spacing:normal; white-space:normal; min-width:0; }
+#staff-dashboard #staff-landing-bars .staff-bar-identity { display:grid; gap:3px; }
+#staff-dashboard #staff-landing-bars .staff-bar-code { font-size:13px; overflow-wrap:anywhere; }
+#staff-dashboard #staff-landing-bars .staff-bar-bartenders { font-size:12px; line-height:1.35; }
+#staff-dashboard .staff-dashboard-tools { display:block; margin-top:12px; }
+#staff-dashboard .staff-voice-guide { padding:0; }
+#staff-dashboard .staff-voice-guide > summary { min-height:44px; padding:10px; cursor:pointer; overflow-wrap:anywhere; }
+#staff-dashboard .staff-voice-guide > summary:focus-visible { outline:3px solid var(--a); outline-offset:2px; }
+#staff-dashboard .staff-voice-status { display:inline; font-size:12px; line-height:1.35; margin:0 0 0 8px; letter-spacing:normal; }
+#staff-dashboard .staff-voice-controls { padding:0 10px 10px; }
+#staff-dashboard .staff-voice-controls .btn { min-height:44px; font-size:12px; letter-spacing:.02em; }
+#staff-dashboard #staff-shell-dashboard { padding:12px; margin-bottom:12px; }
+#staff-dashboard #staff-shell-dashboard > .panel-title { margin-bottom:8px !important; }
+#staff-dashboard #staff-shell-dashboard .fg { grid-template-columns:repeat(auto-fit,minmax(min(100%,9em),1fr)); gap:8px; margin:0; }
+#staff-dashboard #staff-shell-dashboard .btn { min-height:48px; padding:10px 12px; white-space:normal; letter-spacing:.03em; }
+#staff-dashboard #staff-shell-dispatch { padding:12px !important; }
+#staff-dashboard #staff-shell-dispatch .fg { grid-template-columns:repeat(auto-fit,minmax(min(100%,10em),1fr)); gap:8px; margin:0; }
+#staff-dashboard #staff-shell-dispatch .empty-text { margin-bottom:10px !important; }
+#staff-dashboard .staff-item-category-rail { flex-wrap:wrap; overflow:visible; }
+#staff-dashboard .staff-item-category-chip { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+#staff-dashboard .staff-review-panel > div > div { overflow:visible !important; }
+#staff-dashboard .staff-review-panel table { table-layout:fixed; }
+#staff-dashboard .staff-review-panel :is(th,td) { white-space:normal; overflow-wrap:anywhere; padding:8px 6px; }
+
+#staff-dashboard .staff-header-brand { flex-basis:100%; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; line-height:1.3; }
+#staff-dashboard .staff-header-brand img { width:28px; height:28px; flex:none; }
+#staff-dashboard .staff-header-brand strong { color:inherit !important; font-size:14px; letter-spacing:.02em; }
+#staff-dashboard .staff-header-brand > span { font-size:12px; letter-spacing:.03em; }
+#staff-dashboard .staff-active-section-inner { gap:6px 12px; }
+#staff-dashboard .staff-active-section-caption { line-height:1.4; letter-spacing:.03em; }
+#staff-dashboard .staff-scale-header { width:max-content; min-width:110px; max-width:100%; }
+#staff-dashboard .staff-scale-header-live, #staff-dashboard .staff-scale-connect-state { line-height:1.4; }
+#staff-dashboard .staff-scale-header summary::after { line-height:1.3; }
+#staff-dashboard .staff-scale-header-popover { max-width:calc(100vw - 32px); }
+#staff-dashboard .staff-section-actions { flex:1 1 auto; width:auto; }
+#staff-dashboard .staff-section-actions .btn { flex:1 1 auto; min-width:min-content; letter-spacing:.02em; }
+#staff-dashboard .staff-profile-brand { justify-content:flex-end; margin-bottom:8px; }
+#staff-dashboard.staff-header-flow .staff-active-section { position:static; width:100%; }
+#staff-dashboard.staff-header-flow .staff-active-section-space { display:none; }
+#staff-dashboard.staff-header-flow [id^="staff-shell-"] :is(input,select,textarea,button,[tabindex]), #staff-dashboard.staff-header-flow .staff-review-panel { scroll-margin-top:12px; }
+@media (max-width:600px) {
+  #staff-dashboard .staff-review-panel table, #staff-dashboard .staff-review-panel tbody { display:block; }
+  #staff-dashboard .staff-review-panel thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
+  #staff-dashboard .staff-review-panel tbody tr { display:block; border:1px solid var(--border); margin:0 0 10px; }
+  #staff-dashboard .staff-review-panel td { display:block; width:100%; border:none; padding:6px 8px; }
+  #staff-dashboard .staff-review-panel td::before { content:attr(data-label); display:block; font-weight:700; font-size:inherit; line-height:1.3; margin-bottom:3px; color:var(--muted); }
+}
+
+#staff-dashboard .staff-section-title-line > [role="status"] { flex:1 0 max-content; min-width:0; max-width:100%; }
+#staff-dashboard #staff-active-section-name { overflow-wrap:anywhere; }
+#staff-dashboard .staff-movement-footer { flex-wrap:wrap; }
+#staff-dashboard .staff-movement-footer > .btn { min-height:44px; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+#staff-dashboard #staff-shell-transfer .field > .btn { width:100%; min-height:44px; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+/* STAFF_COMPACT_UI_CSS_END */
+
+/* STAFF_R9_HEADER_CLOSEOUT_CSS_START — reuse the existing controls; no DOM or handler changes. */
+@media (max-width:600px) {
+  #staff-dashboard .staff-active-section[data-section="dashboard"] .staff-active-section-inner { gap:4px 8px; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] :is(.staff-section-heading,.staff-section-title-line) { display:contents; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] .staff-section-title-line > [role="status"] { flex:1 0 100%; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] .staff-header-tools { flex:0 1 auto; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] .staff-scale-header-popover { left:0; right:auto; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] .staff-section-actions { flex:0 1 auto; margin-left:auto; }
+  #staff-dashboard .staff-active-section[data-section="dashboard"] :is(#staff-screen-refresh-status,#staff-scale-header-message) { flex:1 0 100%; }
+}
+#staff-dashboard #staff-shell-dashboard > .panel-title { display:none; }
+/* STAFF_R9_HEADER_CLOSEOUT_CSS_END */
+
+
+/* STAFF_SHARED_VOICE_HEADER_CSS_START — same disclosure, controls and saved preferences. */
+#staff-dashboard .staff-header-brand-identity { display:flex; flex:1 1 8em; align-items:center; flex-wrap:wrap; gap:4px 8px; min-width:0; }
+#staff-dashboard .staff-header-brand-identity > span { font-size:12px; letter-spacing:.03em; }
+#staff-dashboard .staff-header-brand .staff-voice-guide { flex:0 1 auto; min-width:0; max-width:100%; margin:0 0 0 auto; color:var(--text); }
+#staff-dashboard .staff-header-brand .staff-voice-guide > summary { display:list-item; min-height:44px; padding:5px 8px; font-size:12px; line-height:1.35; }
+#staff-dashboard .staff-header-brand .staff-voice-label { font-size:12px; }
+#staff-dashboard .staff-header-brand #staff-voice-summary-state { display:block; margin:0; }
+#staff-dashboard .staff-header-brand .staff-voice-guide[open] { flex:1 1 100%; }
+#staff-dashboard .staff-header-brand .staff-voice-controls { padding:4px 10px 10px; }
+/* STAFF_SHARED_VOICE_HEADER_CSS_END */
+
+/* STAFF_TAKING_COMPACT_CSS_START — presentation only; canonical controls and state unchanged. */
+#staff-dashboard #staff-shell-taking { padding:12px !important; }
+#staff-dashboard #staff-taking-context { margin-bottom:10px !important; }
+#staff-dashboard .staff-taking-fields { grid-template-columns:repeat(auto-fit,minmax(min(100%,10em),1fr)); gap:8px; margin-bottom:10px !important; }
+#staff-dashboard .staff-taking-fields .field { min-width:0; margin:0; }
+#staff-dashboard .staff-taking-fields .field:last-child { grid-column:1 / -1; }
+#staff-dashboard .staff-taking-fields label { margin-bottom:4px; letter-spacing:.03em; }
+#staff-dashboard .staff-taking-fields :is(input,select) { min-height:44px; min-width:0; padding:10px 12px; }
+#staff-dashboard .staff-taking-destinations { margin-bottom:10px !important; padding:10px !important; }
+#staff-dashboard .staff-taking-destinations > .panel-title { margin-bottom:8px !important; }
+#staff-dashboard #staff-taking-bars { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5em),1fr)); gap:8px; }
+#staff-dashboard #staff-taking-bars > label { display:flex !important; align-items:flex-start !important; gap:8px !important; min-width:0 !important; min-height:44px; margin:0 !important; padding:8px; border:1px solid var(--border2); border-radius:8px; cursor:pointer; }
+#staff-dashboard #staff-taking-bars > label > input { flex:0 0 auto; width:18px; height:18px; margin:2px 0 0; }
+#staff-dashboard #staff-taking-bars .staff-bar-identity { flex:1 1 auto; min-width:0; }
+#staff-dashboard #staff-taking-bars .staff-bar-code { overflow-wrap:anywhere; }
+#staff-dashboard #staff-taking-bars .staff-bar-bartenders { font-size:12px; line-height:1.35; }
+#staff-dashboard #staff-taking-summary { grid-template-columns:repeat(auto-fit,minmax(min(100%,8em),1fr)); gap:8px; margin-bottom:10px !important; }
+#staff-dashboard #staff-taking-summary > .stat-card { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:8px; min-width:0; padding:8px !important; overflow:visible; }
+#staff-dashboard #staff-taking-summary .stat-val { min-width:0; margin:0; overflow-wrap:anywhere; }
+#staff-dashboard #staff-taking-summary .stat-lbl { min-width:0; font-size:11px; line-height:1.35; letter-spacing:.03em; overflow-wrap:anywhere; }
+#staff-dashboard #staff-taking-error { scroll-margin-top:calc(var(--staff-section-height, 100px) + 12px); }
+#staff-dashboard.staff-header-flow #staff-taking-error { scroll-margin-top:12px; }
+/* STAFF_TAKING_COMPACT_CSS_END */
+
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -3124,48 +3246,11 @@ th.sortable span { font-size:10px; }
   <div class="staff-workspace-wrap">
     <div id="staff-active-section" class="staff-active-section" data-section="dashboard">
       <div class="staff-active-section-inner">
-        <div class="staff-section-heading">
-          <div class="staff-section-title-line">
-            <div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div>
-            <div id="staff-scale-header" class="staff-scale-header" data-busy="false">
-              <output id="staff-scale-header-live" class="staff-scale-header-live" aria-label="Live scale weight">LIVE — g</output>
-              <button id="staff-scale-header-connect" class="btn" type="button" onclick="staffScaleToggle()" aria-describedby="staff-scale-header-help"><span id="staff-scale-header-connect-state" class="staff-scale-connect-state">Disconnected</span><strong>Connect scale</strong></button>
-              <details id="staff-scale-header-details" hidden>
-                <summary class="btn" aria-label="Connected scale details">Connected</summary>
-                <div class="staff-scale-header-popover"><p>Live readings never apply or submit automatically. Use the weight at the intended Item, then review Preview.</p><button id="staff-scale-header-disconnect" class="btn" type="button" onclick="staffScaleHeaderDisconnect()">Disconnect scale</button></div>
-              </details>
-              <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
-            </div>
-          </div>
-          <div id="staff-section-night" class="staff-section-night" hidden></div>
-          <p id="staff-scale-header-message" class="staff-scale-header-message" role="status" aria-live="polite" hidden></p>
-        </div>
-        <nav class="staff-section-actions" aria-label="Staff workspace navigation">
-          <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
-          <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
-          <button class="btn" id="staff-section-action" type="button" onclick="staffWorkspaceAction()" hidden disabled>Review</button>
-        </nav>
-      </div>
-    </div>
-    <div class="staff-active-section-space" aria-hidden="true"></div>
-    <div id="staff-workspace-profile" class="panel" style="padding:24px;margin-bottom:16px;">
-      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
-        <div><div class="login-logo" style="font-size:30px;">BARINV</div><div class="login-subtitle" style="margin-bottom:20px;">Staff workspace</div></div>
-        <div style="display:flex;gap:8px;align-items:center;"><button class="btn btn-ghost btn-sm" id="staff-theme-toggle" type="button" onclick="staffThemeToggle()" aria-label="Switch to dark theme" title="Switch to dark theme">DARK</button><button class="btn btn-ghost btn-sm" onclick="doLogout()">Log Out</button></div>
-      </div>
-      <div class="fg fg-2">
-        <div class="field"><label>BARBACK</label><div id="staff-landing-name" class="form-value"></div></div>
-        <div class="field"><label>Role</label><div id="staff-landing-role" class="form-value"></div></div>
-        <div class="field"><label>Working Area</label><div id="staff-landing-area" class="form-value"></div></div>
-        <div class="field"><label>Night</label><div id="staff-landing-night" class="form-value"></div></div>
-      </div>
-      <div class="field" style="margin-bottom:0;"><label>Authorized Bars</label><div id="staff-landing-bars" class="staff-bars-list"></div></div>
-      <div id="staff-scope-warning" class="alert alert-err"></div>
-      <div class="staff-dashboard-tools" aria-label="Staff settings">
-      <div id="staff-scale-widget-dashboard" style="margin-top:16px;"></div>
-      <div id="staff-voice-guide" class="staff-voice-guide" aria-label="Staff voice settings">
+        <div class="staff-header-brand"><div class="staff-header-brand-identity"><img src="img/icon-192.png" width="28" height="28" alt=""><strong>BARIV PRO</strong><span>BARBACKS</span></div>
+      <details id="staff-voice-guide" class="staff-voice-guide" aria-label="Staff voice settings">
+        <summary><span class="staff-voice-label">Voice settings</span><span id="staff-voice-summary-state" class="staff-voice-status">Voice Guide: Off</span></summary>
+        <div class="staff-voice-controls">
         <div class="staff-voice-row">
-          <span class="staff-voice-label">VOICE SETTINGS</span>
           <div class="staff-voice-actions">
             <button class="btn btn-ghost btn-sm" id="staff-voice-toggle" type="button" aria-pressed="false">TURN ON</button>
             <button class="btn btn-ghost btn-sm" id="staff-voice-test" type="button">TEST VOICE</button>
@@ -3176,9 +3261,37 @@ th.sortable span { font-size:10px; }
           <button class="btn btn-ghost btn-sm" id="staff-voice-item-toggle" type="button" aria-pressed="false">OFF</button>
         </div>
         <span id="staff-voice-status" class="staff-voice-status" aria-live="polite">Voice Guide: Off</span>
-      </div>
+        </div>
+      </details>
+        </div>
+        <div class="staff-section-heading">
+          <div class="staff-section-title-line">
+            <div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div>
+            <div class="staff-header-tools">
+            <div id="staff-scale-header" class="staff-scale-header" data-busy="false">
+              <output id="staff-scale-header-live" class="staff-scale-header-live" aria-label="Live scale weight">LIVE — g</output>
+              <button id="staff-scale-header-connect" class="btn" type="button" onclick="staffScaleToggle()" aria-describedby="staff-scale-header-help"><span id="staff-scale-header-connect-state" class="staff-scale-connect-state">Disconnected</span><strong>Connect scale</strong></button>
+              <details id="staff-scale-header-details" hidden>
+                <summary class="btn" aria-label="Connected scale details">Connected</summary>
+                <div class="staff-scale-header-popover"><p>Live readings never apply or submit automatically. Use the weight at the intended Item, then review Preview.</p><button id="staff-scale-header-disconnect" class="btn" type="button" onclick="staffScaleHeaderDisconnect()">Disconnect scale</button></div>
+              </details>
+              <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
+            </div>
+              <button id="staff-screen-refresh" class="btn" type="button" onclick="staffScreenRefresh()">Refresh</button>
+            </div>
+          </div>
+          <div id="staff-section-night" class="staff-section-night" hidden></div>
+          <p id="staff-screen-refresh-status" role="status" aria-live="polite" hidden></p>
+          <p id="staff-scale-header-message" class="staff-scale-header-message" role="status" aria-live="polite" hidden></p>
+        </div>
+        <nav class="staff-section-actions" aria-label="Staff workspace navigation">
+          <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
+          <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
+          <button class="btn" id="staff-section-action" type="button" onclick="staffWorkspaceAction()" hidden disabled>Review</button>
+        </nav>
       </div>
     </div>
+    <div class="staff-active-section-space" aria-hidden="true"></div>
     <div id="staff-shell-dashboard" class="panel" style="padding:20px;">
       <div class="panel-title" style="margin-bottom:14px;">Staff Actions</div>
       <div class="fg fg-2">
@@ -3186,6 +3299,25 @@ th.sortable span { font-size:10px; }
         <button class="btn btn-a btn-lg" id="staff-action-scan" onclick="showStaffShellView('scan')">QUICK SCAN</button>
         <button class="btn btn-a btn-lg" id="staff-action-history" onclick="showStaffShellView('history')">MY HISTORY</button>
         <button class="btn btn-ghost btn-lg" onclick="showStaffShellView('help')">HELP</button>
+      </div>
+    </div>
+    <div id="staff-workspace-profile" class="panel">
+      <div class="staff-profile-brand">
+        <div class="staff-profile-account"><button class="btn btn-ghost btn-sm" id="staff-theme-toggle" type="button" onclick="staffThemeToggle()" aria-label="Switch to dark theme" title="Switch to dark theme">DARK</button><button class="btn btn-ghost btn-sm" onclick="doLogout()">Log Out</button></div>
+      </div>
+      <div class="staff-profile-pair">
+        <div class="field"><label>Employee</label><div id="staff-landing-name" class="form-value"></div></div>
+        <div class="field"><label>Role</label><div id="staff-landing-role" class="form-value"></div></div>
+      </div>
+      <div class="staff-profile-pair">
+        <div class="field"><label>Working Area</label><div id="staff-landing-area" class="form-value"></div></div>
+        <div class="field"><label>Night</label><div id="staff-landing-night" class="form-value"></div></div>
+      </div>
+      <div class="field" style="margin-bottom:0;"><label>Authorized Bars</label><div id="staff-landing-bars" class="staff-bars-list"></div></div>
+      <div id="staff-scope-warning" class="alert alert-err"></div>
+      <div class="staff-dashboard-tools" aria-label="Staff settings">
+      <div id="staff-scale-widget-dashboard" style="margin-top:16px;"></div>
+
       </div>
     </div>
     <div id="staff-opening-result" class="alert" role="status" aria-live="polite"></div>
@@ -3215,7 +3347,7 @@ th.sortable span { font-size:10px; }
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-opening-preview"></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px;">
+      <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
         <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
         <button class="btn btn-a" id="staff-opening-save" onclick="saveStaffOpening()">Save / Submit</button>
       </div>
@@ -3228,12 +3360,12 @@ th.sortable span { font-size:10px; }
       <div class="panel-title" style="margin:18px 0 6px;">Taking — Send to Destination</div>
       <div id="staff-taking-context" class="empty-text" style="margin-bottom:14px;"></div>
       <div id="staff-scale-widget-taking" style="margin-bottom:14px;"></div>
-      <div class="fg fg-2" style="margin-bottom:14px;">
-        <div class="field"><label>Source</label><select id="staff-taking-source"><option value="Main Liquor Room">Main Liquor Room</option></select></div>
-        <div class="field"><label>Ticket Code</label><input id="staff-taking-ticket" type="text" placeholder="SHOT-101 / COMP-5"></div>
-        <div class="field"><label>Note / Recipient</label><input id="staff-taking-note" type="text" placeholder="Who is this for?"></div>
+      <div class="fg fg-2 staff-taking-fields" style="margin-bottom:14px;">
+        <div class="field"><label for="staff-taking-source">Source</label><select id="staff-taking-source"><option value="Main Liquor Room">Main Liquor Room</option></select></div>
+        <div class="field"><label for="staff-taking-ticket">Ticket Code</label><input id="staff-taking-ticket" type="text" placeholder="SHOT-101 / COMP-5"></div>
+        <div class="field"><label for="staff-taking-note">Note / Recipient</label><input id="staff-taking-note" type="text" placeholder="Who is this for?"></div>
       </div>
-      <div class="panel" style="margin-bottom:16px;padding:14px;background:var(--s2);">
+      <div class="panel staff-taking-destinations" style="margin-bottom:16px;padding:14px;background:var(--s2);">
         <div class="panel-title" style="margin-bottom:10px;">Destination Bars</div>
         <div id="staff-taking-bars"></div>
       </div>
@@ -3245,7 +3377,7 @@ th.sortable span { font-size:10px; }
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-taking-preview"></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px;">
+      <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
         <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
         <button class="btn btn-a" id="staff-taking-save" onclick="saveStaffTaking()">Save / Submit</button>
       </div>
@@ -3270,7 +3402,7 @@ th.sortable span { font-size:10px; }
         <p class="staff-returning-help">Save / Submit sends only the eligible quantities in Preview. Searching does not clear your selection.</p>
         <div id="staff-returning-preview"></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px;">
+      <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
         <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
         <button class="btn btn-a" id="staff-returning-save" onclick="saveStaffReturning()">Save / Submit</button>
       </div>
@@ -3296,7 +3428,7 @@ th.sortable span { font-size:10px; }
         <div class="panel-title" style="margin-bottom:10px;">Preview</div>
         <div id="staff-transfer-preview"></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:16px;">
+      <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
         <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
         <button class="btn btn-a" id="staff-transfer-save" onclick="saveStaffTransfer()">Save / Submit</button>
       </div>
@@ -4123,6 +4255,22 @@ function staffThemeToggle() {
   staffThemeApply(next);
 }
 
+// STAFF_BAR_DISPLAY_ORDER_START — copy for presentation; authority and draft order stay unchanged.
+function staffBarDisplayCompare(a, b) {
+  const label = bar => String(bar?.barCode || bar?.name || bar?.id || '');
+  const left = label(a), right = label(b);
+  const natural = left.localeCompare(right, 'en', { numeric: true, sensitivity: 'base' });
+  if (natural) return natural;
+  // Stable canonical tie-breaks keep equal-looking labels deterministic without moving their data.
+  if (left !== right) return left < right ? -1 : 1;
+  const leftId = String(a?.id || ''), rightId = String(b?.id || '');
+  return leftId === rightId ? 0 : leftId < rightId ? -1 : 1;
+}
+function staffBarsForDisplay(bars) {
+  return [...bars].sort(staffBarDisplayCompare);
+}
+// STAFF_BAR_DISPLAY_ORDER_END
+
 function renderStaffDashboard() {
   staffOpeningRenderResult();
   staffReturningRenderResult();
@@ -4140,7 +4288,7 @@ function renderStaffDashboard() {
   const barsEl = document.getElementById('staff-landing-bars');
   const bars = SESSION.cache.authorizedBars || [];
   barsEl.innerHTML = bars.length
-    ? bars.map(bar => `<span class="badge b-active" style="margin:0 6px 6px 0;display:inline-block;">${staffBarIdentityHtml(bar)}</span>`).join('')
+    ? staffBarsForDisplay(bars).map(bar => `<span class="badge b-active" style="margin:0 6px 6px 0;display:inline-block;">${staffBarIdentityHtml(bar)}</span>`).join('')
     : '<span class="empty-text">None available</span>';
   const warning = document.getElementById('staff-scope-warning');
   if (warning && bars.length) { warning.textContent = ''; warning.className = 'alert alert-err'; }
@@ -4190,6 +4338,8 @@ function staffWorkspaceMeasure() {
   const root = document.getElementById('staff-dashboard');
   const strip = document.getElementById('staff-active-section');
   const height = Math.ceil(strip?.getBoundingClientRect().height || 0);
+  // Short/enlarged views need natural page flow instead of an obscuring fixed banner.
+  if (root && height > 0) root.classList.toggle('staff-header-flow', height > window.innerHeight * 0.45);
   if (root && height > 0 && root.style.getPropertyValue('--staff-section-height') !== height + 'px') root.style.setProperty('--staff-section-height', height + 'px');
 }
 function staffWorkspaceSync() {
@@ -4243,6 +4393,7 @@ function staffWorkspacePresent(view) {
   const root = document.getElementById('staff-dashboard');
   if (!root) return;
   root.dataset.staffView = view;
+  if (typeof staffScreenRefreshEntry === 'function') staffScreenRefreshEntry();
   if (['opening', 'taking', 'returning', 'transfer'].includes(view)) STAFF_WORKSPACE_UI.entries[view] = staffWorkspaceScope();
   staffWorkspaceObserve();
   staffWorkspaceSync();
@@ -4595,7 +4746,7 @@ function staffOpeningApplyWeight(itemId, barId, rawWeight = null) {
 }
 
 function renderStaffOpening() {
-  const bars = staffOpeningBars();
+  const bars = staffBarsForDisplay(staffOpeningBars());
   const items = staffOpeningItems();
   const user = SESSION.user || {};
   const context = document.getElementById('staff-opening-context');
@@ -4605,7 +4756,7 @@ function renderStaffOpening() {
   if (!context || !summary || !grid || !preview) return;
   const visibleItems = staffRenderItemFilter('opening', items);
   staffScaleRenderWidget('opening');
-  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${bars.map(staffBarIdentityText).join(' | ') || 'No authorized active Bars'}`;
+  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${bars.map(staffBarIdentityDisplayText).join(' | ') || 'No authorized active Bars'}`;
   const rows = staffOpeningRows();
   const openingQty = rows.reduce((sum, row) => sum + row.qty, 0);
   summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${bars.length}</div><div class="stat-lbl">BARS</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${openingQty}</div><div class="stat-lbl">OPENING QTY</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${rows.length}</div><div class="stat-lbl">ITEM / BAR ROWS</div></div>`;
@@ -4619,7 +4770,7 @@ function renderStaffOpening() {
     grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(staffBarIdentityDisplayText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
     Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
   }
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityDisplayText(row.bar))}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td>${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td data-label="Mode">${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
   staffOpeningSetError(STAFF_OPENING_ERROR, STAFF_OPENING_ERROR_OK);
   staffOpeningUpdateSaveButton();
 }
@@ -5417,6 +5568,8 @@ const StaffVoiceGuide = {
     const test = document.getElementById('staff-voice-test');
     const itemToggle = document.getElementById('staff-voice-item-toggle');
     const status = document.getElementById('staff-voice-status');
+    const summary = document.getElementById('staff-voice-summary-state');
+    if (summary) summary.textContent = this.supported ? `${this.enabled ? 'On' : 'Off'} · Names ${this.speakItemNames ? 'On' : 'Off'}` : 'Unavailable';
     if (toggle) {
       toggle.disabled = !this.supported;
       toggle.textContent = this.enabled ? 'TURN OFF' : 'TURN ON';
@@ -5529,6 +5682,13 @@ const StaffVoiceGuide = {
 
 function initStaffVoiceGuide() {
   StaffVoiceGuide.init();
+  const guide = document.getElementById('staff-voice-guide');
+  if (guide && !guide.dataset.voiceMeasureBound) {
+    guide.dataset.voiceMeasureBound = '1';
+    guide.addEventListener('toggle', () => {
+      if (typeof staffWorkspaceMeasure === 'function') staffWorkspaceMeasure();
+    });
+  }
   const toggle = document.getElementById('staff-voice-toggle');
   const test = document.getElementById('staff-voice-test');
   const itemToggle = document.getElementById('staff-voice-item-toggle');
@@ -6811,8 +6971,10 @@ function staffDispatchAuthorizedBars() {
 }
 
 function staffDispatchSwitchMarkup(mode, selectedId) {
-  const bars = staffDispatchAuthorizedBars();
-  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
+  const bars = staffBarsForDisplay(staffDispatchAuthorizedBars());
+  const selected = bars.some(bar => String(bar.id) === String(selectedId || ''));
+  const prompt = selected ? '' : '<option value="" disabled selected>Choose Bar</option>';
+  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? prompt + bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
 }
 
 function staffDispatchResetItem(mode, itemId) {
@@ -6934,7 +7096,7 @@ function staffDispatchDecorateReturningCards(candidates, source) {
 }
 
 function renderStaffTaking() {
-  const bars = staffTakingBars();
+  const bars = staffBarsForDisplay(staffTakingBars());
   const items = staffTakingItems();
   const user = SESSION.user || {};
   const context = document.getElementById('staff-taking-context');
@@ -6947,8 +7109,8 @@ function renderStaffTaking() {
   const visibleItems = staffRenderItemFilter('taking', items);
   if (STAFF_SCALE_CONTEXT.mode !== 'taking' || !items.some(item => String(item.id) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'taking', itemId: String(items[0]?.id || '') };
   staffScaleRenderWidget('taking');
-  context.textContent = `${user.nightName || user.nightId || 'Night'} · Staff Taking · ${bars.map(staffBarIdentityText).join(' | ') || 'No destination Bars selected'}`;
-  const authorized = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false);
+  context.textContent = `${user.nightName || user.nightId || 'Night'} · Staff Taking · ${bars.map(staffBarIdentityDisplayText).join(' | ') || 'No destination Bars selected'}`;
+  const authorized = staffBarsForDisplay((SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false));
   barEl.innerHTML = authorized.length ? authorized.map(bar => `<label style="display:inline-flex;align-items:flex-start;gap:7px;margin:0 12px 10px 0;font-size:12px;min-width:min(100%,220px);"><input type="checkbox" ${STAFF_TAKING_SELECTED_BARS.includes(String(bar.id)) ? 'checked' : ''} onchange="staffTakingToggleBar('${esc(bar.id)}',this.checked)">${staffBarIdentityHtml(bar)}</label>`).join('') : '<span class="empty-text">No authorized active Bars are available.</span>';
   const states = Object.values(STAFF_TAKING_STATE);
   const taken = states.reduce((sum, state) => sum + (Number(state.taken) || 0), 0);
@@ -6970,7 +7132,7 @@ function renderStaffTaking() {
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.item.name)}</td><td>${esc(staffBarIdentityDisplayText(row.bar))}</td><td>${esc(row.action)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Action">${esc(row.action)}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
   staffTakingSetError(STAFF_TAKING_ERROR);
 }
 
@@ -7401,7 +7563,7 @@ function staffReturningLookupMarkup(lookup) {
   return `${classificationMessage}${pendingMessage}${auditCards}<button class="btn btn-ghost btn-sm" id="staff-returning-reload" type="button" onclick="staffReturningReloadHistory()" ${pending ? 'disabled' : ''}>Reload approved history</button>`;
 }
 
-async function hydrateStaffReturningHistory() {
+async function hydrateStaffReturningHistory(options = {}) {
   const user = SESSION.user || {};
   const barIds = (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false).map(bar => bar.id);
   const contextKey = staffReturningHistoryContextKey();
@@ -7409,16 +7571,19 @@ async function hydrateStaffReturningHistory() {
   const nightId = user.nightId;
   const sourceBar = String(STAFF_RETURNING_SOURCE_BAR || '');
   const requestToken = STAFF_RETURNING_HISTORY_LOAD.requestToken + 1;
-  STAFF_RETURNING_HISTORY_LOAD = { status: 'loading', contextKey, requestToken, error: '' };
-  SESSION.cache.returningHistory = [];
-  staffReturningRenderIfVisible();
+  if (options.stageOnly !== true) {
+    STAFF_RETURNING_HISTORY_LOAD = { status: 'loading', contextKey, requestToken, error: '' };
+    SESSION.cache.returningHistory = [];
+    staffReturningRenderIfVisible();
+  }
   if (!contextKey || !SESSION.venueId || !user.nightId || !barIds.length) {
+    if (options.stageOnly === true) throw staffScreenRefreshConflict();
     STAFF_RETURNING_HISTORY_LOAD = { status: 'idle', contextKey, requestToken, error: '' };
     staffReturningRenderIfVisible();
     return [];
   }
-  const ownsRequest = () => STAFF_RETURNING_HISTORY_LOAD.requestToken === requestToken &&
-    STAFF_RETURNING_HISTORY_LOAD.contextKey === contextKey && staffReturningHistoryContextKey() === contextKey;
+  const ownsRequest = () => options.stageOnly === true || (STAFF_RETURNING_HISTORY_LOAD.requestToken === requestToken &&
+    STAFF_RETURNING_HISTORY_LOAD.contextKey === contextKey && staffReturningHistoryContextKey() === contextKey);
   try {
     const { data, error, count } = await SB.from('events')
       .select('venue_id, night_id, bar_id, item_id, action, status, qty, notes, items(id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url)', { count: 'exact' })
@@ -7432,6 +7597,7 @@ async function hydrateStaffReturningHistory() {
     if (!Array.isArray(data) || !Number.isSafeInteger(count) || count < 0 || count !== data.length) {
       throw new Error('Complete approved return history is unavailable.');
     }
+    if (options.stageOnly === true && data.some(row => !row || String(row.venue_id) !== String(venueId) || String(row.night_id) !== String(nightId) || !barIds.map(String).includes(String(row.bar_id)) || row.status !== 'APPROVED')) throw new Error('Complete approved return history is unavailable.');
     let pendingDeliveryStatus = 'error';
     let pendingDeliveryCount = null;
     try {
@@ -7449,11 +7615,13 @@ async function hydrateStaffReturningHistory() {
       // Keep valid approved balances usable, but never invent a zero pending count.
     }
     if (!ownsRequest()) throw staffItemLookupStaleError();
+    if (options.stageOnly === true) return { data, approvedRowCount: count, pendingDeliveryStatus, pendingDeliveryCount };
     SESSION.cache.returningHistory = data;
     STAFF_RETURNING_HISTORY_LOAD = { status: 'ready', contextKey, requestToken, error: '', approvedRowCount: count, pendingDeliveryStatus, pendingDeliveryCount };
     staffReturningRenderIfVisible();
     return SESSION.cache.returningHistory;
   } catch (error) {
+    if (options.stageOnly === true) throw error;
     if (!ownsRequest()) throw staffItemLookupStaleError();
     SESSION.cache.returningHistory = [];
     STAFF_RETURNING_HISTORY_LOAD = { status: 'error', contextKey, requestToken, error: 'Approved return history could not be loaded.' };
@@ -7697,7 +7865,7 @@ function renderStaffReturning() {
   const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate, lookup);
   if (lookup.history.status === 'ready' && (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId))) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
-  select.innerHTML = bars.length ? bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
+  select.innerHTML = bars.length ? (source ? '' : '<option value="" disabled selected>Current source unavailable</option>') + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
@@ -7729,7 +7897,7 @@ function renderStaffReturning() {
   }
   staffDispatchDecorateReturningCards(visibleCandidates, source);
   grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.candidate.name || row.candidate.itemId)}</td><td>${esc(source?.name || row.candidate.barId)}</td><td>${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(staffReturningItemForCandidate(row.candidate), row.measurement))}` : ''}</td><td>MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td data-label="Item">${esc(row.candidate.name || row.candidate.itemId)}</td><td data-label="Source Bar">${esc(source?.name || row.candidate.barId)}</td><td data-label="Return Qty">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(staffReturningItemForCandidate(row.candidate), row.measurement))}` : ''}</td><td data-label="Destination">MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
   staffReturningSetError(STAFF_RETURNING_ERROR, STAFF_RETURNING_ERROR_OK);
   staffReturningRenderSubmitState();
   staffReturningRestoreDrafts();
@@ -7904,8 +8072,8 @@ function renderStaffTransfer() {
     STAFF_TRANSFER_STATE.destinationBar = String(bars.find(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar))?.id || '');
   }
   if (!items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = String(items[0].id);
-  if (source) source.innerHTML = bars.map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
-  if (destination) destination.innerHTML = bars.filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (source) source.innerHTML = staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (destination) destination.innerHTML = staffBarsForDisplay(bars).filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
   const selectedItemIsVisible = visibleItems.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (item) {
     item.innerHTML = visibleItems.length
@@ -7919,7 +8087,7 @@ function renderStaffTransfer() {
   const to = bars.find(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.destinationBar));
   const selectedItem = items.find(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (preview) preview.innerHTML = selectedItem && from && to && Number.isFinite(Number(STAFF_TRANSFER_STATE.qty)) && Number(STAFF_TRANSFER_STATE.qty) > 0
-    ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source</th><th>Destination</th><th>Qty</th></tr></thead><tbody><tr><td>${esc(selectedItem.name || selectedItem.id)}</td><td>${esc(from.name || from.id)}</td><td>${esc(to.name || to.id)}</td><td>${esc(staffFormatQuantity(STAFF_TRANSFER_STATE.qty))}${STAFF_TRANSFER_STATE.measurement ? ` · ${esc(staffScaleMeasurementSummary(selectedItem, STAFF_TRANSFER_STATE.measurement))} · ONE MEASUREMENT` : ''}</td></tr></tbody></table></div>`
+    ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source</th><th>Destination</th><th>Qty</th></tr></thead><tbody><tr><td data-label="Item">${esc(selectedItem.name || selectedItem.id)}</td><td data-label="Source">${esc(from.name || from.id)}</td><td data-label="Destination">${esc(to.name || to.id)}</td><td data-label="Qty">${esc(staffFormatQuantity(STAFF_TRANSFER_STATE.qty))}${STAFF_TRANSFER_STATE.measurement ? ` · ${esc(staffScaleMeasurementSummary(selectedItem, STAFF_TRANSFER_STATE.measurement))} · ONE MEASUREMENT` : ''}</td></tr></tbody></table></div>`
     : '<div class="empty-text">Enter a valid Transfer quantity to preview.</div>';
   staffTransferSetError(STAFF_TRANSFER_ERROR);
 }
@@ -8021,6 +8189,279 @@ async function saveStaffTransfer() {
 // STAFF_TRANSFER_PHASE3D_END
 
 // ══════════════════════════════════════════════════════
+// STAFF_SCREEN_REFRESH_START — explicit read-only staging; no login, movement or BLE action.
+const STAFF_SCREEN_REFRESH = { epoch: 0, entry: 0, busy: false, flight: 0 };
+function staffScreenRefreshStatus(message) {
+  const el = document.getElementById('staff-screen-refresh-status');
+  if (el) { el.textContent = message || ''; el.hidden = !message; }
+  if (typeof staffWorkspaceMeasure === 'function') staffWorkspaceMeasure();
+}
+function staffScreenRefreshEntry() {
+  STAFF_SCREEN_REFRESH.entry += 1;
+  STAFF_SCREEN_REFRESH.epoch += 1;
+  const button = document.getElementById('staff-screen-refresh');
+  if (button) button.disabled = STAFF_SCREEN_REFRESH.busy;
+  staffScreenRefreshStatus('');
+}
+function staffScreenRefreshTarget(view) {
+  if (view === 'opening') return STAFF_SCALE_CONTEXT.mode === 'opening' ? String(STAFF_SCALE_CONTEXT.itemId || '') : '';
+  if (view === 'taking') return JSON.stringify([(STAFF_TAKING_SELECTED_BARS || []).map(String).sort(), STAFF_SCALE_CONTEXT.mode === 'taking' ? STAFF_SCALE_CONTEXT.itemId : '']);
+  if (view === 'returning') return JSON.stringify([String(STAFF_RETURNING_SOURCE_BAR || ''), STAFF_SCALE_CONTEXT.mode === 'returning' ? STAFF_SCALE_CONTEXT.itemId : '']);
+  if (view === 'transfer') return JSON.stringify([STAFF_TRANSFER_STATE.sourceBar, STAFF_TRANSFER_STATE.destinationBar, STAFF_TRANSFER_STATE.itemId,
+    document.getElementById('staff-transfer-source-bar')?.value, document.getElementById('staff-transfer-destination-bar')?.value, document.getElementById('staff-transfer-item')?.value]);
+  return '';
+}
+function staffScreenRefreshCoreScope() {
+  const user = SESSION.user || {};
+  return JSON.stringify([APP_MODE, SESSION.type, SESSION.venueId || '', user.staff_id || '', user.assignment_id || '', user.nightId || '', user.session_id || '',
+    Array.isArray(user.allowed_bar_ids) ? user.allowed_bar_ids.map(String).sort() : null]);
+}
+function staffScreenRefreshContext() {
+  const root = document.getElementById('staff-dashboard');
+  const key = staffItemLookupContextKey();
+  if (!key || !root?.getClientRects().length) return null;
+  return { userRef: SESSION.user, coreScope: staffScreenRefreshCoreScope(), key, view: root.dataset.staffView || 'dashboard', target: staffScreenRefreshTarget(root.dataset.staffView || 'dashboard'), entry: STAFF_SCREEN_REFRESH.entry,
+    barsRef: SESSION.cache.authorizedBars, openingRef: SESSION.cache.openingItems, takingToken: STAFF_TAKING_ITEMS_LOAD.requestToken, historyToken: STAFF_RETURNING_HISTORY_LOAD.requestToken };
+}
+function staffScreenRefreshOwns(op) {
+  const current = staffScreenRefreshContext();
+  return !!current && op.epoch === STAFF_SCREEN_REFRESH.epoch && op.userRef === current.userRef && op.key === current.key && op.view === current.view && op.target === current.target && op.entry === current.entry &&
+    op.barsRef === current.barsRef && op.openingRef === current.openingRef && op.takingToken === current.takingToken && op.historyToken === current.historyToken;
+}
+function staffScreenRefreshUiOwns(op) {
+  const root = document.getElementById('staff-dashboard');
+  return op.epoch === STAFF_SCREEN_REFRESH.epoch && SESSION.type === 'barback' && APP_MODE === 'staff' && SESSION.user === op.userRef && staffScreenRefreshCoreScope() === op.coreScope &&
+    root?.getClientRects().length && root.dataset.staffView === op.view && STAFF_SCREEN_REFRESH.entry === op.entry;
+}
+function staffScreenRefreshStateSnapshot() {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  return { opening: copy(STAFF_OPENING_STATE), taking: copy(STAFF_TAKING_STATE), returning: copy(STAFF_RETURNING_STATE), transfer: copy(STAFF_TRANSFER_STATE),
+    takingDraft: copy(STAFF_TAKING_WEIGHT_DRAFT), returningDraft: copy(STAFF_RETURNING_DOM_DRAFT), scaleContext: { ...STAFF_SCALE_CONTEXT },
+    takingDomContext: typeof STAFF_TAKING_LOOKUP_DOM_CONTEXT === 'string' ? STAFF_TAKING_LOOKUP_DOM_CONTEXT : null,
+    filters: typeof STAFF_ITEM_FILTERS === 'object' ? copy(STAFF_ITEM_FILTERS) : null,
+    openingSubmission: STAFF_OPENING_SUBMISSION, returningSubmission: STAFF_RETURNING_SUBMISSION };
+}
+function staffScreenRefreshStateRestore(state) {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  STAFF_OPENING_STATE = copy(state.opening); STAFF_TAKING_STATE = copy(state.taking); STAFF_RETURNING_STATE = copy(state.returning); STAFF_TRANSFER_STATE = copy(state.transfer);
+  STAFF_TAKING_WEIGHT_DRAFT = copy(state.takingDraft); STAFF_RETURNING_DOM_DRAFT = copy(state.returningDraft); STAFF_SCALE_CONTEXT = { ...state.scaleContext };
+  if (state.takingDomContext !== null) STAFF_TAKING_LOOKUP_DOM_CONTEXT = state.takingDomContext;
+  if (state.filters && typeof STAFF_ITEM_FILTERS === 'object') { for (const key of Object.keys(STAFF_ITEM_FILTERS)) delete STAFF_ITEM_FILTERS[key]; Object.assign(STAFF_ITEM_FILTERS, copy(state.filters)); }
+  STAFF_OPENING_SUBMISSION = state.openingSubmission; STAFF_RETURNING_SUBMISSION = state.returningSubmission;
+}
+function staffScreenRefreshBlocked() {
+  return STAFF_OPENING_SAVING || STAFF_TAKING_SAVING || STAFF_RETURNING_SAVING || STAFF_TRANSFER_SAVING ||
+    !!(STAFF_OPENING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_OPENING_SUBMISSION.phase)) ||
+    !!(STAFF_RETURNING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_RETURNING_SUBMISSION.phase));
+}
+function staffScreenRefreshConflict() {
+  const error = new Error('Refresh not applied because current data or a draft needs review. Your draft and measurements are retained.');
+  error.staffRefreshConflict = true;
+  return error;
+}
+function staffScreenRefreshValidateBars(data, claims) {
+  if (!Array.isArray(data) || !Array.isArray(claims?.allowed_bar_ids)) throw new Error('Current Bars are unavailable.');
+  const allowed = new Set(claims.allowed_bar_ids.map(String)), seen = new Set();
+  for (const row of data) {
+    if (!row || typeof row.bar_id !== 'string' || !row.bar_id) throw new Error('Current Bars are unavailable.');
+    if (!allowed.has(row.bar_id)) continue;
+    if (!row.bars || String(row.bars.id) !== row.bar_id || typeof row.bars.name !== 'string' || typeof row.bars.active !== 'boolean' || seen.has(row.bar_id)) throw new Error('Current Bars are unavailable.');
+    seen.add(row.bar_id);
+  }
+}
+function staffScreenRefreshValidateItems(data) {
+  const seen = new Set();
+  if (!Array.isArray(data) || data.some(item => !item || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || seen.has(item.id) || !seen.add(item.id))) throw new Error('Current Items are unavailable.');
+}
+function staffScreenRefreshEqual(a, b) {
+  const canonical = value => Array.isArray(value) ? value.map(canonical).sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)))
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+function staffScreenRefreshFields(view) {
+  const panel = document.getElementById('staff-shell-' + view);
+  const active = document.activeElement;
+  return Array.from(panel?.querySelectorAll('input,select,textarea') || []).map(input => ({
+    id: input.id || '', tag: input.tagName, type: input.type, handler: input.getAttribute('onchange') || input.getAttribute('oninput') || '',
+    value: input.value, checked: input.checked, dirty: (input.tagName !== 'SELECT' && input.value !== input.defaultValue) || input.dataset.staffWeightEdited === '1',
+    origin: input.dataset.staffWeightOrigin, edited: input.dataset.staffWeightEdited, returningApplied: input.dataset.returningApplied,
+    focused: input === active, start: input === active ? input.selectionStart : null, end: input === active ? input.selectionEnd : null
+  }));
+}
+function staffScreenRefreshRestore(view, fields) {
+  const panel = document.getElementById('staff-shell-' + view);
+  const inputs = Array.from(panel?.querySelectorAll('input,select,textarea') || []);
+  for (const field of fields) {
+    const input = inputs.find(node => field.id ? node.id === field.id : node.tagName === field.tag && node.type === field.type && (node.getAttribute('onchange') || node.getAttribute('oninput') || '') === field.handler);
+    if (!input || input.disabled || input.readOnly || (view === 'opening' && !field.id && !field.dirty && field.handler.startsWith('staffOpeningInput('))) continue;
+    input.value = field.value;
+    if (input.type === 'checkbox' || input.type === 'radio') input.checked = field.checked;
+    for (const [key, value] of [['staffWeightOrigin', field.origin], ['staffWeightEdited', field.edited], ['returningApplied', field.returningApplied]]) {
+      if (value === undefined) delete input.dataset[key]; else input.dataset[key] = value;
+    }
+    if (field.focused && input.getClientRects().length) {
+      try { input.focus({ preventScroll: true }); } catch (_) { input.focus(); }
+      if (Number.isInteger(field.start) && Number.isInteger(field.end)) try { input.setSelectionRange(field.start, field.end); } catch (_) {}
+    }
+  }
+}
+function staffScreenRefreshReturningRows(snapshot) {
+  const map = new Map();
+  for (const row of snapshot.data) {
+    if (String(row.bar_id) !== String(STAFF_RETURNING_SOURCE_BAR) || !['DELIVERED', 'TAKEN', 'RETURNED'].includes(String(row.action).toUpperCase()) || !row.item_id) continue;
+    const id = String(row.item_id), value = map.get(id) || { item: null, delivered: 0, returned: 0, hasDelivery: false, invalid: false };
+    if (row.items && String(row.items.id) === id) value.item = row.items;
+    const qty = staffReturningEventQuantity(row);
+    if (qty == null) value.invalid = true;
+    else if (String(row.action).toUpperCase() === 'RETURNED') value.returned += qty;
+    else { value.delivered += qty; }
+    if (String(row.action).toUpperCase() !== 'RETURNED') value.hasDelivery = true;
+    map.set(id, value);
+  }
+  for (const [id, value] of map) {
+    const tolerance = Number.EPSILON * Math.max(1, value.delivered, value.returned) * 8;
+    value.remaining = value.delivered - value.returned;
+    if (!value.hasDelivery || value.invalid || !staffReturningBarApplicable(value.item) || !Number.isFinite(value.remaining) || value.remaining < -tolerance) map.delete(id);
+    else value.remaining = value.remaining > tolerance ? value.remaining : 0;
+  }
+  return map;
+}
+function staffScreenRefreshCheck(data, fields) {
+  const bars = new Map(data.bars.map(bar => [String(bar.id), bar]));
+  const fail = () => { throw staffScreenRefreshConflict(); };
+  if (document.getElementById('staff-dashboard')?.dataset.staffView === 'transfer' && (!STAFF_TRANSFER_STATE.sourceBar || !STAFF_TRANSFER_STATE.destinationBar || !STAFF_TRANSFER_STATE.itemId)) {
+    const error = staffScreenRefreshConflict();
+    error.message = 'Refresh not applied. Choose the intended Transfer source, destination and Item first. Your draft is retained.';
+    throw error;
+  }
+  const changedScope = !staffScreenRefreshEqual(data.bars.map(bar => String(bar.id)), (SESSION.cache.authorizedBars || []).map(bar => String(bar.id)));
+  const hasDraft = [STAFF_OPENING_STATE, STAFF_TAKING_STATE, STAFF_RETURNING_STATE].some(state => Object.keys(state).length) ||
+    !!STAFF_TRANSFER_STATE.measurement || Object.values(fields).some(list => list.some(field => field.dirty || (/weight/.test(field.id) && field.value !== ''))) ||
+    Object.keys(staffTakingWeightDrafts()).length || Object.keys(STAFF_RETURNING_DOM_DRAFT.fields).length;
+  if (changedScope && hasDraft) fail();
+  if ((STAFF_TAKING_SELECTED_BARS || []).some(id => !bars.has(String(id)))) fail();
+  if (STAFF_RETURNING_SOURCE_BAR && !bars.has(String(STAFF_RETURNING_SOURCE_BAR))) fail();
+  for (const key of Object.keys(STAFF_OPENING_STATE)) if (!bars.has(String(key.split('::')[1]))) fail();
+  if (STAFF_TRANSFER_STATE.itemId && (!bars.has(String(STAFF_TRANSFER_STATE.sourceBar)) || !bars.has(String(STAFF_TRANSFER_STATE.destinationBar)))) fail();
+  const measurementSafe = (oldItem, newItem, measurement, raw = false) => {
+    if (!newItem || !oldItem) fail();
+    if ((measurement || raw) && !staffScreenRefreshEqual(staffScaleProfile(oldItem), staffScaleProfile(newItem))) fail();
+    if (measurement) {
+      let current; try { current = staffScaleCalculate(newItem, measurement.weightG); } catch (_) { fail(); }
+      if (['weightG', 'tareG', 'fullG', 'liquidG', 'remainingPercent', 'remainingMl', 'qty'].some(key => current[key] !== measurement[key])) fail();
+    }
+  };
+  if (data.openingItems) {
+    const oldItems = new Map((SESSION.cache.openingItems || []).map(item => [String(item.id), item])), items = new Map(data.openingItems.map(item => [String(item.id), item]));
+    for (const [key, value] of Object.entries(STAFF_OPENING_STATE)) { const id = key.split('::')[0]; measurementSafe(oldItems.get(id), items.get(id), value?.measurement); }
+    for (const field of fields.opening) if (field.dirty || field.value !== '') {
+      const item = [...oldItems.values()].find(item => [...(SESSION.cache.authorizedBars || [])].some(bar => field.id === 'staff-opening-weight-' + item.id + '-' + bar.id));
+      const match = field.handler.match(/staffOpeningInput\('([^']*)','([^']*)'/);
+      if (item) measurementSafe(item, items.get(String(item.id)), null, true);
+      else if (match && field.dirty && (!items.has(match[1]) || !bars.has(match[2]))) fail();
+    }
+  }
+  if (data.takingItems) {
+    const oldItems = new Map((SESSION.cache.takingItems || []).map(item => [String(item.id), item]));
+    const vip = (STAFF_TAKING_SELECTED_BARS || []).some(id => String(bars.get(String(id))?.bar_type).toLowerCase() === 'vip');
+    const items = new Map(data.takingItems.filter(item => vip || (item.service_mode || 'regular_bar') !== 'vip_only' || item.service_mode === 'all_bars').map(item => [String(item.id), item]));
+    for (const [id, value] of Object.entries(STAFF_TAKING_STATE)) measurementSafe(oldItems.get(id), items.get(id), value?.measurement);
+    for (const field of fields.taking) {
+      const match = field.id.match(/^staff-taking-(qty|weight)-(.+)$/);
+      if (match && (field.dirty || (match[1] === 'weight' && field.value !== ''))) measurementSafe(oldItems.get(match[2]), items.get(match[2]), null, match[1] === 'weight');
+    }
+    for (const [id, value] of Object.entries(staffTakingWeightDrafts())) measurementSafe(oldItems.get(id), items.get(id), null, true);
+    if (STAFF_TRANSFER_STATE.itemId) {
+      const id = String(STAFF_TRANSFER_STATE.itemId), item = data.takingItems.find(item => String(item.id) === id);
+      measurementSafe(oldItems.get(id), item, STAFF_TRANSFER_STATE.measurement, fields.transfer.some(field => field.id === 'staff-transfer-weight' && (field.dirty || field.value !== '')));
+    }
+  }
+  if (data.history) {
+    const rows = staffScreenRefreshReturningRows(data.history), oldItems = new Map(staffReturningHistoryItems().map(row => [String(row.itemId), row.item]));
+    const check = (id, qty, measurement, rawWeight = false) => {
+      const row = rows.get(String(id));
+      if (!row || row.remaining <= 0) fail();
+      measurementSafe(oldItems.get(String(id)), row.item, measurement, rawWeight);
+      if (Number.isFinite(qty) && qty > row.remaining + Number.EPSILON * Math.max(1, row.remaining) * 8) fail();
+    };
+    for (const [id, value] of Object.entries(STAFF_RETURNING_STATE)) check(id, Number(value && typeof value === 'object' ? value.qty : value), value?.measurement);
+    for (const field of [...fields.returning, ...Object.entries(STAFF_RETURNING_DOM_DRAFT.fields).map(([id, field]) => ({ id, value: field.value, dirty: true }))]) {
+      const match = field.id.match(/^staff-returning-(qty|weight)-(.+)$/);
+      if (match && (field.dirty || field.value !== '')) check(match[2], match[1] === 'qty' ? Number(field.value) : NaN, null, match[1] === 'weight');
+    }
+  }
+}
+async function staffScreenRefresh() {
+  if (STAFF_SCREEN_REFRESH.busy) return;
+  const context = staffScreenRefreshContext();
+  if (!context) { staffScreenRefreshStatus('Refresh is unavailable outside the current Staff view.'); return; }
+  if (!['dashboard', 'dispatch', 'opening', 'taking', 'returning', 'transfer'].includes(context.view)) { staffScreenRefreshStatus('This screen has no supported data refresh. No data was refreshed.'); return; }
+  if (staffScreenRefreshBlocked()) { staffScreenRefreshStatus('Refresh is unavailable while a submission is pending. Your draft is retained.'); return; }
+  const op = { ...context, epoch: ++STAFF_SCREEN_REFRESH.epoch };
+  STAFF_SCREEN_REFRESH.busy = true;
+  STAFF_SCREEN_REFRESH.flight = op.epoch;
+  const button = document.getElementById('staff-screen-refresh');
+  if (button) button.disabled = true;
+  staffScreenRefreshStatus('Refreshing current-screen data…');
+  try {
+    const jobs = [hydrateStaffAuthorizedBars({ night_id: context.userRef.nightId, allowed_bar_ids: [...context.userRef.allowed_bar_ids] }, { stageOnly: true })];
+    if (context.view === 'opening') jobs.push(hydrateStaffOpeningItems({ stageOnly: true }));
+    if (context.view === 'taking' || context.view === 'transfer') jobs.push(hydrateStaffTakingItems({ stageOnly: true }));
+    if (context.view === 'returning') jobs.push(hydrateStaffReturningHistory({ stageOnly: true }));
+    const outcomes = await Promise.allSettled(jobs);
+    if (!staffScreenRefreshOwns(op)) { if (staffScreenRefreshUiOwns(op)) staffScreenRefreshStatus('Refresh not applied because the current selection or data changed. Your draft is retained.'); return; }
+    const failure = outcomes.find(outcome => outcome.status === 'rejected');
+    if (failure) throw failure.reason;
+    const results = outcomes.map(outcome => outcome.value);
+    if (staffScreenRefreshBlocked()) throw staffScreenRefreshConflict();
+    const data = { bars: results[0] };
+    if (context.view === 'opening') data.openingItems = results[1];
+    if (context.view === 'taking' || context.view === 'transfer') data.takingItems = results[1];
+    if (context.view === 'returning') data.history = results[1];
+    const fields = Object.fromEntries(['opening', 'taking', 'returning', 'transfer'].map(view => [view, staffScreenRefreshFields(view)]));
+    staffScreenRefreshCheck(data, fields);
+    const changed = !staffScreenRefreshEqual(data.bars, SESSION.cache.authorizedBars) ||
+      (data.openingItems && !staffScreenRefreshEqual(data.openingItems, SESSION.cache.openingItems)) ||
+      (data.takingItems && (!staffScreenRefreshEqual(data.takingItems, SESSION.cache.takingItems) || STAFF_TAKING_ITEMS_LOAD.status !== 'ready')) ||
+      (data.history && (!staffScreenRefreshEqual(data.history.data, SESSION.cache.returningHistory) || STAFF_RETURNING_HISTORY_LOAD.status !== 'ready' || data.history.pendingDeliveryStatus !== STAFF_RETURNING_HISTORY_LOAD.pendingDeliveryStatus || data.history.pendingDeliveryCount !== STAFF_RETURNING_HISTORY_LOAD.pendingDeliveryCount));
+    if (changed) {
+      const before = { state: staffScreenRefreshStateSnapshot(), bars: SESSION.cache.authorizedBars, opening: SESSION.cache.openingItems, taking: SESSION.cache.takingItems, history: SESSION.cache.returningHistory, takingLoad: STAFF_TAKING_ITEMS_LOAD, historyLoad: STAFF_RETURNING_HISTORY_LOAD };
+      const render = () => { if (context.view === 'dashboard' || context.view === 'dispatch') renderStaffDashboard(); else ({ opening: renderStaffOpening, taking: renderStaffTaking, returning: renderStaffReturning, transfer: renderStaffTransfer })[context.view](); };
+      try {
+        SESSION.cache.authorizedBars = data.bars;
+        if (data.openingItems) SESSION.cache.openingItems = data.openingItems;
+        if (data.takingItems) { SESSION.cache.takingItems = data.takingItems; STAFF_TAKING_ITEMS_LOAD = { status: 'ready', contextKey: staffItemLookupContextKey(), requestToken: STAFF_TAKING_ITEMS_LOAD.requestToken + 1, error: '', hasVerifiedCache: true }; }
+        if (data.history) { SESSION.cache.returningHistory = data.history.data; STAFF_RETURNING_HISTORY_LOAD = { status: 'ready', contextKey: staffReturningHistoryContextKey(), requestToken: STAFF_RETURNING_HISTORY_LOAD.requestToken + 1, error: '', approvedRowCount: data.history.approvedRowCount, pendingDeliveryStatus: data.history.pendingDeliveryStatus, pendingDeliveryCount: data.history.pendingDeliveryCount }; }
+        render();
+        if (fields[context.view]) staffScreenRefreshRestore(context.view, fields[context.view]);
+      } catch (error) {
+        staffScreenRefreshStateRestore(before.state);
+        SESSION.cache.authorizedBars = before.bars; SESSION.cache.openingItems = before.opening; SESSION.cache.takingItems = before.taking; SESSION.cache.returningHistory = before.history;
+        STAFF_TAKING_ITEMS_LOAD = { ...before.takingLoad, requestToken: Math.max(before.takingLoad.requestToken, STAFF_TAKING_ITEMS_LOAD.requestToken) };
+        STAFF_RETURNING_HISTORY_LOAD = { ...before.historyLoad, requestToken: Math.max(before.historyLoad.requestToken, STAFF_RETURNING_HISTORY_LOAD.requestToken) };
+        try { render(); if (fields[context.view]) staffScreenRefreshRestore(context.view, fields[context.view]); } catch (_) {}
+        finally { staffScreenRefreshStateRestore(before.state); }
+        throw error;
+      }
+    }
+    const refreshed = context.view === 'dashboard' || context.view === 'dispatch' ? 'Authorized Bars refreshed.'
+      : context.view === 'opening' ? 'Authorized Bars and Opening Items refreshed.'
+      : context.view === 'returning' ? 'Authorized Bars and approved return history refreshed. ' + (data.history.pendingDeliveryStatus === 'ready' ? 'Pending delivery status verified.' : 'Pending delivery status unavailable.')
+      : 'Authorized Bars and Items refreshed.';
+    staffScreenRefreshStatus(refreshed + ' Your draft is retained.');
+  } catch (error) {
+    if (staffScreenRefreshUiOwns(op)) staffScreenRefreshStatus(error?.staffRefreshConflict ? error.message : 'Refresh could not be verified. Current data and your draft are retained.');
+  } finally {
+    if (op.epoch === STAFF_SCREEN_REFRESH.flight) {
+      STAFF_SCREEN_REFRESH.flight = 0;
+      STAFF_SCREEN_REFRESH.busy = false;
+      const currentButton = document.getElementById('staff-screen-refresh');
+      if (currentButton) currentButton.disabled = false;
+    }
+  }
+}
+// STAFF_SCREEN_REFRESH_END
+
 // LOGIN TABS
 // ══════════════════════════════════════════════════════
 function switchLoginTab(tab) {
@@ -8125,27 +8566,26 @@ function staffBarDisplayNamesEqual(context) {
 function staffBarIdentityDisplayText(bar) {
   const context = staffBarDisplayContext(bar);
   const title = staffBarDisplayNamesEqual(context) ? context.barCode : `${context.barCode} — ${context.barDisplayName}`;
-  const bartenders = context.bartenderNames.length
-    ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
-    : 'No bartender assigned';
+  // Current peer-roster restoration requires the separately reviewed R8 contract.
+  const bartenders = 'Bartender roster unavailable';
   return `${title} · ${bartenders}`;
 }
 
 function staffBarIdentityHtml(bar) {
   const context = staffBarDisplayContext(bar);
-  const bartenders = context.bartenderNames.length
-    ? `Bartender${context.bartenderNames.length === 1 ? '' : 's'}: ${context.bartenderNames.join(', ')}`
-    : 'No bartender assigned';
+  // Current peer-roster restoration requires the separately reviewed R8 contract.
+  const bartenders = 'Bartender roster unavailable';
   return `<span class="staff-bar-identity"><span class="staff-bar-code">${esc(context.barCode)}</span>${staffBarDisplayNamesEqual(context) ? '' : `<span class="staff-bar-display-name">${esc(context.barDisplayName)}</span>`}<span class="staff-bar-bartenders">${esc(bartenders)}</span></span>`;
 }
 
-async function hydrateStaffAuthorizedBars(claims) {
+async function hydrateStaffAuthorizedBars(claims, options = {}) {
   const allowedIds = new Set((claims.allowed_bar_ids || []).map(id => String(id)));
   const { data, error } = await SB.from('night_bars')
     .select('bar_id, bar_name_at, bars(id, name, active, bar_type)')
     .eq('night_id', claims.night_id);
   if (error) throw new Error('Authorized Bars could not be verified.');
-  SESSION.cache.authorizedBars = (data || [])
+  if (options.stageOnly === true) staffScreenRefreshValidateBars(data, claims);
+  const nextBars = (data || [])
     .filter(row => row?.bars?.active === true && allowedIds.has(String(row.bar_id)))
     .map(row => ({
       id: row.bar_id,
@@ -8156,38 +8596,45 @@ async function hydrateStaffAuthorizedBars(claims) {
       active: true,
       bar_type: row.bars.bar_type || 'bar'
     }));
+  if (options.stageOnly === true) return nextBars;
+  SESSION.cache.authorizedBars = nextBars;
   SESSION.user.allowed_bar_ids = [...allowedIds];
   return SESSION.cache.authorizedBars;
 }
 
-async function hydrateStaffOpeningItems() {
+async function hydrateStaffOpeningItems(options = {}) {
   const { data, error } = await SB.from('items')
     .select('id, name, par_level, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url')
     .eq('active', true)
     .gt('par_level', 0)
     .order('name');
   if (error) throw new Error('Opening Items could not be loaded.');
+  if (options.stageOnly === true) staffScreenRefreshValidateItems(data);
   const seen = new Set();
-  SESSION.cache.openingItems = (data || []).filter(item => {
+  const nextItems = (data || []).filter(item => {
     const par = Number(item?.par_level);
     const key = String(item?.name || '').trim().toLowerCase();
     if (!key || !Number.isFinite(par) || par <= 0 || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+  if (options.stageOnly === true) return nextItems;
+  SESSION.cache.openingItems = nextItems;
   return SESSION.cache.openingItems;
 }
 
-async function hydrateStaffTakingItems() {
+async function hydrateStaffTakingItems(options = {}) {
   const contextKey = staffItemLookupContextKey();
   const requestToken = STAFF_TAKING_ITEMS_LOAD.requestToken + 1;
   const preserveCatalog = !!contextKey && STAFF_TAKING_ITEMS_LOAD.contextKey === contextKey &&
     (STAFF_TAKING_ITEMS_LOAD.status === 'ready' || STAFF_TAKING_ITEMS_LOAD.hasVerifiedCache === true);
-  STAFF_TAKING_ITEMS_LOAD = { status: 'loading', contextKey, requestToken, error: '', hasVerifiedCache: preserveCatalog };
-  if (!preserveCatalog) SESSION.cache.takingItems = [];
-  staffItemLookupRenderVisibleViews();
-  const ownsRequest = () => !!contextKey && STAFF_TAKING_ITEMS_LOAD.requestToken === requestToken &&
-    STAFF_TAKING_ITEMS_LOAD.contextKey === contextKey && staffItemLookupContextKey() === contextKey;
+  if (options.stageOnly !== true) {
+    STAFF_TAKING_ITEMS_LOAD = { status: 'loading', contextKey, requestToken, error: '', hasVerifiedCache: preserveCatalog };
+    if (!preserveCatalog) SESSION.cache.takingItems = [];
+    staffItemLookupRenderVisibleViews();
+  }
+  const ownsRequest = () => options.stageOnly === true || (!!contextKey && STAFF_TAKING_ITEMS_LOAD.requestToken === requestToken &&
+    STAFF_TAKING_ITEMS_LOAD.contextKey === contextKey && staffItemLookupContextKey() === contextKey);
   try {
     const { data, error } = await SB.from('items')
       .select('id, name, active, service_mode, measurement_mode, unit, units_per_case, category, sku, bottle_size_ml, full_shots, shot_weight_g, empty_bottle_weight_g, full_bottle_weight_g, image_url')
@@ -8195,11 +8642,13 @@ async function hydrateStaffTakingItems() {
       .order('name');
     if (!ownsRequest()) throw staffItemLookupStaleError();
     if (error) throw new Error('Taking Items could not be loaded.');
+    if (options.stageOnly === true) { staffScreenRefreshValidateItems(data); return data.filter(item => item && item.active !== false); }
     SESSION.cache.takingItems = (data || []).filter(item => item && item.active !== false);
     STAFF_TAKING_ITEMS_LOAD = { status: 'ready', contextKey, requestToken, error: '', hasVerifiedCache: true };
     staffItemLookupRenderVisibleViews();
     return SESSION.cache.takingItems;
   } catch (error) {
+    if (options.stageOnly === true) throw error;
     if (!ownsRequest()) throw staffItemLookupStaleError();
     if (!preserveCatalog) SESSION.cache.takingItems = [];
     STAFF_TAKING_ITEMS_LOAD = { status: 'error', contextKey, requestToken, error: 'Taking Items could not be loaded.', hasVerifiedCache: preserveCatalog };
