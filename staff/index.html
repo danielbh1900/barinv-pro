@@ -1772,6 +1772,15 @@ th.sortable span { font-size:10px; }
 <button id="bluefy-diag-tab" type="button" onclick="toggleBluefyDiagnostics()" aria-label="Open Bluefy diagnostics">DEBUG</button>
 <section id="bluefy-diag-panel" aria-label="Bluefy runtime diagnostics">
   <div id="bluefy-diag-head"><span id="bluefy-diag-title">BLUEFY DIAGNOSTICS</span><button type="button" onclick="toggleBluefyDiagnostics()" aria-label="Close diagnostics">X</button></div>
+  <!-- STAFF_ROSTER_HTTP_GATE_UI_START -->
+  <section aria-label="Optional Staff roster HTTP check" style="padding:10px;border:1px solid #777;margin:8px 0;">
+    <strong>STAFF ROSTER · READ-ONLY CHECK</strong>
+    <p>Use once in your intended signed-in Staff/Night workspace. No Console paste, inventory submission or credential entry is needed.</p>
+    <button id="staff-roster-http-gate-run" type="button" onclick="staffRunRosterHttpGate(event)" style="min-height:44px;">CHECK STAFF RESPONSE ONCE</button>
+    <p id="staff-roster-http-gate-status" role="status" aria-live="polite">Not run. Opening DEBUG makes no roster request.</p>
+    <textarea id="staff-roster-http-gate-result" readonly hidden aria-label="Sanitized Staff gate result — select and copy only this line" style="width:100%;min-height:120px;overflow-wrap:anywhere;"></textarea>
+  </section>
+  <!-- STAFF_ROSTER_HTTP_GATE_UI_END -->
   <!-- STAFF_SCALE_CAPTURE_UI_START — opt-in, scale-only, RAM-only. -->
   <section id="staff-scale-capture" aria-label="Optional scale capture" style="padding:10px;border:1px solid #777;margin:8px 0;">
     <strong>SCALE CAPTURE · OPTIONAL</strong>
@@ -4255,6 +4264,106 @@ function showApp() {
 function staffHasAuthorizedBars() {
   return SESSION.type === 'barback' && Array.isArray(SESSION.cache.authorizedBars) && SESSION.cache.authorizedBars.length > 0;
 }
+
+// STAFF_ROSTER_HTTP_GATE_START — explicit diagnostic only; no roster rendering.
+let STAFF_ROSTER_HTTP_GATE_STARTED = false;
+function staffRunRosterHttpGate(event) {
+  const button = document.getElementById('staff-roster-http-gate-run');
+  if (!event?.isTrusted || event.currentTarget !== button || STAFF_ROSTER_HTTP_GATE_STARTED) return;
+  STAFF_ROSTER_HTTP_GATE_STARTED = true;
+  button.disabled = true;
+  const status = document.getElementById('staff-roster-http-gate-status');
+  if (status) status.textContent = 'Checking once. Keep this Staff/Night workspace unchanged.';
+  return staffRosterHttpGateCheck();
+}
+async function staffRosterHttpGateCheck() {
+  const label = 'BARINV_STAFF_ROSTER_HTTP_GATE';
+  const emit = value => { const line = label + ' ' + JSON.stringify(value); const output = document.getElementById('staff-roster-http-gate-result'); if (output) { output.value = line; output.hidden = false; } const status = document.getElementById('staff-roster-http-gate-status'); if (status) status.textContent = value.passed ? 'Read-only gate passed. Share only the result below; roster publication is still a separate release.' : 'Gate not verified. Share only the result below; do not change browser security settings or retry automatically.'; console.info(label, JSON.stringify(value)); return value; };
+  const base = { schema: 'barinv-staff-roster-http-gate-v1', observed_at_utc: new Date().toISOString(), passed: false, stage: 'preflight', http_status: null, no_store: false, fetch_observations: 0 };
+  const fail = reason => emit({ ...base, reason });
+  let query, originalFetch, wrappedFetch;
+  try {
+    const page = new URL(location.href);
+    if (page.origin !== 'https://danielbh1900.github.io' || page.pathname !== '/barinv-pro/staff/index.html' || page.searchParams.get('cb') !== 'staff') return fail('canonical_staff_page_required');
+    if (typeof APP_MODE === 'undefined' || APP_MODE !== 'staff' || typeof SESSION === 'undefined' || SESSION.type !== 'barback' || !SESSION.user || !SESSION.cache || !document.getElementById('staff-dashboard')?.getClientRects().length) return fail('existing_active_staff_workspace_required');
+    if (typeof SB === 'undefined' || !SB || typeof SB.rpc !== 'function') return fail('existing_client_unavailable');
+    const user = SESSION.user, barsRef = SESSION.cache.authorizedBars;
+    const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    const expected = { venue_id: SESSION.venueId, night_id: user.nightId, staff_id: user.staff_id, assignment_id: user.assignment_id };
+    if (!Object.values(expected).every(uuid) || !Array.isArray(user.allowed_bar_ids) || !user.allowed_bar_ids.every(uuid) || !Array.isArray(barsRef)) return fail('canonical_page_scope_unavailable');
+    const allowedSignature = JSON.stringify(user.allowed_bar_ids), sessionBinding = user.session_id || null;
+    const allowed = new Set(user.allowed_bar_ids);
+    const barIds = [...new Set(barsRef.filter(bar => bar && bar.active !== false && allowed.has(bar.id)).map(bar => bar.id))].sort();
+    if (!barIds.length || !barIds.every(uuid)) return fail('active_allowed_bar_scope_unavailable');
+    const current = () => APP_MODE === 'staff' && SESSION.type === 'barback' && SESSION.user === user && SESSION.cache.authorizedBars === barsRef && SESSION.venueId === expected.venue_id && user.nightId === expected.night_id && user.staff_id === expected.staff_id && user.assignment_id === expected.assignment_id && JSON.stringify(user.allowed_bar_ids) === allowedSignature && (user.session_id || null) === sessionBinding && JSON.stringify([...new Set(barsRef.filter(bar => bar && bar.active !== false && allowed.has(bar.id)).map(bar => bar.id))].sort()) === JSON.stringify(barIds) && document.getElementById('staff-dashboard')?.getClientRects().length > 0;
+
+    // Construction is lazy: no HTTP occurs until the single await below.
+    query = SB.rpc('staff_bar_display_roster');
+    if (!query || typeof query.then !== 'function' || typeof query.fetch !== 'function' || Object.getOwnPropertyDescriptor(query, 'fetch')?.writable !== true || query.method !== 'POST') return fail('sdk_builder_capture_unsupported');
+    const endpoint = new URL(String(query.url));
+    if (endpoint.origin !== 'https://uzommuafouvaerdvirzf.supabase.co' || endpoint.pathname !== '/rest/v1/rpc/staff_bar_display_roster' || endpoint.search) return fail('unexpected_rpc_target');
+    // Current SDK has a documented retry modifier; older SDKs may omit it.
+    // Regardless, the wrapper allows only one invocation of the original fetch.
+    if (typeof query.retry === 'function') query.retry(false);
+    originalFetch = query.fetch;
+    let observations = 0, status = null, noStore = false, redirected = false;
+    wrappedFetch = async function (...opaqueArguments) {
+      observations += 1;
+      base.fetch_observations = observations;
+      if (observations !== 1) throw new Error('Read-only gate request cap');
+      const response = await Reflect.apply(originalFetch, query, opaqueArguments);
+      status = Number.isInteger(response?.status) ? response.status : null;
+      noStore = typeof response?.headers?.get === 'function' && String(response.headers.get('Cache-Control') || '').split(',').some(value => value.trim().toLowerCase() === 'no-store');
+      redirected = response?.redirected === true;
+      base.http_status = status;
+      base.no_store = noStore;
+      return response;
+    };
+    query.fetch = wrappedFetch;
+    if (query.fetch !== wrappedFetch || !current()) return fail('scope_or_capture_changed_before_request');
+    base.stage = 'request';
+    const result = await query;
+    base.http_status = status;
+    base.no_store = noStore;
+    base.fetch_observations = observations;
+    base.stage = 'validation';
+    const sameContext = current();
+    const exact = (value, keys) => !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
+    const data = result?.data, scope = data?.scope;
+    const bodyValid = exact(data, ['version', 'status', 'scope', 'bars']) && data.version === 1 && data.status === 'ready' && exact(scope, ['venue_id', 'night_id', 'staff_id', 'assignment_id', 'session_id', 'bar_ids']) && Array.isArray(data.bars);
+    const scalarScopeMatches = bodyValid && Object.keys(expected).every(key => scope[key] === expected[key]);
+    // Compare the current page's effective session binding only in RAM. Never
+    // emit session IDs, read Auth state or decode a credential/token.
+    const sessionMatches = bodyValid && scope.session_id === sessionBinding;
+    const barScopeMatches = bodyValid && Array.isArray(scope.bar_ids) && scope.bar_ids.every(uuid) && new Set(scope.bar_ids).size === scope.bar_ids.length && JSON.stringify([...scope.bar_ids].sort()) === JSON.stringify(barIds);
+    let coverageMatches = false, namesValid = false, counts = [];
+    if (bodyValid && Array.isArray(data.bars) && data.bars.length === barIds.length) {
+      const seenBars = new Set();
+      namesValid = data.bars.every(row => {
+        if (!exact(row, ['bar_id', 'bartenders']) || !barIds.includes(row.bar_id) || seenBars.has(row.bar_id) || !Array.isArray(row.bartenders)) return false;
+        seenBars.add(row.bar_id);
+        const seenPeople = new Set();
+        const valid = row.bartenders.every(person => exact(person, ['staff_id', 'name']) && uuid(person.staff_id) && !seenPeople.has(person.staff_id) && typeof person.name === 'string' && !!person.name.trim() && !!seenPeople.add(person.staff_id));
+        counts.push({ bar_id: row.bar_id, bartender_count: row.bartenders.length });
+        return valid;
+      });
+      coverageMatches = namesValid && seenBars.size === barIds.length;
+    }
+    const passed = observations === 1 && status === 200 && result?.status === 200 && !result?.error && noStore && !redirected && sameContext && bodyValid && scalarScopeMatches && sessionMatches && barScopeMatches && coverageMatches;
+    const safe = { ...base, passed, stage: 'complete', reason: passed ? 'verified_staff_scope_http_200_no_store' : !sameContext ? 'page_context_changed' : observations !== 1 ? 'capture_not_single_request' : status !== 200 ? 'http_not_200' : !noStore ? 'no_store_not_observed' : redirected ? 'redirected_response' : 'response_or_scope_not_verified', cache_control: noStore ? 'no-store' : 'missing_or_without_no_store', context_unchanged: sameContext, response_shape_valid: !!bodyValid, canonical_scope_matches: !!scalarScopeMatches, session_binding_matches: !!sessionMatches, allowed_bars_match: !!barScopeMatches, complete_bar_coverage: coverageMatches, display_name_fields_valid: namesValid };
+    if (passed) {
+      safe.active_bar_count = barIds.length;
+      safe.bars_with_bartenders = counts.filter(row => row.bartender_count > 0).length;
+      safe.bartender_entries = counts.reduce((sum, row) => sum + row.bartender_count, 0);
+    }
+    return emit(safe);
+  } catch (_) {
+    return fail('request_or_validation_unavailable');
+  } finally {
+    if (query && originalFetch && query.fetch === wrappedFetch) query.fetch = originalFetch;
+  }
+}
+// STAFF_ROSTER_HTTP_GATE_END
 
 function staffOperationalGuard() {
   if (SESSION.type !== 'barback' || APP_MODE !== 'staff') return false;
