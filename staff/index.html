@@ -5352,9 +5352,26 @@ function staffTakingApply(itemId, type) {
   catch (error) { staffTakingSetError(error.message); }
 }
 
+function staffTakingWeightFeedback(itemId, message, ok = false) {
+  staffTakingSetError(message, ok);
+  const input = document.getElementById('staff-taking-weight-' + itemId);
+  if (!input?.parentElement) return;
+  let feedback = input.parentElement.querySelector('[data-staff-taking-weight-feedback]');
+  if (!feedback) {
+    feedback = document.createElement('div');
+    feedback.dataset.staffTakingWeightFeedback = '1';
+    feedback.setAttribute('role', 'status');
+    feedback.setAttribute('aria-live', 'polite');
+    feedback.style.flexBasis = '100%';
+    input.parentElement.appendChild(feedback);
+  }
+  feedback.textContent = message;
+  feedback.className = ok ? 'alert alert-ok show' : 'alert alert-err show';
+}
+
 function staffTakingApplyWeight(itemId, rawWeight = null) {
   if (!staffOperationalGuard()) return;
-  if (STAFF_TAKING_SELECTED_BARS.length !== 1) { staffTakingSetError('Weighed Taking requires exactly one authorized destination Bar.'); return; }
+  if (STAFF_TAKING_SELECTED_BARS.length !== 1) { staffTakingWeightFeedback(itemId, 'Weighed Taking requires exactly one authorized destination Bar. Select one destination above; your grams draft is unchanged.'); return; }
   const item = staffTakingItems().find(candidate => String(candidate.id) === String(itemId));
   const input = document.getElementById('staff-taking-weight-' + itemId);
   try {
@@ -5364,7 +5381,8 @@ function staffTakingApplyWeight(itemId, rawWeight = null) {
     staffTakingSetError('Measured partial bottle applied. Review the measured preview before Save.', true);
     try { StaffVoiceGuide.announce('weight', { itemName: item?.name }); } catch (_) {}
     renderStaffTaking();
-  } catch (error) { staffTakingSetError(error.message); }
+    staffTakingWeightFeedback(itemId, 'Measured partial bottle applied. Review the measured preview before Save.', true);
+  } catch (error) { staffTakingWeightFeedback(itemId, error.message); }
 }
 
 function staffTakingToggleBar(barId, checked) {
