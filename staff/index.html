@@ -1699,12 +1699,20 @@ th.sortable span { font-size:10px; }
 /* STAFF_SHARED_VOICE_HEADER_CSS_START — same disclosure, controls and saved preferences. */
 #staff-dashboard .staff-header-brand-identity { display:flex; flex:1 1 8em; align-items:center; flex-wrap:wrap; gap:4px 8px; min-width:0; }
 #staff-dashboard .staff-header-brand-identity > span { font-size:12px; letter-spacing:.03em; }
-#staff-dashboard .staff-header-brand .staff-voice-guide { flex:0 1 auto; min-width:0; max-width:100%; margin:0 0 0 auto; color:var(--text); }
-#staff-dashboard .staff-header-brand .staff-voice-guide > summary { display:list-item; min-height:44px; padding:5px 8px; font-size:12px; line-height:1.35; }
+#staff-dashboard .staff-voice-trigger { display:flex; flex:0 1 auto; flex-direction:column; justify-content:center; align-items:flex-start; min-width:44px; min-height:44px; max-width:100%; margin:0 0 0 auto; padding:6px 8px; border:1px solid var(--border2); border-radius:10px; background:var(--s2); color:var(--text); cursor:pointer; text-align:left; font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+#staff-dashboard .staff-voice-trigger:focus-visible { outline:3px solid var(--a); outline-offset:2px; }
 #staff-dashboard .staff-header-brand .staff-voice-label { font-size:12px; }
 #staff-dashboard .staff-header-brand #staff-voice-summary-state { display:block; margin:0; }
-#staff-dashboard .staff-header-brand .staff-voice-guide[open] { flex:1 1 100%; }
-#staff-dashboard .staff-header-brand .staff-voice-controls { padding:4px 10px 10px; }
+#staff-dashboard .staff-voice-dialog { position:fixed; inset:0; margin:auto; width:min(420px,calc(100vw - 24px)); height:fit-content; max-width:calc(100vw - 24px); max-height:calc(100vh - 32px); max-height:calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); padding:16px; overflow:auto; border:1px solid var(--border2); border-radius:12px; background:var(--s1); color:var(--text); box-shadow:0 8px 32px rgba(0,0,0,.35); z-index:10040; }
+#staff-dashboard .staff-voice-dialog:not([open]) { display:none; }
+#staff-dashboard .staff-voice-dialog::backdrop { background:rgba(0,0,0,.5); }
+#staff-dashboard #staff-voice-dialog-backdrop:not([hidden]) { position:fixed; inset:0; z-index:10039; background:rgba(0,0,0,.5); }
+#staff-dashboard .staff-voice-dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+#staff-dashboard .staff-voice-dialog-heading h2 { min-width:0; margin:0; font-size:18px; line-height:1.3; overflow-wrap:anywhere; }
+#staff-dashboard .staff-voice-dialog .btn { min-height:44px; min-width:44px; padding:10px 12px; font-size:12px; letter-spacing:.02em; white-space:normal; }
+#staff-dashboard .staff-voice-dialog .staff-voice-controls { padding:0; }
+#staff-dashboard .staff-voice-dialog .staff-voice-label { font-size:12px; line-height:1.35; }
+#staff-dashboard .staff-voice-dialog #staff-voice-status { display:block; margin:12px 0 0; overflow-wrap:anywhere; }
 /* STAFF_SHARED_VOICE_HEADER_CSS_END */
 
 /* STAFF_TAKING_COMPACT_CSS_START — presentation only; canonical controls and state unchanged. */
@@ -1730,6 +1738,27 @@ th.sortable span { font-size:10px; }
 #staff-dashboard #staff-taking-error { scroll-margin-top:calc(var(--staff-section-height, 100px) + 12px); }
 #staff-dashboard.staff-header-flow #staff-taking-error { scroll-margin-top:12px; }
 /* STAFF_TAKING_COMPACT_CSS_END */
+
+/* STAFF_ACCEPTANCE_HEADER_OPENING_CSS_START — shared controls, no additional action path. */
+#staff-dashboard .staff-active-section-inner { justify-content:flex-start; gap:8px; }
+#staff-dashboard .staff-active-section[data-section] .staff-section-heading { display:block; flex:1 1 100%; width:100%; }
+#staff-dashboard .staff-active-section[data-section] .staff-section-title-line { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; }
+#staff-dashboard .staff-active-section[data-section] .staff-section-title-line > [role="status"] { flex:1 1 9em; min-width:0; }
+#staff-dashboard .staff-header-scale-status { display:grid; flex:0 1 auto; gap:0; max-width:100%; min-width:0; text-align:right; }
+#staff-dashboard .staff-header-scale-status :is(.staff-scale-header-live,.staff-scale-connect-state) { font-size:12px; line-height:1.4; white-space:normal; overflow-wrap:anywhere; }
+#staff-dashboard .staff-header-controls { display:flex; flex-wrap:wrap; align-items:stretch; gap:8px; width:100%; min-width:0; font-size:12px; }
+#staff-dashboard .staff-active-section[data-section] .staff-header-controls :is(.staff-header-tools,.staff-scale-header,.staff-section-actions) { display:contents; }
+#staff-dashboard .staff-header-controls :is(#staff-scale-header-connect,#staff-scale-header-details,#staff-screen-refresh,#staff-section-dashboard,#staff-section-dispatch,#staff-section-action) { flex:1 1 7em; min-width:0; max-width:100%; margin:0; }
+#staff-dashboard .staff-header-controls :is(#staff-scale-header-connect,#staff-screen-refresh,#staff-section-dashboard,#staff-section-dispatch,#staff-section-action), #staff-dashboard .staff-header-controls #staff-scale-header-details > summary { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-height:48px; padding:8px; border:1px solid currentColor; border-radius:var(--r); font-size:12px; line-height:1.3; letter-spacing:.02em; text-align:center; white-space:normal; overflow-wrap:anywhere; }
+#staff-dashboard .staff-header-controls #staff-scale-header-details > summary { height:100%; width:100%; margin:0; }
+#staff-dashboard .staff-header-controls #staff-scale-header-details > summary::after { content:none; }
+#staff-dashboard .staff-active-section[data-section] .staff-scale-header-popover { left:0; right:auto; }
+#staff-dashboard #staff-opening-summary { grid-template-columns:repeat(auto-fit,minmax(min(100%,6em),1fr)); gap:8px; margin-bottom:10px !important; font-size:12px; }
+#staff-dashboard #staff-opening-summary > .stat-card { display:flex; flex-direction:column; justify-content:center; gap:4px; min-width:0; padding:8px !important; }
+#staff-dashboard #staff-opening-summary .stat-val { margin:0; line-height:1.2; overflow-wrap:anywhere; }
+#staff-dashboard #staff-opening-summary .stat-lbl { font-size:12px; line-height:1.3; letter-spacing:.02em; overflow-wrap:anywhere; }
+/* STAFF_ACCEPTANCE_HEADER_OPENING_CSS_END */
+
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -3247,8 +3276,44 @@ th.sortable span { font-size:10px; }
     <div id="staff-active-section" class="staff-active-section" data-section="dashboard">
       <div class="staff-active-section-inner">
         <div class="staff-header-brand"><div class="staff-header-brand-identity"><img src="img/icon-192.png" width="28" height="28" alt=""><strong>BARIV PRO</strong><span>BARBACKS</span></div>
-      <details id="staff-voice-guide" class="staff-voice-guide" aria-label="Staff voice settings">
-        <summary><span class="staff-voice-label">Voice settings</span><span id="staff-voice-summary-state" class="staff-voice-status">Voice Guide: Off</span></summary>
+      <button id="staff-voice-guide" class="staff-voice-trigger" type="button" aria-haspopup="dialog" aria-controls="staff-voice-dialog" aria-expanded="false"><span class="staff-voice-label">Voice settings</span><span id="staff-voice-summary-state" class="staff-voice-status">Voice Guide: Off</span></button>
+        </div>
+        <div class="staff-section-heading">
+          <div class="staff-section-title-line">
+            <div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div>
+            <div class="staff-header-scale-status" aria-label="Scale status">
+              <output id="staff-scale-header-live" class="staff-scale-header-live" aria-label="Live scale weight">LIVE — g</output>
+              <span id="staff-scale-header-connect-state" class="staff-scale-connect-state">Disconnected</span>
+            </div>
+          </div>
+          <div id="staff-section-night" class="staff-section-night" hidden></div>
+          <p id="staff-screen-refresh-status" role="status" aria-live="polite" hidden></p>
+          <p id="staff-scale-header-message" class="staff-scale-header-message" role="status" aria-live="polite" hidden></p>
+        </div>
+        <div class="staff-header-controls">
+          <div class="staff-header-tools">
+            <div id="staff-scale-header" class="staff-scale-header" data-busy="false">
+              <button id="staff-scale-header-connect" class="btn" type="button" onclick="staffScaleToggle()" aria-describedby="staff-scale-header-help"><strong>Connect scale</strong></button>
+              <details id="staff-scale-header-details" hidden>
+                <summary class="btn" aria-label="Connected scale details">Scale details</summary>
+                <div class="staff-scale-header-popover"><p>Live readings never apply or submit automatically. Use the weight at the intended Item, then review Preview.</p><button id="staff-scale-header-disconnect" class="btn" type="button" onclick="staffScaleHeaderDisconnect()">Disconnect scale</button></div>
+              </details>
+              <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
+            </div>
+            <button id="staff-screen-refresh" class="btn" type="button" onclick="staffScreenRefresh()">Refresh</button>
+          </div>
+          <nav class="staff-section-actions" aria-label="Staff workspace navigation">
+            <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
+            <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
+            <button class="btn" id="staff-section-action" type="button" onclick="staffWorkspaceAction()" hidden disabled>Review</button>
+          </nav>
+        </div>
+      </div>
+    </div>
+    <div class="staff-active-section-space" aria-hidden="true"></div>
+    <div id="staff-voice-dialog-backdrop" hidden></div>
+    <dialog id="staff-voice-dialog" class="staff-voice-dialog" aria-labelledby="staff-voice-dialog-title" aria-modal="true" role="dialog" tabindex="-1">
+      <div class="staff-voice-dialog-heading"><h2 id="staff-voice-dialog-title">Voice settings</h2><button id="staff-voice-close" class="btn btn-ghost" type="button">Close</button></div>
         <div class="staff-voice-controls">
         <div class="staff-voice-row">
           <div class="staff-voice-actions">
@@ -3262,36 +3327,7 @@ th.sortable span { font-size:10px; }
         </div>
         <span id="staff-voice-status" class="staff-voice-status" aria-live="polite">Voice Guide: Off</span>
         </div>
-      </details>
-        </div>
-        <div class="staff-section-heading">
-          <div class="staff-section-title-line">
-            <div role="status" aria-live="polite" aria-atomic="true"><span class="staff-active-section-caption">Current section</span><strong id="staff-active-section-name">Staff actions</strong></div>
-            <div class="staff-header-tools">
-            <div id="staff-scale-header" class="staff-scale-header" data-busy="false">
-              <output id="staff-scale-header-live" class="staff-scale-header-live" aria-label="Live scale weight">LIVE — g</output>
-              <button id="staff-scale-header-connect" class="btn" type="button" onclick="staffScaleToggle()" aria-describedby="staff-scale-header-help"><span id="staff-scale-header-connect-state" class="staff-scale-connect-state">Disconnected</span><strong>Connect scale</strong></button>
-              <details id="staff-scale-header-details" hidden>
-                <summary class="btn" aria-label="Connected scale details">Connected</summary>
-                <div class="staff-scale-header-popover"><p>Live readings never apply or submit automatically. Use the weight at the intended Item, then review Preview.</p><button id="staff-scale-header-disconnect" class="btn" type="button" onclick="staffScaleHeaderDisconnect()">Disconnect scale</button></div>
-              </details>
-              <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
-            </div>
-              <button id="staff-screen-refresh" class="btn" type="button" onclick="staffScreenRefresh()">Refresh</button>
-            </div>
-          </div>
-          <div id="staff-section-night" class="staff-section-night" hidden></div>
-          <p id="staff-screen-refresh-status" role="status" aria-live="polite" hidden></p>
-          <p id="staff-scale-header-message" class="staff-scale-header-message" role="status" aria-live="polite" hidden></p>
-        </div>
-        <nav class="staff-section-actions" aria-label="Staff workspace navigation">
-          <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
-          <button class="btn" id="staff-section-dispatch" type="button" onclick="staffWorkspaceNavigate('dispatch')" disabled>Dispatch</button>
-          <button class="btn" id="staff-section-action" type="button" onclick="staffWorkspaceAction()" hidden disabled>Review</button>
-        </nav>
-      </div>
-    </div>
-    <div class="staff-active-section-space" aria-hidden="true"></div>
+    </dialog>
     <div id="staff-shell-dashboard" class="panel" style="padding:20px;">
       <div class="panel-title" style="margin-bottom:14px;">Staff Actions</div>
       <div class="fg fg-2">
@@ -4186,6 +4222,7 @@ function resetConfig() {
 // SCREENS
 // ══════════════════════════════════════════════════════
 function showSetupWizard() {
+  if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'flex';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'none';
@@ -4194,6 +4231,7 @@ function showSetupWizard() {
 }
 
 function showLoginScreen() {
+  if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
@@ -4206,6 +4244,7 @@ function showLoginScreen() {
 }
 
 function showApp() {
+  if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -4745,6 +4784,16 @@ function staffOpeningApplyWeight(itemId, barId, rawWeight = null) {
   } catch (error) { staffOpeningSetError(error.message); }
 }
 
+// Presentation-only compression: preserve each full label whenever statuses differ.
+function staffOpeningBarSummary(bars) {
+  const labels = bars.map(staffBarIdentityDisplayText);
+  if (!labels.length) return 'No authorized active Bars';
+  const common = ' · Bartender roster unavailable';
+  return labels.every(label => label.endsWith(common))
+    ? labels.map(label => label.slice(0, -common.length)).join(' | ') + common
+    : labels.join(' | ');
+}
+
 function renderStaffOpening() {
   const bars = staffBarsForDisplay(staffOpeningBars());
   const items = staffOpeningItems();
@@ -4756,7 +4805,7 @@ function renderStaffOpening() {
   if (!context || !summary || !grid || !preview) return;
   const visibleItems = staffRenderItemFilter('opening', items);
   staffScaleRenderWidget('opening');
-  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${bars.map(staffBarIdentityDisplayText).join(' | ') || 'No authorized active Bars'}`;
+  context.textContent = `${user.nightName || user.nightId || 'Night'} · ${staffOpeningBarSummary(bars)}`;
   const rows = staffOpeningRows();
   const openingQty = rows.reduce((sum, row) => sum + row.qty, 0);
   summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${bars.length}</div><div class="stat-lbl">BARS</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${openingQty}</div><div class="stat-lbl">OPENING QTY</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${rows.length}</div><div class="stat-lbl">ITEM / BAR ROWS</div></div>`;
@@ -4970,7 +5019,7 @@ function staffScaleHeaderRender() {
   const connect = document.getElementById('staff-scale-header-connect');
   const state = document.getElementById('staff-scale-header-connect-state');
   if (connect) { connect.hidden = connected; connect.disabled = busy || !supported; }
-  if (state) state.textContent = busy ? 'Connecting…' : 'Disconnected';
+  if (state) state.textContent = busy ? 'Connecting…' : connected ? 'Connected' : 'Disconnected';
   const details = document.getElementById('staff-scale-header-details');
   if (details) { details.hidden = !connected; if (!connected) details.open = false; }
   const disconnect = document.getElementById('staff-scale-header-disconnect');
@@ -5680,13 +5729,78 @@ const StaffVoiceGuide = {
   }
 };
 
+// STAFF_VOICE_DIALOG_START — presentation only; the existing voice preferences and actions remain canonical.
+function staffVoiceSettingsOpen() {
+  const dialog = document.getElementById('staff-voice-dialog');
+  const guide = document.getElementById('staff-voice-guide');
+  if (!dialog || dialog.hasAttribute('open')) return;
+  dialog._staffVoiceReturnFocus = document.activeElement;
+  guide?.setAttribute('aria-expanded', 'true');
+  try {
+    if (typeof dialog.showModal !== 'function') throw new Error('Dialog fallback');
+    dialog.showModal();
+  } catch (_) {
+    dialog.dataset.voiceFallback = '1';
+    dialog.setAttribute('open', '');
+    const backdrop = document.getElementById('staff-voice-dialog-backdrop');
+    if (backdrop) backdrop.hidden = false;
+  }
+  document.getElementById('staff-voice-close')?.focus({ preventScroll: true });
+}
+function staffVoiceSettingsRestoreFocus() {
+  const dialog = document.getElementById('staff-voice-dialog');
+  if (!dialog || dialog.hasAttribute('open')) return;
+  delete dialog.dataset.voiceFallback;
+  const backdrop = document.getElementById('staff-voice-dialog-backdrop');
+  if (backdrop) backdrop.hidden = true;
+  const guide = document.getElementById('staff-voice-guide');
+  guide?.setAttribute('aria-expanded', 'false');
+  const previous = dialog._staffVoiceReturnFocus;
+  dialog._staffVoiceReturnFocus = null;
+  if (!previous) return;
+  const target = previous?.isConnected && previous.getClientRects().length ? previous : guide?.getClientRects().length ? guide : null;
+  target?.focus({ preventScroll: true });
+}
+function staffVoiceSettingsClose(restoreFocus = true) {
+  const dialog = document.getElementById('staff-voice-dialog');
+  if (!dialog || !dialog.hasAttribute('open')) return;
+  if (restoreFocus === false) dialog._staffVoiceReturnFocus = null;
+  if (dialog.dataset.voiceFallback !== '1' && typeof dialog.close === 'function') dialog.close();
+  else dialog.removeAttribute('open');
+  staffVoiceSettingsRestoreFocus();
+}
+function staffVoiceSettingsTrapKey(event) {
+  if (event.key === 'Escape') { event.preventDefault(); staffVoiceSettingsClose(); return; }
+  if (event.key !== 'Tab') return;
+  const dialog = document.getElementById('staff-voice-dialog');
+  const controls = Array.from(dialog?.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') || []).filter(node => node.getClientRects().length);
+  if (!controls.length) { event.preventDefault(); dialog?.focus(); return; }
+  const first = controls[0], last = controls[controls.length - 1];
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+// STAFF_VOICE_DIALOG_END
+
 function initStaffVoiceGuide() {
   StaffVoiceGuide.init();
   const guide = document.getElementById('staff-voice-guide');
-  if (guide && !guide.dataset.voiceMeasureBound) {
-    guide.dataset.voiceMeasureBound = '1';
-    guide.addEventListener('toggle', () => {
-      if (typeof staffWorkspaceMeasure === 'function') staffWorkspaceMeasure();
+  const dialog = document.getElementById('staff-voice-dialog');
+  const close = document.getElementById('staff-voice-close');
+  if (guide && !guide.dataset.voiceDialogBound) {
+    guide.dataset.voiceDialogBound = '1';
+    guide.addEventListener('click', staffVoiceSettingsOpen);
+  }
+  if (close && !close.dataset.voiceDialogBound) {
+    close.dataset.voiceDialogBound = '1';
+    close.addEventListener('click', staffVoiceSettingsClose);
+  }
+  if (dialog && !dialog.dataset.voiceDialogBound) {
+    dialog.dataset.voiceDialogBound = '1';
+    dialog.addEventListener('close', staffVoiceSettingsRestoreFocus);
+    dialog.addEventListener('cancel', event => { event.preventDefault(); staffVoiceSettingsClose(); });
+    dialog.addEventListener('keydown', staffVoiceSettingsTrapKey);
+    document.addEventListener('focusin', event => {
+      if (dialog.dataset.voiceFallback === '1' && dialog.hasAttribute('open') && !dialog.contains(event.target)) document.getElementById('staff-voice-close')?.focus({ preventScroll: true });
     });
   }
   const toggle = document.getElementById('staff-voice-toggle');
