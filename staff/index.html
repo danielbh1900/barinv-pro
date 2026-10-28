@@ -4925,10 +4925,10 @@ function renderStaffOpening() {
   } else if (!visibleItems.length) {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
   } else {
-    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label>OPEN BOTTLE · ${esc(staffBarIdentityDisplayText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
+    grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" data-staff-bar-aria="${esc(bar.id)}" data-staff-bar-aria-prefix="Opening ${esc(item.name)} " aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label data-staff-bar-display="${esc(bar.id)}" data-staff-bar-prefix="OPEN BOTTLE · ">OPEN BOTTLE · ${esc(staffBarIdentityDisplayText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" data-staff-bar-aria="${esc(bar.id)}" data-staff-bar-aria-prefix="Opening measured grams ${esc(item.name)} " aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
     Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
   }
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td data-label="Mode">${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar" data-staff-bar-display="${esc(row.bar.id)}">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td data-label="Mode">${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
   staffOpeningSetError(STAFF_OPENING_ERROR, STAFF_OPENING_ERROR_OK);
   staffOpeningUpdateSaveButton();
 }
@@ -7215,7 +7215,7 @@ function staffDispatchSwitchMarkup(mode, selectedId) {
   const bars = staffBarsForDisplay(staffDispatchAuthorizedBars());
   const selected = bars.some(bar => String(bar.id) === String(selectedId || ''));
   const prompt = selected ? '' : '<option value="" disabled selected>Choose Bar</option>';
-  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? prompt + bars.map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
+  return `<div class="staff-card-switch"><span style="font-size:10px;color:#766b5e;font-weight:700;">SWITCH</span><select aria-label="Switch authorized Bar" onchange="staffDispatchSwitchBar('${esc(mode)}',this.value)">${bars.length ? prompt + bars.map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}" ${String(bar.id) === String(selectedId || '') ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized Bars</option>'}</select></div>`;
 }
 
 function staffDispatchResetItem(mode, itemId) {
@@ -7373,7 +7373,7 @@ function renderStaffTaking() {
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
-  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Action">${esc(row.action)}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
+  preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar" data-staff-bar-display="${esc(row.bar.id)}">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Action">${esc(row.action)}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
   staffTakingSetError(STAFF_TAKING_ERROR);
 }
 
@@ -8106,7 +8106,7 @@ function renderStaffReturning() {
   const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate, lookup);
   if (lookup.history.status === 'ready' && (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId))) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
-  select.innerHTML = bars.length ? (source ? '' : '<option value="" disabled selected>Current source unavailable</option>') + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
+  select.innerHTML = bars.length ? (source ? '' : '<option value="" disabled selected>Current source unavailable</option>') + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
@@ -8313,8 +8313,8 @@ function renderStaffTransfer() {
     STAFF_TRANSFER_STATE.destinationBar = String(bars.find(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar))?.id || '');
   }
   if (!items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = String(items[0].id);
-  if (source) source.innerHTML = staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
-  if (destination) destination.innerHTML = staffBarsForDisplay(bars).filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (source) source.innerHTML = staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (destination) destination.innerHTML = staffBarsForDisplay(bars).filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
   const selectedItemIsVisible = visibleItems.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (item) {
     item.innerHTML = visibleItems.length
@@ -8685,11 +8685,22 @@ async function staffScreenRefresh() {
         throw error;
       }
     }
+    // Roster is a separate read-only display result after the metadata commit.
+    // A missing/denied endpoint cannot roll back data or affect authentication.
+    const rosterRefreshContext = staffScreenRefreshContext();
+    try { await hydrateStaffBarRoster({ force: true }); } catch (_) {}
+    if (!staffScreenRefreshUiOwns(op)) return;
+    if (!rosterRefreshContext || !staffScreenRefreshOwns({ ...rosterRefreshContext, epoch: op.epoch })) {
+      staffScreenRefreshStatus('Refresh result belongs to the previous selection or data. Review the current view; your draft is retained.');
+      return;
+    }
+    const rosterStatus = staffBarRosterState().status;
+    const rosterMessage = rosterStatus === 'ready' ? ' Bartender labels refreshed.' : rosterStatus === 'loading' ? ' Bartender labels are still loading.' : ' Bartender labels unavailable.';
     const refreshed = context.view === 'dashboard' || context.view === 'dispatch' ? 'Authorized Bars refreshed.'
       : context.view === 'opening' ? 'Authorized Bars and Opening Items refreshed.'
       : context.view === 'returning' ? 'Authorized Bars and approved return history refreshed. ' + (data.history.pendingDeliveryStatus === 'ready' ? 'Pending delivery status verified.' : 'Pending delivery status unavailable.')
       : 'Authorized Bars and Items refreshed.';
-    staffScreenRefreshStatus(refreshed + ' Your draft is retained.');
+    staffScreenRefreshStatus(refreshed + rosterMessage + ' Your draft is retained.');
   } catch (error) {
     if (staffScreenRefreshUiOwns(op)) staffScreenRefreshStatus(error?.staffRefreshConflict ? error.message : 'Refresh could not be verified. Current data and your draft are retained.');
   } finally {
@@ -8774,6 +8785,142 @@ function mapStaffAssignment(row, claims, fallback = {}) {
   };
 }
 
+// STAFF_BAR_DISPLAY_ROSTER_START — display-only; never part of login or movement authority.
+let STAFF_BAR_ROSTER_EPOCH = 0;
+let STAFF_BAR_ROSTER = { status: 'unknown', contextKey: '', userRef: null, barsRef: null, requestEpoch: 0, namesByBarId: Object.create(null) };
+let STAFF_BAR_ROSTER_OBSERVED = false;
+function staffBarRosterContext() {
+  try {
+    const key = staffItemLookupContextKey(), user = SESSION.user;
+    if (!key || SESSION.type !== 'barback' || APP_MODE !== 'staff' || !user) return null;
+    const ids = [SESSION.venueId, user.nightId, user.staff_id, user.assignment_id];
+    if (!ids.every(value => typeof value === 'string' && value.length > 0)) return null;
+    const sessionId = user.session_id || null;
+    if (sessionId !== null && typeof sessionId !== 'string') return null;
+    const allowed = new Set((user.allowed_bar_ids || []).map(String));
+    const barIds = [...new Set((SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false && allowed.has(String(bar.id))).map(bar => String(bar.id)))].sort();
+    if (!barIds.length) return null;
+    return { key, userRef: user, barsRef: SESSION.cache.authorizedBars, venueId: ids[0], nightId: ids[1], staffId: ids[2], assignmentId: ids[3], sessionId, barIds };
+  } catch (_) { return null; }
+}
+function staffBarRosterState() {
+  const context = staffBarRosterContext();
+  if (!context || STAFF_BAR_ROSTER.contextKey !== context.key || STAFF_BAR_ROSTER.userRef !== context.userRef || STAFF_BAR_ROSTER.barsRef !== context.barsRef) {
+    if (STAFF_BAR_ROSTER.contextKey || STAFF_BAR_ROSTER.userRef || STAFF_BAR_ROSTER.status !== 'unknown') {
+      STAFF_BAR_ROSTER = { status: 'unknown', contextKey: '', userRef: null, barsRef: null, requestEpoch: ++STAFF_BAR_ROSTER_EPOCH, namesByBarId: Object.create(null) };
+    }
+    return { status: 'unknown', namesByBarId: Object.create(null) };
+  }
+  return STAFF_BAR_ROSTER;
+}
+function staffBarRosterValidate(response, context) {
+  const exact = (value, fields) => value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === fields.length && fields.every(field => Object.prototype.hasOwnProperty.call(value, field));
+  if (!exact(response, ['version', 'status', 'scope', 'bars']) || response.version !== 1 || response.status !== 'ready' ||
+      !exact(response.scope, ['venue_id', 'night_id', 'staff_id', 'assignment_id', 'session_id', 'bar_ids'])) throw new Error('Bartender labels unavailable.');
+  const scope = response.scope;
+  if (scope.venue_id !== context.venueId || scope.night_id !== context.nightId || scope.staff_id !== context.staffId ||
+      scope.assignment_id !== context.assignmentId || scope.session_id !== context.sessionId || !Array.isArray(scope.bar_ids) ||
+      scope.bar_ids.some(id => typeof id !== 'string') || new Set(scope.bar_ids).size !== scope.bar_ids.length ||
+      JSON.stringify([...scope.bar_ids].sort()) !== JSON.stringify(context.barIds) || !Array.isArray(response.bars) || response.bars.length !== context.barIds.length) throw new Error('Bartender labels unavailable.');
+  const namesByBarId = Object.create(null), seenBars = new Set();
+  response.bars.forEach(row => {
+    if (!exact(row, ['bar_id', 'bartenders']) || !context.barIds.includes(row.bar_id) || seenBars.has(row.bar_id) || !Array.isArray(row.bartenders)) throw new Error('Bartender labels unavailable.');
+    seenBars.add(row.bar_id);
+    const seenStaff = new Set();
+    namesByBarId[row.bar_id] = row.bartenders.map(person => {
+      if (!exact(person, ['staff_id', 'name']) || typeof person.staff_id !== 'string' || !person.staff_id || seenStaff.has(person.staff_id) || typeof person.name !== 'string' || !person.name.trim()) throw new Error('Bartender labels unavailable.');
+      seenStaff.add(person.staff_id);
+      return person.name.trim();
+    });
+  });
+  return namesByBarId;
+}
+function staffBarRosterUiContext(bar) {
+  const barId = String(bar?.id || ''), barCode = String(bar?.barCode || bar?.name || bar?.id || 'Bar');
+  const barDisplayName = String(bar?.displayName || bar?.bar_name_at || bar?.name || barCode).trim() || barCode;
+  const state = staffBarRosterState();
+  const ready = state.status === 'ready' && Object.prototype.hasOwnProperty.call(state.namesByBarId, barId);
+  const bartenderNames = ready ? [...state.namesByBarId[barId]] : [];
+  const bartenderLabel = ready ? (bartenderNames.length ? `Bartender${bartenderNames.length === 1 ? '' : 's'}: ${bartenderNames.join(', ')}` : 'No bartender assigned')
+    : state.status === 'loading' ? 'Loading bartender assignments…' : 'Bartender unavailable';
+  return { barId, barCode, barDisplayName, bartenderNames, bartenderLabel, rosterStatus: ready ? 'ready' : state.status };
+}
+function staffBarRosterRefreshLabels() {
+  try {
+    const root = document.getElementById('staff-dashboard');
+    if (!root) return;
+    const context = staffBarRosterContext();
+    const bars = new Map((SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false && context?.barIds.includes(String(bar.id))).map(bar => [String(bar.id), bar]));
+    root.querySelectorAll('[data-staff-bar-identity]').forEach(node => {
+      const id = node.dataset.staffBarIdentity, display = staffBarRosterUiContext(bars.get(id) || { id });
+      const label = node.querySelector('.staff-bar-bartenders');
+      if (label) label.textContent = display.bartenderLabel;
+      node.dataset.staffRosterStatus = display.rosterStatus;
+    });
+    root.querySelectorAll('[data-staff-bar-display]').forEach(node => {
+      const id = node.dataset.staffBarDisplay;
+      node.textContent = (node.dataset.staffBarPrefix || '') + staffBarIdentityDisplayText(bars.get(id) || { id });
+    });
+    root.querySelectorAll('[data-staff-bar-aria]').forEach(node => {
+      const id = node.dataset.staffBarAria;
+      node.setAttribute('aria-label', (node.dataset.staffBarAriaPrefix || '') + staffBarIdentityDisplayText(bars.get(id) || { id }));
+    });
+    const user = SESSION.user || {}, opening = document.getElementById('staff-opening-context'), taking = document.getElementById('staff-taking-context');
+    if (opening && typeof staffOpeningBars === 'function') opening.textContent = `${user.nightName || user.nightId || 'Night'} · ${staffOpeningBarSummary(staffBarsForDisplay(staffOpeningBars()))}`;
+    if (taking && typeof staffTakingBars === 'function') taking.textContent = `${user.nightName || user.nightId || 'Night'} · Staff Taking · ${staffBarsForDisplay(staffTakingBars()).map(staffBarIdentityDisplayText).join(' | ') || 'No destination Bars selected'}`;
+  } catch (_) { /* A display refresh cannot affect the Staff session or movement. */ }
+}
+async function hydrateStaffBarRoster({ force = false } = {}) {
+  const context = staffBarRosterContext();
+  if (!context) { staffBarRosterState(); staffBarRosterRefreshLabels(); return false; }
+  const current = staffBarRosterState();
+  if (!force && current.status === 'loading') return false;
+  const requestEpoch = ++STAFF_BAR_ROSTER_EPOCH;
+  STAFF_BAR_ROSTER = { status: 'loading', contextKey: context.key, userRef: context.userRef, barsRef: context.barsRef, requestEpoch, namesByBarId: Object.create(null) };
+  staffBarRosterRefreshLabels();
+  const ownsRequest = () => {
+    const now = staffBarRosterContext();
+    return !!now && now.userRef === context.userRef && now.key === context.key && now.barsRef === context.barsRef && STAFF_BAR_ROSTER.requestEpoch === requestEpoch &&
+      STAFF_BAR_ROSTER.contextKey === context.key && STAFF_BAR_ROSTER.userRef === context.userRef && STAFF_BAR_ROSTER.barsRef === context.barsRef;
+  };
+  const discardObsolete = () => {
+    // A cache/context change can retire this read without starting another one.
+    // Only its still-owned epoch may neutralize its Loading labels.
+    if (STAFF_BAR_ROSTER.requestEpoch === requestEpoch) { staffBarRosterState(); staffBarRosterRefreshLabels(); }
+    return false;
+  };
+  try {
+    const { data, error } = await SB.rpc('staff_bar_display_roster');
+    if (!ownsRequest()) return discardObsolete();
+    if (error) throw new Error('Bartender labels unavailable.');
+    const namesByBarId = staffBarRosterValidate(data, context);
+    if (!ownsRequest()) return discardObsolete();
+    STAFF_BAR_ROSTER = { status: 'ready', contextKey: context.key, userRef: context.userRef, barsRef: context.barsRef, requestEpoch, namesByBarId };
+  } catch (_) {
+    if (!ownsRequest()) return discardObsolete();
+    STAFF_BAR_ROSTER = { status: 'error', contextKey: context.key, userRef: context.userRef, barsRef: context.barsRef, requestEpoch, namesByBarId: Object.create(null) };
+  }
+  staffBarRosterRefreshLabels();
+  return STAFF_BAR_ROSTER.status === 'ready';
+}
+function staffBarRosterObserve() {
+  if (STAFF_BAR_ROSTER_OBSERVED || typeof document === 'undefined') return;
+  const root = document.getElementById('staff-dashboard');
+  if (!root) return;
+  STAFF_BAR_ROSTER_OBSERVED = true;
+  const refresh = () => {
+    if (document.visibilityState !== 'visible' || !root.getClientRects().length) return;
+    void hydrateStaffBarRoster({ force: true });
+  };
+  if (typeof MutationObserver === 'function') new MutationObserver(refresh).observe(root, { attributes: true, attributeFilter: ['data-staff-view'] });
+  document.addEventListener('visibilitychange', refresh);
+  window.addEventListener('pageshow', refresh);
+  refresh();
+}
+if (typeof document !== 'undefined') staffBarRosterObserve();
+// STAFF_BAR_DISPLAY_ROSTER_END
+
 function staffBarDisplayContext(bar) {
   const barId = String(bar?.id || '');
   const assignments = Array.isArray(SESSION.cache.assignments) ? SESSION.cache.assignments : [];
@@ -8805,18 +8952,14 @@ function staffBarDisplayNamesEqual(context) {
 
 // UI-only formatter. Persisted Transfer notes keep staffBarIdentityText unchanged.
 function staffBarIdentityDisplayText(bar) {
-  const context = staffBarDisplayContext(bar);
+  const context = staffBarRosterUiContext(bar);
   const title = staffBarDisplayNamesEqual(context) ? context.barCode : `${context.barCode} — ${context.barDisplayName}`;
-  // Current peer-roster restoration requires the separately reviewed R8 contract.
-  const bartenders = 'Bartender roster unavailable';
-  return `${title} · ${bartenders}`;
+  return `${title} · ${context.bartenderLabel}`;
 }
 
 function staffBarIdentityHtml(bar) {
-  const context = staffBarDisplayContext(bar);
-  // Current peer-roster restoration requires the separately reviewed R8 contract.
-  const bartenders = 'Bartender roster unavailable';
-  return `<span class="staff-bar-identity"><span class="staff-bar-code">${esc(context.barCode)}</span>${staffBarDisplayNamesEqual(context) ? '' : `<span class="staff-bar-display-name">${esc(context.barDisplayName)}</span>`}<span class="staff-bar-bartenders">${esc(bartenders)}</span></span>`;
+  const context = staffBarRosterUiContext(bar);
+  return `<span class="staff-bar-identity" data-staff-bar-identity="${esc(context.barId)}" data-staff-roster-status="${esc(context.rosterStatus)}"><span class="staff-bar-code">${esc(context.barCode)}</span>${staffBarDisplayNamesEqual(context) ? '' : `<span class="staff-bar-display-name">${esc(context.barDisplayName)}</span>`}<span class="staff-bar-bartenders">${esc(context.bartenderLabel)}</span></span>`;
 }
 
 async function hydrateStaffAuthorizedBars(claims, options = {}) {
