@@ -3327,7 +3327,6 @@ th.sortable span { font-size:10px; }
               </details>
               <span id="staff-scale-header-help" class="staff-scale-header-help">Connect the scale, then use its weight at the intended Item. For Opening, choose the exact Item and Bar. Manual grams remain available.</span>
             </div>
-            <button id="staff-screen-refresh" class="btn" type="button" onclick="staffScreenRefresh()">Refresh</button>
           </div>
           <nav class="staff-section-actions" aria-label="Staff workspace navigation">
             <button class="btn" id="staff-section-dashboard" type="button" onclick="staffWorkspaceNavigate('dashboard')" hidden>Dashboard</button>
@@ -3411,7 +3410,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-opening-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('opening')">Cancel</button>
         <button class="btn btn-a" id="staff-opening-save" onclick="saveStaffOpening()">Save / Submit</button>
       </div>
     </div>
@@ -3441,7 +3440,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-taking-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('taking')">Cancel</button>
         <button class="btn btn-a" id="staff-taking-save" onclick="saveStaffTaking()">Save / Submit</button>
       </div>
     </div>
@@ -3466,7 +3465,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-returning-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('returning')">Cancel</button>
         <button class="btn btn-a" id="staff-returning-save" onclick="saveStaffReturning()">Save / Submit</button>
       </div>
     </div>
@@ -3483,7 +3482,7 @@ th.sortable span { font-size:10px; }
         <div class="field"><label>From</label><select id="staff-transfer-source-bar" onchange="staffTransferSourceChanged(this.value)"></select></div>
         <div class="field"><label>To</label><select id="staff-transfer-destination-bar" onchange="staffTransferDestinationChanged(this.value)"></select></div>
         <div class="field"><label>Item</label><select id="staff-transfer-item" onchange="staffTransferItemChanged(this.value)"></select></div>
-        <div class="field"><label>Quantity (whole units)</label><input id="staff-transfer-qty" type="number" min="1" step="1" value="1" onchange="staffTransferQtyChanged(this.value)"></div>
+        <div class="field"><label>Quantity (whole units)</label><input id="staff-transfer-qty" type="number" min="1" step="1" value="" onchange="staffTransferQtyChanged(this.value)"></div>
         <div class="field"><label>Opened bottle grams</label><input id="staff-transfer-weight" type="number" min="0" step="any" placeholder="Manual grams"><button class="btn btn-ghost btn-sm" type="button" onclick="staffTransferApplyWeight()">Apply measured grams</button><button id="staff-transfer-use-current" class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseTransferCurrentWeight()" disabled>USE CURRENT WEIGHT</button></div>
       </div>
       <div id="staff-transfer-error" class="alert alert-err"></div>
@@ -3492,7 +3491,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-transfer-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" onclick="showStaffShellView('dispatch')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('transfer')">Cancel</button>
         <button class="btn btn-a" id="staff-transfer-save" onclick="saveStaffTransfer()">Save / Submit</button>
       </div>
     </div>
@@ -4568,10 +4567,10 @@ function staffWorkspacePresent(view) {
   staffWorkspaceSync();
   requestAnimationFrame(staffWorkspaceSync);
 }
-function staffWorkspaceNavigate(view) {
+function staffWorkspaceNavigate(view, options = {}) {
   const current = document.getElementById('staff-dashboard')?.dataset.staffView;
   if (current === 'scan' && view === 'dashboard') return staffQuickScanExit();
-  showStaffShellView(view);
+  showStaffShellView(view, options);
   requestAnimationFrame(() => {
     window.scrollTo(0, 0);
     const heading = document.getElementById('staff-active-section-name');
@@ -4586,11 +4585,61 @@ function staffWorkspaceOpenMovement(mode) {
   const sameScope = !!current.key && prior && prior.user === current.user && prior.key === current.key;
   const hasDraft = mode === 'opening' ? (STAFF_OPENING_SUBMISSION?.phase !== 'completed' && (!!STAFF_OPENING_SUBMISSION || Object.keys(STAFF_OPENING_STATE).length > 0))
     : mode === 'taking' ? Object.keys(STAFF_TAKING_STATE).length > 0 || Object.keys(staffTakingWeightDrafts()).length > 0
-    : mode === 'transfer' ? !!STAFF_TRANSFER_STATE.itemId && Number(STAFF_TRANSFER_STATE.qty) > 0 : false;
+    : mode === 'transfer' ? !!STAFF_TRANSFER_STATE.itemId || !!STAFF_TRANSFER_STATE.sourceBar || !!STAFF_TRANSFER_STATE.destinationBar : false;
   // Returning owns its pending/draft/history restoration. Fresh/changed scopes use original open paths.
   const result = sameScope && hasDraft && mode !== 'returning' ? showStaffShellView(mode) : open();
   requestAnimationFrame(() => window.scrollTo(0, 0));
   return result;
+}
+function staffWorkspaceCancelMovement(mode) {
+  const current = document.getElementById('staff-dashboard')?.dataset.staffView;
+  if (current !== mode || !['opening', 'taking', 'returning', 'transfer'].includes(mode) || !staffOperationalGuard()) return false;
+  if (mode === 'returning') staffReturningResetObsoleteSubmission();
+  const pending = mode === 'opening' ? STAFF_OPENING_SAVING || !!(STAFF_OPENING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_OPENING_SUBMISSION.phase))
+    : mode === 'taking' ? STAFF_TAKING_SAVING || STAFF_TAKING_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey())
+    : mode === 'returning' ? STAFF_RETURNING_SAVING || !!(STAFF_RETURNING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_RETURNING_SUBMISSION.phase))
+    : STAFF_TRANSFER_SAVING || STAFF_TRANSFER_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey());
+  if (pending) {
+    const message = 'This submission may still be in progress or unverified. Check its status or Log before discarding this draft.';
+    ({ opening: staffOpeningSetError, taking: staffTakingSetError, returning: staffReturningSetError, transfer: staffTransferSetError })[mode](message);
+    return false;
+  }
+  if (mode === 'opening') {
+    STAFF_OPENING_STATE = {};
+    STAFF_OPENING_SUBMISSION = null;
+    staffOpeningSetError('');
+  } else if (mode === 'taking') {
+    staffTakingCloseDetail();
+    STAFF_TAKING_STATE = {};
+    STAFF_TAKING_SELECTED_BARS = [];
+    STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} };
+    STAFF_TAKING_LOOKUP_DOM_CONTEXT = '';
+    for (const [id, value] of [['staff-taking-source', 'Main Liquor Room'], ['staff-taking-ticket', ''], ['staff-taking-note', '']]) {
+      const field = document.getElementById(id);
+      if (field) field.value = value;
+    }
+    staffTakingSetError('');
+  } else if (mode === 'returning') {
+    STAFF_RETURNING_STATE = {};
+    STAFF_RETURNING_SOURCE_BAR = '';
+    STAFF_RETURNING_DOM_DRAFT = { contextKey: '', fields: {}, focus: null };
+    const grid = document.getElementById('staff-returning-grid');
+    if (grid) grid.innerHTML = '';
+    STAFF_RETURNING_SUBMISSION = null;
+    staffReturningSetError('');
+  } else {
+    STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '', measurement: null };
+    for (const id of ['staff-transfer-qty', 'staff-transfer-weight']) {
+      const field = document.getElementById(id);
+      if (field) field.value = '';
+    }
+    staffTransferSetError('');
+  }
+  if (STAFF_ITEM_FILTERS[mode]) { STAFF_ITEM_FILTERS[mode].query = ''; STAFF_ITEM_FILTERS[mode].category = ''; }
+  if (STAFF_SCALE_CONTEXT.mode === mode) STAFF_SCALE_CONTEXT = { mode: '', itemId: '' };
+  // The canceled screen is cleared above; keep any other movement draft intact.
+  staffWorkspaceNavigate('dispatch', { preserveOtherMeasurements: true });
+  return true;
 }
 function staffWorkspaceAction() {
   const root = document.getElementById('staff-dashboard');
@@ -4628,13 +4677,13 @@ function showStaffLanding() {
   showStaffDashboard();
 }
 
-function showStaffShellView(view) {
+function showStaffShellView(view, options = {}) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
   if (view !== 'taking' && typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   staffSetActiveSection(view);
   const scaleMode = ['taking', 'returning', 'transfer'].includes(view) ? view : '';
   const nextScaleView = view === 'dashboard' ? 'dashboard' : scaleMode;
-  if (STAFF_SCALE_ACTIVE_MODE && STAFF_SCALE_ACTIVE_MODE !== nextScaleView) staffScaleClearConfirmedMeasurements();
+  if (!options.preserveOtherMeasurements && STAFF_SCALE_ACTIVE_MODE && STAFF_SCALE_ACTIVE_MODE !== nextScaleView) staffScaleClearConfirmedMeasurements();
   STAFF_SCALE_ACTIVE_MODE = nextScaleView;
   if (view === 'opening') {
     ['dashboard', 'dispatch', 'taking', 'returning', 'transfer', 'scan', 'history', 'help'].forEach(v => document.getElementById('staff-shell-' + v).style.display = 'none');
@@ -5037,6 +5086,11 @@ let STAFF_TAKING_SELECTED_BARS = [];
 let STAFF_TAKING_CONTEXT_KEY = '';
 let STAFF_TAKING_SAVING = false;
 let STAFF_TAKING_ERROR = '';
+function staffUnverifiedWriteScopeKey() {
+  const user = SESSION.user || {};
+  return JSON.stringify([SESSION.venueId || '', user.staff_id || '', user.nightId || '']);
+}
+const STAFF_TAKING_WRITE_UNCERTAIN = new Set();
 
 let STAFF_SCALE_ACTIVE_MODE = '';
 let STAFF_SCALE_LIVE_WEIGHT = null;
@@ -7453,7 +7507,10 @@ function openStaffTaking() {
 
 async function saveStaffTaking() {
   if (STAFF_TAKING_SAVING || !staffOperationalGuard()) return;
+  const writeScope = staffUnverifiedWriteScopeKey();
+  if (STAFF_TAKING_WRITE_UNCERTAIN.has(writeScope)) { staffTakingSetError('A previous Taking response is unverified. Check the Log before another submission.'); return; }
   STAFF_TAKING_SAVING = true;
+  let writeStarted = false;
   const button = document.getElementById('staff-taking-save');
   if (button) button.disabled = true;
   try {
@@ -7473,13 +7530,20 @@ async function saveStaffTaking() {
       const measurementNote = row.measurement ? staffScaleNote(row.measurement) : '';
       return { venue_id: SESSION.venueId, night_id: user.nightId, bar_id: row.bar.id, item_id: row.item.id, qty: row.measurement ? 1 : row.qty, action: row.action, status: 'PENDING', submitted_by: user.name, notes: [noteParts.join(' | '), measurementNote].filter(Boolean).join(' | ') };
     });
+    writeStarted = true;
     const { error } = await SB.from('events').insert(records);
-    if (error) throw new Error(error.message || 'Taking save failed.');
+    if (error) {
+      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) writeStarted = false;
+      throw new Error(error.message || 'Taking save failed.');
+    }
+    writeStarted = false;
+    STAFF_TAKING_WRITE_UNCERTAIN.delete(writeScope);
     STAFF_TAKING_STATE = {};
     staffTakingSetError(`Taking submitted: ${records.length} movement rows across ${new Set(records.map(record => record.bar_id)).size} authorized Bars.`, true);
     renderStaffTaking();
   } catch (error) {
-    staffTakingSetError(error?.message || 'Taking save failed.');
+    if (writeStarted) STAFF_TAKING_WRITE_UNCERTAIN.add(writeScope);
+    staffTakingSetError(writeStarted ? 'Taking response could not be verified. Check the Log before another submission.' : error?.message || 'Taking save failed.');
   } finally {
     STAFF_TAKING_SAVING = false;
     if (button) button.disabled = false;
@@ -8152,7 +8216,7 @@ function staffReturningHasDrafts() {
 function renderStaffReturning() {
   staffReturningCaptureDrafts();
   const bars = staffReturningBars();
-  if (!bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR)) && !staffReturningSourceLocked()) STAFF_RETURNING_SOURCE_BAR = String(bars[0]?.id || '');
+  if (STAFF_RETURNING_SOURCE_BAR && !bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR)) && !staffReturningSourceLocked()) STAFF_RETURNING_SOURCE_BAR = '';
   const source = bars.find(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR));
   const candidates = staffReturningCandidates();
   const context = document.getElementById('staff-returning-context');
@@ -8166,14 +8230,14 @@ function renderStaffReturning() {
   const visibleCandidates = staffRenderItemFilter('returning', candidates, staffReturningItemForCandidate, lookup);
   if (lookup.history.status === 'ready' && (STAFF_SCALE_CONTEXT.mode !== 'returning' || !candidates.some(candidate => String(candidate.itemId) === STAFF_SCALE_CONTEXT.itemId))) STAFF_SCALE_CONTEXT = { mode: 'returning', itemId: String(candidates[0]?.itemId || '') };
   staffScaleRenderWidget('returning');
-  select.innerHTML = bars.length ? (source ? '' : '<option value="" disabled selected>Current source unavailable</option>') + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
+  select.innerHTML = bars.length ? (source ? '' : '<option value="" disabled selected>Choose source Bar</option>') + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}" ${String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR) ? 'selected' : ''}>${esc(staffBarIdentityDisplayText(bar))}</option>`).join('') : '<option value="">No authorized source Bars</option>';
   context.textContent = `${user.nightName || user.nightId || 'Night'} · Approved history · Return to Main Liquor Room`;
   const available = candidates.reduce((sum, row) => sum + row.remaining, 0);
   const rows = staffReturningRows();
   const requested = rows.reduce((sum, row) => sum + row.qty, 0);
   summary.innerHTML = `<div class="stat-card sc-a2" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${source ? esc(source.name) : '—'}</div><div class="stat-lbl">SOURCE BAR</div></div><div class="stat-card sc-a" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${lookup.history.status === 'ready' ? staffFormatQuantity(available) : '—'}</div><div class="stat-lbl">AVAILABLE</div></div><div class="stat-card sc-dim" style="padding:12px 14px;"><div class="stat-val" style="font-size:22px;">${lookup.history.status === 'ready' ? staffFormatQuantity(requested) : '—'}</div><div class="stat-lbl">RETURN QTY</div></div>`;
   if (!source || !bars.length) {
-    grid.innerHTML = '<div class="empty"><div class="empty-text">No authorized source Bars are available.</div></div>';
+    grid.innerHTML = `<div class="empty"><div class="empty-text">${bars.length ? 'Choose a source Bar to load approved return history.' : 'No authorized source Bars are available.'}</div></div>`;
   } else if (lookup.history.status === 'loading') {
     grid.innerHTML = '<div class="empty staff-returning-loading"><div class="empty-text">Loading approved return history. Return eligibility is not yet verified.</div></div>';
   } else if (lookup.history.status === 'idle') {
@@ -8230,9 +8294,13 @@ async function openStaffReturning() {
   if (batch) { STAFF_RETURNING_SUBMISSION = null; staffReturningRenderResult(); }
   if (staffReturningHasDrafts()) { showStaffShellView('returning'); staffReturningSetError('Your unsaved Returning draft is preserved. Review it before switching Bar.'); return; }
   STAFF_RETURNING_STATE = {};
-  STAFF_RETURNING_SOURCE_BAR = String(staffReturningBars()[0]?.id || '');
+  const currentScope = staffWorkspaceScope();
+  const priorScope = STAFF_WORKSPACE_UI.entries.returning;
+  const sameScope = !!currentScope.key && priorScope && priorScope.user === currentScope.user && priorScope.key === currentScope.key;
+  if (!sameScope || !staffReturningBars().some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = '';
   STAFF_RETURNING_ERROR = '';
   showStaffShellView('returning');
+  if (!STAFF_RETURNING_SOURCE_BAR) return;
   try { await hydrateStaffReturningHistory(); renderStaffReturning(); }
   catch (error) { if (!error?.staffLookupStale) staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
 }
@@ -8303,9 +8371,10 @@ async function saveStaffReturning() {
 // TRANSFER Event with source bar_id and destination_bar_id. The client key is
 // retained for the submit attempt so an ambiguous retry cannot intentionally
 // create a second Event with a different identity.
-let STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 1, clientEventId: '' };
+let STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '' };
 let STAFF_TRANSFER_SAVING = false;
 let STAFF_TRANSFER_ERROR = '';
+const STAFF_TRANSFER_WRITE_UNCERTAIN = new Set();
 
 function staffTransferBars() {
   return (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false);
@@ -8368,22 +8437,22 @@ function renderStaffTransfer() {
     if (preview) preview.innerHTML = '<div class="empty-text">Transfer requires at least two authorized Bars and an active Item.</div>';
     return;
   }
-  if (!bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.sourceBar))) STAFF_TRANSFER_STATE.sourceBar = String(bars[0].id);
-  if (!bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.destinationBar)) || String(STAFF_TRANSFER_STATE.destinationBar) === String(STAFF_TRANSFER_STATE.sourceBar)) {
-    STAFF_TRANSFER_STATE.destinationBar = String(bars.find(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar))?.id || '');
-  }
-  if (!items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = String(items[0].id);
-  if (source) source.innerHTML = staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
-  if (destination) destination.innerHTML = staffBarsForDisplay(bars).filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (STAFF_TRANSFER_STATE.sourceBar && !bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.sourceBar))) STAFF_TRANSFER_STATE.sourceBar = '';
+  if (STAFF_TRANSFER_STATE.destinationBar && (!bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.destinationBar)) || String(STAFF_TRANSFER_STATE.destinationBar) === String(STAFF_TRANSFER_STATE.sourceBar))) STAFF_TRANSFER_STATE.destinationBar = '';
+  if (STAFF_TRANSFER_STATE.itemId && !items.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId))) STAFF_TRANSFER_STATE.itemId = '';
+  if (source) source.innerHTML = '<option value="" disabled selected>Choose source Bar</option>' + staffBarsForDisplay(bars).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
+  if (destination) destination.innerHTML = '<option value="" disabled selected>Choose destination Bar</option>' + staffBarsForDisplay(bars).filter(bar => String(bar.id) !== String(STAFF_TRANSFER_STATE.sourceBar)).map(bar => `<option value="${esc(bar.id)}" data-staff-bar-display="${esc(bar.id)}">${esc(staffBarIdentityDisplayText(bar))}</option>`).join('');
   const selectedItemIsVisible = visibleItems.some(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   if (item) {
     item.innerHTML = visibleItems.length
-      ? `${selectedItemIsVisible ? '' : '<option value="" disabled selected>Current selection hidden by filter</option>'}${visibleItems.map(candidate => `<option value="${esc(candidate.id)}">${esc(candidate.name || candidate.id)}</option>`).join('')}`
+      ? `${selectedItemIsVisible ? '' : `<option value="" disabled selected>${STAFF_TRANSFER_STATE.itemId ? 'Current selection hidden by filter' : 'Choose Item'}</option>`}${visibleItems.map(candidate => `<option value="${esc(candidate.id)}">${esc(candidate.name || candidate.id)}</option>`).join('')}`
       : '<option value="" disabled selected>No matching items</option>';
   }
   if (source) source.value = STAFF_TRANSFER_STATE.sourceBar;
   if (destination) destination.value = STAFF_TRANSFER_STATE.destinationBar;
   if (item && selectedItemIsVisible) item.value = STAFF_TRANSFER_STATE.itemId;
+  const qtyInput = document.getElementById('staff-transfer-qty');
+  if (qtyInput) qtyInput.value = Number(STAFF_TRANSFER_STATE.qty) > 0 ? String(STAFF_TRANSFER_STATE.qty) : '';
   const from = bars.find(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.sourceBar));
   const to = bars.find(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.destinationBar));
   const selectedItem = items.find(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
@@ -8441,19 +8510,22 @@ function openStaffTransfer() {
   }
   STAFF_TRANSFER_ERROR = '';
   STAFF_TRANSFER_STATE = {
-    sourceBar: String(staffTransferBars()[0].id),
-    destinationBar: String(staffTransferBars()[1].id),
-    itemId: String(staffTransferItems()[0]?.id || ''),
-    qty: 1,
+    sourceBar: '',
+    destinationBar: '',
+    itemId: '',
+    qty: 0,
     measurement: null,
-    clientEventId: staffTransferClientEventId()
+    clientEventId: ''
   };
   showStaffShellView('transfer');
 }
 
 async function saveStaffTransfer() {
   if (STAFF_TRANSFER_SAVING || !staffOperationalGuard()) return;
+  const writeScope = staffUnverifiedWriteScopeKey();
+  if (STAFF_TRANSFER_WRITE_UNCERTAIN.has(writeScope)) { staffTransferSetError('A previous Transfer response is unverified. Check the Log before another submission.'); return; }
   STAFF_TRANSFER_SAVING = true;
+  let writeStarted = false;
   const button = document.getElementById('staff-transfer-save');
   if (button) button.disabled = true;
   try {
@@ -8475,13 +8547,20 @@ async function saveStaffTransfer() {
       client_event_id: staffTransferClientEventId(),
       notes: [notes, validated.measurement ? staffScaleNote(validated.measurement) : ''].filter(Boolean).join(' | ')
     };
+    writeStarted = true;
     const { error } = await SB.from('events').insert(record);
-    if (error) throw new Error(error.message || 'Transfer save failed.');
+    if (error) {
+      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) writeStarted = false;
+      throw new Error(error.message || 'Transfer save failed.');
+    }
+    writeStarted = false;
+    STAFF_TRANSFER_WRITE_UNCERTAIN.delete(writeScope);
     STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '', measurement: null };
     staffTransferSetError(`Transfer submitted pending review: ${validated.qty}× ${validated.item.name || validated.item.id}.`, true);
     renderStaffTransfer();
   } catch (error) {
-    staffTransferSetError(error?.message || 'Transfer save failed.');
+    if (writeStarted) STAFF_TRANSFER_WRITE_UNCERTAIN.add(writeScope);
+    staffTransferSetError(writeStarted ? 'Transfer response could not be verified. Check the Log before another submission.' : error?.message || 'Transfer save failed.');
   } finally {
     STAFF_TRANSFER_SAVING = false;
     if (button) button.disabled = false;
