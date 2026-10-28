@@ -1757,6 +1757,29 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-taking-detail-dialog .staff-item-card { margin:0 !important; }
 @media (max-width:430px) { #staff-dashboard #staff-taking-grid { grid-template-columns:minmax(0,1fr); } }
 
+/* Opening shares the compact catalog pattern while retaining one control row per authorized Bar. */
+#staff-dashboard #staff-opening-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr)); gap:8px; }
+#staff-dashboard .staff-opening-tile { min-width:0; }
+#staff-dashboard .staff-opening-tile-open { display:flex; align-items:center; gap:9px; width:100%; min-height:64px; padding:7px; border:1px solid var(--border2); border-radius:10px; background:var(--s2); color:var(--text); text-align:left; cursor:pointer; }
+#staff-dashboard .staff-opening-tile-open:focus-visible { outline:3px solid var(--a); outline-offset:2px; }
+#staff-dashboard .staff-opening-tile-open .staff-item-card-image { width:46px; height:46px; flex:none; }
+#staff-dashboard .staff-opening-tile-label { min-width:0; overflow-wrap:anywhere; font-weight:700; line-height:1.25; }
+#staff-dashboard .staff-opening-tile-summary { display:block; margin-top:4px; color:var(--muted); font-size:13px; font-weight:600; }
+#staff-dashboard .staff-opening-detail-dialog { position:fixed; inset:0; width:min(690px,calc(100vw - 16px)); max-width:calc(100vw - 16px); max-height:calc(100dvh - 24px); margin:auto; padding:10px; overflow:auto; overflow-x:hidden; border:1px solid var(--border2); border-radius:12px; background:var(--s1); color:var(--text); box-shadow:0 14px 40px rgba(0,0,0,.4); z-index:10030; }
+#staff-dashboard .staff-opening-detail-dialog:not([open]) { display:none; }
+#staff-dashboard .staff-opening-detail-dialog::backdrop { background:rgba(5,12,25,.7); }
+#staff-dashboard .staff-opening-detail-top { position:sticky; top:-10px; z-index:1; display:flex; justify-content:flex-end; margin:-10px -10px 8px; padding:10px; background:var(--s1); border-bottom:1px solid var(--border); }
+#staff-dashboard .staff-opening-detail-top .btn { min-width:64px; min-height:44px; }
+#staff-dashboard .staff-opening-detail-dialog .staff-item-card { margin:0 !important; min-width:0; }
+#staff-dashboard .staff-opening-bar-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; min-width:0; padding:7px 0; border-top:1px solid var(--border); }
+#staff-dashboard .staff-opening-bar-row .staff-bar-identity { min-width:0; overflow-wrap:anywhere; }
+#staff-dashboard .staff-opening-bar-quantity { display:flex; align-items:center; gap:4px; min-width:0; }
+#staff-dashboard .staff-opening-bar-quantity .btn { min-width:44px; min-height:44px; }
+#staff-dashboard .staff-opening-bar-quantity input { min-width:64px; }
+#staff-dashboard .staff-opening-detail-dialog .staff-card-scale { min-width:0; }
+#staff-dashboard .staff-taking-tile-net { display:inline-block; margin:0 0 0 8px; padding:3px 8px; border-radius:6px; background:var(--a); color:#1b1504; font-size:14px; font-weight:800; white-space:nowrap; }
+@media (max-width:430px) { #staff-dashboard #staff-opening-grid { grid-template-columns:minmax(0,1fr); } }
+
 /* STAFF_ACCEPTANCE_HEADER_OPENING_CSS_START — shared controls, no additional action path. */
 #staff-dashboard .staff-active-section-inner { justify-content:flex-start; gap:8px; }
 #staff-dashboard .staff-active-section[data-section] .staff-section-heading { display:block; flex:1 1 100%; width:100%; }
@@ -4583,7 +4606,7 @@ function staffWorkspaceOpenMovement(mode) {
   const current = staffWorkspaceScope();
   const prior = STAFF_WORKSPACE_UI.entries[mode];
   const sameScope = !!current.key && prior && prior.user === current.user && prior.key === current.key;
-  const hasDraft = mode === 'opening' ? (STAFF_OPENING_SUBMISSION?.phase !== 'completed' && (!!STAFF_OPENING_SUBMISSION || Object.keys(STAFF_OPENING_STATE).length > 0))
+  const hasDraft = mode === 'opening' ? (STAFF_OPENING_SUBMISSION?.phase !== 'completed' && (!!STAFF_OPENING_SUBMISSION || Object.keys(STAFF_OPENING_STATE).length > 0 || Object.values(staffOpeningDomDrafts()).some(field => Object.keys(field).length > 0)))
     : mode === 'taking' ? Object.keys(STAFF_TAKING_STATE).length > 0 || Object.keys(staffTakingWeightDrafts()).length > 0
     : mode === 'transfer' ? !!STAFF_TRANSFER_STATE.itemId || !!STAFF_TRANSFER_STATE.sourceBar || !!STAFF_TRANSFER_STATE.destinationBar : false;
   // Returning owns its pending/draft/history restoration. Fresh/changed scopes use original open paths.
@@ -4605,7 +4628,10 @@ function staffWorkspaceCancelMovement(mode) {
     return false;
   }
   if (mode === 'opening') {
+    staffOpeningCloseDetail();
     STAFF_OPENING_STATE = {};
+    STAFF_OPENING_DOM_DRAFT = { contextKey: '', fields: {} };
+    STAFF_OPENING_DETAIL_ID = '';
     STAFF_OPENING_SUBMISSION = null;
     staffOpeningSetError('');
   } else if (mode === 'taking') {
@@ -4680,6 +4706,7 @@ function showStaffLanding() {
 function showStaffShellView(view, options = {}) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
   if (view !== 'taking' && typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
+  if (view !== 'opening' && typeof staffOpeningCloseDetail === 'function') staffOpeningCloseDetail();
   staffSetActiveSection(view);
   const scaleMode = ['taking', 'returning', 'transfer'].includes(view) ? view : '';
   const nextScaleView = view === 'dashboard' ? 'dashboard' : scaleMode;
@@ -4730,6 +4757,8 @@ function isAdminSession() {
 }
 
 let STAFF_OPENING_STATE = {};
+let STAFF_OPENING_DETAIL_ID = '';
+let STAFF_OPENING_DOM_DRAFT = { contextKey: '', fields: {} };
 let STAFF_OPENING_SAVING = false;
 let STAFF_OPENING_ERROR = '';
 let STAFF_OPENING_ERROR_OK = false;
@@ -4895,6 +4924,21 @@ function staffOpeningMeasurement(itemId, barId) {
   return value && typeof value === 'object' ? value.measurement || null : null;
 }
 
+function staffOpeningDomDrafts() {
+  const key = staffOpeningContext()?.key || '';
+  if (STAFF_OPENING_DOM_DRAFT.contextKey !== key) {
+    STAFF_OPENING_DOM_DRAFT = { contextKey: key, fields: {} };
+    STAFF_OPENING_DETAIL_ID = '';
+  }
+  return STAFF_OPENING_DOM_DRAFT.fields;
+}
+
+function staffOpeningDomDraft(itemId, barId) {
+  const key = staffOpeningKey(itemId, barId);
+  const fields = staffOpeningDomDrafts();
+  return fields[key] || (fields[key] = {});
+}
+
 function staffOpeningRows() {
   const rows = [];
   staffOpeningItems().forEach(item => staffOpeningBars().forEach(bar => {
@@ -4931,6 +4975,8 @@ window.staffOpeningAdjust = function(itemId, barId, delta) {
   const bar = staffOpeningBars().find(candidate => String(candidate.id) === String(barId));
   if (!item || !bar) { staffOpeningSetError('That Opening Item or destination Bar is not authorized.'); return; }
   const key = staffOpeningKey(itemId, barId);
+  if (staffOpeningMeasurement(itemId, barId)) delete staffOpeningDomDraft(itemId, barId).grams;
+  delete staffOpeningDomDraft(itemId, barId).qty;
   const current = Object.prototype.hasOwnProperty.call(STAFF_OPENING_STATE, key) ? Number(staffOpeningQuantity(item, bar)) : Number(item.par_level);
   STAFF_OPENING_STATE[key] = Math.max(0, Math.round((current + Number(delta || 0)) * 100) / 100);
   staffOpeningSetError('');
@@ -4944,6 +4990,8 @@ window.staffOpeningInput = function(itemId, barId, value) {
     staffOpeningSetError('Opening quantity must be a finite number that is zero or greater.');
     return;
   }
+  if (staffOpeningMeasurement(itemId, barId)) delete staffOpeningDomDraft(itemId, barId).grams;
+  delete staffOpeningDomDraft(itemId, barId).qty;
   STAFF_OPENING_STATE[staffOpeningKey(itemId, barId)] = Math.round(n * 100) / 100;
   staffOpeningSetError('');
   renderStaffOpening();
@@ -4957,7 +5005,9 @@ function staffOpeningApplyWeight(itemId, barId, rawWeight = null) {
   try {
     if (!item || !bar) throw new Error('Opening Item or destination Bar is outside the Staff scope.');
     const measurement = { ...staffScaleCalculate(item, rawWeight == null ? input?.value : rawWeight), source: rawWeight == null ? 'manual' : 'ble' };
-    STAFF_OPENING_STATE[staffOpeningKey(itemId, barId)] = { qty: measurement.qty, measurement };
+    const key = staffOpeningKey(itemId, barId);
+    STAFF_OPENING_STATE[key] = { qty: measurement.qty, measurement };
+    staffOpeningDomDrafts()[key] = { grams: String(measurement.weightG) };
     staffOpeningSetError('Measured opening bottle applied. Review the preview before Save.', true);
     try { StaffVoiceGuide.announce('weight', { itemName: item?.name }); } catch (_) {}
     renderStaffOpening();
@@ -4974,6 +5024,76 @@ function staffOpeningBarSummary(bars) {
     : labels.join(' | ');
 }
 
+function staffOpeningDecorateCards(items, bars) {
+  const grid = document.getElementById('staff-opening-grid');
+  if (!grid) return;
+  Array.from(grid.children).forEach((card, index) => {
+    const item = items[index];
+    if (!item || !card.classList.contains('staff-item-card')) return;
+    card.dataset.staffItemId = String(item.id);
+    for (const input of card.querySelectorAll('input[data-staff-bar-aria]')) {
+      const barId = String(input.dataset.staffBarAria || '');
+      if (!bars.some(bar => String(bar.id) === barId)) continue;
+      const draft = staffOpeningDomDrafts()[staffOpeningKey(item.id, barId)] || {};
+      if (input.id.startsWith('staff-opening-weight-')) {
+        if (Object.prototype.hasOwnProperty.call(draft, 'grams')) input.value = draft.grams;
+        input.addEventListener('input', () => { staffOpeningDomDraft(item.id, barId).grams = input.value; });
+        const buttons = input.parentElement?.querySelectorAll('button') || [];
+        if (buttons[0]) buttons[0].id = `staff-opening-apply-${item.id}-${barId}`;
+        if (buttons[1]) buttons[1].id = `staff-opening-use-${item.id}-${barId}`;
+      } else {
+        input.id = `staff-opening-qty-${item.id}-${barId}`;
+        if (Object.prototype.hasOwnProperty.call(draft, 'qty')) input.value = draft.qty;
+        input.addEventListener('input', () => { staffOpeningDomDraft(item.id, barId).qty = input.value; });
+        const buttons = input.parentElement?.querySelectorAll('button') || [];
+        if (buttons[0]) buttons[0].id = `staff-opening-minus-${item.id}-${barId}`;
+        if (buttons[1]) buttons[1].id = `staff-opening-plus-${item.id}-${barId}`;
+        input.parentElement?.classList.add('staff-opening-bar-quantity');
+        input.parentElement?.parentElement?.classList.add('staff-opening-bar-row');
+      }
+    }
+    const total = bars.reduce((sum, bar) => sum + Number(staffOpeningQuantity(item, bar)), 0);
+    const tile = document.createElement('div');
+    tile.className = 'staff-opening-tile';
+    tile.dataset.staffItemId = String(item.id);
+    tile.innerHTML = `<button class="staff-opening-tile-open" type="button" aria-label="Opening details for ${esc(item.name)}">${staffDispatchItemImage(item)}<span class="staff-opening-tile-label">${esc(item.name)}<span class="staff-opening-tile-summary">Total ${esc(staffFormatQuantity(total))} · ${bars.length} ${bars.length === 1 ? 'Bar' : 'Bars'}</span></span></button>`;
+    tile.querySelector('.staff-opening-tile-open').addEventListener('click', () => staffOpeningOpenDetail(item.id));
+    const dialog = document.createElement('dialog');
+    dialog.className = 'staff-opening-detail-dialog';
+    dialog.dataset.staffItemId = String(item.id);
+    dialog.setAttribute('aria-label', `Opening details for ${item.name}`);
+    dialog.addEventListener('close', () => {
+      if (!dialog.isConnected) return;
+      if (STAFF_OPENING_DETAIL_ID === String(item.id)) STAFF_OPENING_DETAIL_ID = '';
+      const opener = tile.querySelector('.staff-opening-tile-open');
+      if (opener?.getClientRects().length) opener.focus({ preventScroll: true });
+    });
+    const top = document.createElement('div');
+    top.className = 'staff-opening-detail-top';
+    top.innerHTML = '<button class="btn btn-ghost btn-sm" type="button">DONE</button>';
+    top.querySelector('button').id = `staff-opening-done-${item.id}`;
+    top.querySelector('button').addEventListener('click', staffOpeningCloseDetail);
+    dialog.appendChild(top);
+    dialog.appendChild(card);
+    tile.appendChild(dialog);
+    grid.appendChild(tile);
+  });
+}
+
+function staffOpeningOpenDetail(itemId) {
+  if (!staffOperationalGuard()) return;
+  const dialog = Array.from(document.querySelectorAll('#staff-opening-grid .staff-opening-detail-dialog')).find(el => el.dataset.staffItemId === String(itemId));
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  STAFF_OPENING_DETAIL_ID = String(itemId);
+  if (!dialog.open) dialog.showModal();
+}
+
+function staffOpeningCloseDetail() {
+  const dialog = document.querySelector('#staff-opening-grid .staff-opening-detail-dialog[open]');
+  STAFF_OPENING_DETAIL_ID = '';
+  if (dialog) dialog.close();
+}
+
 function renderStaffOpening() {
   const bars = staffBarsForDisplay(staffOpeningBars());
   const items = staffOpeningItems();
@@ -4983,6 +5103,12 @@ function renderStaffOpening() {
   const grid = document.getElementById('staff-opening-grid');
   const preview = document.getElementById('staff-opening-preview');
   if (!context || !summary || !grid || !preview) return;
+  const sameContext = STAFF_OPENING_DOM_DRAFT.contextKey === (staffOpeningContext()?.key || '');
+  staffOpeningDomDrafts();
+  const priorDetail = grid.querySelector('.staff-opening-detail-dialog[open]');
+  const detailId = sameContext ? (priorDetail?.dataset.staffItemId || STAFF_OPENING_DETAIL_ID) : '';
+  const focusId = priorDetail?.contains(document.activeElement) ? document.activeElement.id : '';
+  if (priorDetail) priorDetail.close();
   const visibleItems = staffRenderItemFilter('opening', items);
   staffScaleRenderWidget('opening');
   context.textContent = `${user.nightName || user.nightId || 'Night'} · ${staffOpeningBarSummary(bars)}`;
@@ -4997,8 +5123,15 @@ function renderStaffOpening() {
     grid.innerHTML = '<div class="empty"><div class="empty-text">No matching items</div></div>';
   } else {
     grid.innerHTML = visibleItems.map(item => `<div class="panel staff-item-card" style="padding:14px;margin-bottom:10px;"><div class="staff-item-card-head">${staffDispatchItemImage(item)}<div><div class="staff-item-name">${esc(item.name)}</div><div class="staff-item-meta">${esc(staffDispatchItemMeta(item))}</div><div class="staff-item-net">PAR ${esc(staffFormatQuantity(item.par_level))}</div></div></div>${bars.map(bar => { const value = staffOpeningQuantity(item, bar); const measurement = staffOpeningMeasurement(item.id, bar.id); const profile = staffScaleProfile(item); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--border);"><span style="font-size:12px;color:var(--muted);">${staffBarIdentityHtml(bar)}</span><div style="display:flex;align-items:center;gap:4px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',-1)">−</button><input type="number" min="0" step="any" value="${esc(staffFormatQuantity(value))}" data-staff-bar-aria="${esc(bar.id)}" data-staff-bar-aria-prefix="Opening ${esc(item.name)} " aria-label="Opening ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}" onchange="staffOpeningInput('${esc(item.id)}','${esc(bar.id)}',this.value)" style="width:70px;padding:7px;background:var(--s2);border:1px solid var(--border);color:var(--text);font-family:'Fira Mono',monospace;text-align:center;font-size:15px;"><button class="btn btn-ghost btn-xs" type="button" onclick="staffOpeningAdjust('${esc(item.id)}','${esc(bar.id)}',1)">+</button></div></div>${profile ? `<div class="staff-card-scale"><label data-staff-bar-display="${esc(bar.id)}" data-staff-bar-prefix="OPEN BOTTLE · ">OPEN BOTTLE · ${esc(staffBarIdentityDisplayText(bar))}</label><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input type="number" min="${esc(String(profile.tareG))}" max="${esc(String(profile.fullG))}" step="any" id="staff-opening-weight-${esc(item.id)}-${esc(bar.id)}" placeholder="grams" data-staff-bar-aria="${esc(bar.id)}" data-staff-bar-aria-prefix="Opening measured grams ${esc(item.name)} " aria-label="Opening measured grams ${esc(item.name)} ${esc(staffBarIdentityDisplayText(bar))}"><button class="btn btn-ghost btn-sm" type="button" onclick="staffOpeningApplyWeight('${esc(item.id)}','${esc(bar.id)}')">Apply grams</button><button class="btn btn-a2 btn-sm" type="button" onclick="staffScaleUseCurrentWeight('opening','${esc(item.id)}::${esc(bar.id)}')">USE CURRENT WEIGHT</button></div>${measurement ? `<div class="staff-item-meta">${esc(staffScaleMeasurementSummary(item, measurement))}</div>` : ''}</div>` : ''}`; }).join('')}</div>`).join('');
-    Array.from(grid.children).forEach((card, index) => { if (visibleItems[index]) card.dataset.staffItemId = String(visibleItems[index].id); });
+    staffOpeningDecorateCards(visibleItems, bars);
   }
+  if (detailId && visibleItems.some(item => String(item.id) === detailId)) {
+    staffOpeningOpenDetail(detailId);
+    if (focusId) {
+      const control = document.getElementById(focusId);
+      if (control?.closest('.staff-opening-detail-dialog[open]')) control.focus({ preventScroll: true });
+    }
+  } else STAFF_OPENING_DETAIL_ID = '';
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Quantity</th><th>Mode</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar" data-staff-bar-display="${esc(row.bar.id)}">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td><td data-label="Mode">${row.measurement ? 'MEASURED PARTIAL' : 'UNIT'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Opening quantities recorded yet.</div>';
   staffOpeningSetError(STAFF_OPENING_ERROR, STAFF_OPENING_ERROR_OK);
   staffOpeningUpdateSaveButton();
@@ -5009,6 +5142,8 @@ function openStaffOpening() {
   staffOpeningResetObsoleteSubmission();
   if (!STAFF_OPENING_SUBMISSION || STAFF_OPENING_SUBMISSION.phase === 'completed') {
     STAFF_OPENING_STATE = {};
+    STAFF_OPENING_DOM_DRAFT = { contextKey: '', fields: {} };
+    STAFF_OPENING_DETAIL_ID = '';
     STAFF_OPENING_SUBMISSION = null;
     staffOpeningSetError('');
   }
@@ -6845,8 +6980,12 @@ function staffScannerFocusExistingAction(mode, item) {
       control?.focus?.({ preventScroll: true });
       return;
     }
-    const card = Array.from(document.querySelectorAll('[data-staff-item-id]')).find(candidate => String(candidate.dataset.staffItemId) === id);
+    const candidates = mode === 'opening'
+      ? document.querySelectorAll('#staff-opening-grid [data-staff-item-id]')
+      : document.querySelectorAll('[data-staff-item-id]');
+    const card = Array.from(candidates).find(candidate => String(candidate.dataset.staffItemId) === id);
     if (!card) return;
+    if (mode === 'opening') staffOpeningOpenDetail(id);
     const selector = STAFF_SCANNER.actionMode === 'WEIGH'
       ? 'input[id^="staff-opening-weight-"], input[id^="staff-taking-weight-"], input[id^="staff-returning-weight-"]'
       : 'input[aria-label^="Opening "], input[aria-label^="Taking quantity"], input[aria-label^="Return "]';
@@ -7384,7 +7523,7 @@ function staffDispatchDecorateTakingCards(items) {
     card.insertAdjacentHTML('beforeend', `<div class="staff-item-actions"><button class="btn btn-sm staff-action-take" type="button" onclick="staffTakingApply('${esc(item.id)}','taken')">+ TAKEN</button><button class="btn btn-sm staff-action-take" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',5)">+5</button><button class="btn btn-sm btn-ghost staff-action-comp" type="button" onclick="staffTakingApply('${esc(item.id)}','comp')">COMP</button><button class="btn btn-sm staff-action-transfer" type="button" onclick="openStaffTransferForItem('${esc(item.id)}')">TRANSFER</button><button class="btn btn-sm staff-action-reset" type="button" onclick="staffDispatchResetItem('taking','${esc(item.id)}')">RESET</button></div>${staffDispatchSwitchMarkup('taking', STAFF_TAKING_SELECTED_BARS[0])}`);
     const tile = document.createElement('div');
     tile.className = 'staff-taking-tile';
-    const count = net || state.measurement ? `<span class="staff-taking-tile-count">${state.measurement ? 'Measured · ' : ''}NET ${esc(staffFormatQuantity(net))}</span>` : '';
+    const count = `<span class="staff-taking-tile-net">NET ${esc(staffFormatQuantity(net))}</span>${state.measurement ? '<span class="staff-taking-tile-count">Measured</span>' : ''}`;
     tile.innerHTML = `<button class="staff-taking-tile-open" type="button" onclick="staffTakingOpenDetail('${esc(item.id)}')" aria-label="Details for ${esc(item.name)}">${staffDispatchItemImage(item)}<span class="staff-taking-tile-name">${esc(item.name)}${count}</span></button><button class="staff-taking-tile-adjust staff-taking-tile-adjust-decrease" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',-1)" aria-label="Remove one Taken ${esc(item.name)}">−</button><button class="staff-taking-tile-adjust" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',1)" aria-label="Add one Taken ${esc(item.name)}">+</button>`;
     const dialog = document.createElement('dialog');
     dialog.className = 'staff-taking-detail-dialog';
