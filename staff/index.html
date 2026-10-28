@@ -1739,6 +1739,24 @@ th.sortable span { font-size:10px; }
 #staff-dashboard.staff-header-flow #staff-taking-error { scroll-margin-top:12px; }
 /* STAFF_TAKING_COMPACT_CSS_END */
 
+/* Compact Taking catalog; the existing movement card lives in its detail dialog. */
+#staff-dashboard #staff-taking-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr)); gap:8px; }
+#staff-dashboard .staff-taking-tile { display:flex; align-items:stretch; gap:6px; min-width:0; }
+#staff-dashboard .staff-taking-tile-open { display:flex; align-items:center; gap:9px; flex:1 1 auto; min-width:0; min-height:64px; padding:7px; border:1px solid var(--border2); border-radius:10px; background:var(--s2); color:var(--text); text-align:left; cursor:pointer; }
+#staff-dashboard .staff-taking-tile-open:focus-visible, #staff-dashboard .staff-taking-tile-add:focus-visible { outline:3px solid var(--a); outline-offset:2px; }
+#staff-dashboard .staff-taking-tile-open .staff-item-card-image { width:46px; height:46px; }
+#staff-dashboard .staff-taking-tile-name { min-width:0; overflow-wrap:anywhere; font-weight:700; line-height:1.25; }
+#staff-dashboard .staff-taking-tile-count { display:block; margin-top:3px; color:var(--muted); font-size:11px; }
+#staff-dashboard .staff-taking-tile-adjust { min-width:44px; min-height:44px; align-self:center; padding:5px; border:1px solid var(--border2); border-radius:8px; background:var(--a); color:#1b1504; font-weight:700; cursor:pointer; }
+#staff-dashboard .staff-taking-tile-adjust-decrease { background:var(--s2); color:var(--text); }
+#staff-dashboard .staff-taking-detail-dialog { position:fixed; inset:0; width:min(610px,calc(100vw - 16px)); max-width:calc(100vw - 16px); max-height:calc(100dvh - 24px); margin:auto; padding:10px; overflow:auto; border:1px solid var(--border2); border-radius:12px; background:var(--s1); color:var(--text); box-shadow:0 14px 40px rgba(0,0,0,.4); z-index:10030; }
+#staff-dashboard .staff-taking-detail-dialog:not([open]) { display:none; }
+#staff-dashboard .staff-taking-detail-dialog::backdrop { background:rgba(5,12,25,.7); }
+#staff-dashboard .staff-taking-detail-top { display:flex; justify-content:flex-end; margin-bottom:8px; }
+#staff-dashboard .staff-taking-detail-top .btn { min-width:44px; min-height:44px; }
+#staff-dashboard .staff-taking-detail-dialog .staff-item-card { margin:0 !important; }
+@media (max-width:430px) { #staff-dashboard #staff-taking-grid { grid-template-columns:minmax(0,1fr); } }
+
 /* STAFF_ACCEPTANCE_HEADER_OPENING_CSS_START — shared controls, no additional action path. */
 #staff-dashboard .staff-active-section-inner { justify-content:flex-start; gap:8px; }
 #staff-dashboard .staff-active-section[data-section] .staff-section-heading { display:block; flex:1 1 100%; width:100%; }
@@ -4231,6 +4249,7 @@ function resetConfig() {
 // SCREENS
 // ══════════════════════════════════════════════════════
 function showSetupWizard() {
+  if (typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'flex';
   document.getElementById('login-screen').style.display = 'none';
@@ -4240,6 +4259,7 @@ function showSetupWizard() {
 }
 
 function showLoginScreen() {
+  if (typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
@@ -4253,6 +4273,7 @@ function showLoginScreen() {
 }
 
 function showApp() {
+  if (typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   if (typeof staffVoiceSettingsClose === 'function') staffVoiceSettingsClose(false);
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'none';
@@ -4609,6 +4630,7 @@ function showStaffLanding() {
 
 function showStaffShellView(view) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
+  if (view !== 'taking' && typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   staffSetActiveSection(view);
   const scaleMode = ['taking', 'returning', 'transfer'].includes(view) ? view : '';
   const nextScaleView = view === 'dashboard' ? 'dashboard' : scaleMode;
@@ -7306,7 +7328,38 @@ function staffDispatchDecorateTakingCards(items) {
     if (weightInput?.parentElement) weightInput.parentElement.classList.add('staff-card-scale');
     Array.from(card.children).filter(child => /^Taken:/i.test(String(child.textContent || '').trim())).forEach(child => { child.style.display = 'none'; });
     card.insertAdjacentHTML('beforeend', `<div class="staff-item-actions"><button class="btn btn-sm staff-action-take" type="button" onclick="staffTakingApply('${esc(item.id)}','taken')">+ TAKEN</button><button class="btn btn-sm staff-action-take" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',5)">+5</button><button class="btn btn-sm btn-ghost staff-action-comp" type="button" onclick="staffTakingApply('${esc(item.id)}','comp')">COMP</button><button class="btn btn-sm staff-action-transfer" type="button" onclick="openStaffTransferForItem('${esc(item.id)}')">TRANSFER</button><button class="btn btn-sm staff-action-reset" type="button" onclick="staffDispatchResetItem('taking','${esc(item.id)}')">RESET</button></div>${staffDispatchSwitchMarkup('taking', STAFF_TAKING_SELECTED_BARS[0])}`);
+    const tile = document.createElement('div');
+    tile.className = 'staff-taking-tile';
+    const count = net || state.measurement ? `<span class="staff-taking-tile-count">${state.measurement ? 'Measured · ' : ''}NET ${esc(staffFormatQuantity(net))}</span>` : '';
+    tile.innerHTML = `<button class="staff-taking-tile-open" type="button" onclick="staffTakingOpenDetail('${esc(item.id)}')" aria-label="Details for ${esc(item.name)}">${staffDispatchItemImage(item)}<span class="staff-taking-tile-name">${esc(item.name)}${count}</span></button><button class="staff-taking-tile-adjust staff-taking-tile-adjust-decrease" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',-1)" aria-label="Remove one Taken ${esc(item.name)}">−</button><button class="staff-taking-tile-adjust" type="button" onclick="staffTakingAdjust('${esc(item.id)}','taken',1)" aria-label="Add one Taken ${esc(item.name)}">+</button>`;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'staff-taking-detail-dialog';
+    dialog.dataset.staffItemId = String(item.id);
+    dialog.setAttribute('aria-label', `Taking details for ${item.name}`);
+    dialog.addEventListener('close', () => {
+      if (!dialog.isConnected) return;
+      if (STAFF_TAKING_DETAIL_ID === String(item.id)) STAFF_TAKING_DETAIL_ID = '';
+      const opener = dialog.parentElement?.querySelector('.staff-taking-tile-open');
+      if (opener?.getClientRects().length) opener.focus({ preventScroll: true });
+    });
+    dialog.insertAdjacentHTML('afterbegin', '<div class="staff-taking-detail-top"><button class="btn btn-ghost btn-sm" type="button" onclick="staffTakingCloseDetail()">DONE</button></div>');
+    dialog.appendChild(card);
+    tile.appendChild(dialog);
+    grid.appendChild(tile);
   });
+}
+
+let STAFF_TAKING_DETAIL_ID = '';
+function staffTakingOpenDetail(itemId) {
+  const dialog = Array.from(document.querySelectorAll('#staff-taking-grid .staff-taking-detail-dialog')).find(el => el.dataset.staffItemId === String(itemId));
+  if (!dialog || typeof dialog.showModal !== 'function') return;
+  STAFF_TAKING_DETAIL_ID = String(itemId);
+  if (!dialog.open) dialog.showModal();
+}
+function staffTakingCloseDetail() {
+  const dialog = document.querySelector('#staff-taking-grid .staff-taking-detail-dialog[open]');
+  STAFF_TAKING_DETAIL_ID = '';
+  if (dialog) dialog.close();
 }
 
 function staffDispatchDecorateReturningCards(candidates, source) {
@@ -7346,6 +7399,8 @@ function renderStaffTaking() {
   const grid = document.getElementById('staff-taking-grid');
   const preview = document.getElementById('staff-taking-preview');
   if (!context || !barEl || !summary || !grid || !preview) return;
+  const priorDetail = grid.querySelector('.staff-taking-detail-dialog[open]');
+  if (priorDetail) priorDetail.close();
   STAFF_TAKING_LOOKUP_DOM_CONTEXT = staffTakingLookupDraftContextKey();
   const visibleItems = staffRenderItemFilter('taking', items);
   if (STAFF_SCALE_CONTEXT.mode !== 'taking' || !items.some(item => String(item.id) === STAFF_SCALE_CONTEXT.itemId)) STAFF_SCALE_CONTEXT = { mode: 'taking', itemId: String(items[0]?.id || '') };
@@ -7373,6 +7428,11 @@ function renderStaffTaking() {
     }).join('');
   }
   staffDispatchDecorateTakingCards(visibleItems);
+  if (STAFF_TAKING_DETAIL_ID) {
+    const stillVisible = visibleItems.some(item => String(item.id) === STAFF_TAKING_DETAIL_ID);
+    if (stillVisible) staffTakingOpenDetail(STAFF_TAKING_DETAIL_ID);
+    else STAFF_TAKING_DETAIL_ID = '';
+  }
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar" data-staff-bar-display="${esc(row.bar.id)}">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Action">${esc(row.action)}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
   staffTakingSetError(STAFF_TAKING_ERROR);
 }
