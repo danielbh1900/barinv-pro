@@ -1780,6 +1780,28 @@ th.sortable span { font-size:10px; }
 #staff-dashboard .staff-taking-tile-net { display:inline-block; margin:0 0 0 8px; padding:3px 8px; border-radius:6px; background:var(--a); color:#1b1504; font-size:14px; font-weight:800; white-space:nowrap; }
 @media (max-width:430px) { #staff-dashboard #staff-opening-grid { grid-template-columns:minmax(0,1fr); } }
 
+/* Returning keeps its verified per-Item controls inside a compact, source-scoped detail. */
+#staff-dashboard #staff-returning-grid { grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr)); gap:8px; }
+#staff-dashboard #staff-returning-grid > :not(.staff-returning-tile) { grid-column:1 / -1; }
+#staff-dashboard .staff-returning-tile { min-width:0; }
+#staff-dashboard .staff-returning-tile-open { display:flex; align-items:center; gap:9px; width:100%; min-width:0; min-height:64px; padding:7px; border:1px solid var(--border2); border-radius:10px; background:var(--s2); color:var(--text); text-align:left; cursor:pointer; }
+#staff-dashboard .staff-returning-tile-open:focus-visible { outline:3px solid var(--a); outline-offset:2px; }
+#staff-dashboard .staff-returning-tile-open .staff-item-card-image { width:46px; height:46px; flex:none; }
+#staff-dashboard .staff-returning-tile-label { min-width:0; overflow-wrap:anywhere; font-weight:700; line-height:1.25; }
+#staff-dashboard .staff-returning-tile-summary { display:block; margin-top:4px; color:var(--muted); font-size:13px; font-weight:600; }
+#staff-dashboard .staff-returning-tile-status { display:block; margin-top:3px; color:#28784e; font-size:11px; font-weight:700; }
+#staff-dashboard .staff-returning-tile-history .staff-returning-tile-status { color:var(--muted); }
+#staff-dashboard .staff-returning-detail-dialog { position:fixed; inset:0; width:min(690px,calc(100vw - 16px)); max-width:calc(100vw - 16px); max-height:calc(100dvh - 24px); margin:auto; padding:10px; overflow:auto; overflow-x:hidden; border:1px solid var(--border2); border-radius:12px; background:var(--s1); color:var(--text); box-shadow:0 14px 40px rgba(0,0,0,.4); z-index:10030; }
+#staff-dashboard .staff-returning-detail-dialog:not([open]) { display:none; }
+#staff-dashboard .staff-returning-detail-dialog::backdrop { background:rgba(5,12,25,.7); }
+#staff-dashboard .staff-returning-detail-top { position:sticky; top:-10px; z-index:1; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:-10px -10px 8px; padding:10px; background:var(--s1); border-bottom:1px solid var(--border); }
+#staff-dashboard .staff-returning-detail-top .btn { min-width:64px; min-height:44px; }
+#staff-dashboard .staff-returning-detail-source { min-width:0; overflow-wrap:anywhere; font-size:12px; }
+#staff-dashboard .staff-returning-detail-dialog .staff-item-card { margin:0 !important; min-width:0; }
+#staff-dashboard .staff-returning-detail-dialog :is(input,select) { max-width:100%; min-height:44px; }
+#staff-dashboard .staff-returning-detail-dialog .btn { min-height:44px; }
+@media (max-width:430px) { #staff-dashboard #staff-returning-grid { grid-template-columns:minmax(0,1fr); } }
+
 /* STAFF_ACCEPTANCE_HEADER_OPENING_CSS_START — shared controls, no additional action path. */
 #staff-dashboard .staff-active-section-inner { justify-content:flex-start; gap:8px; }
 #staff-dashboard .staff-active-section[data-section] .staff-section-heading { display:block; flex:1 1 100%; width:100%; }
@@ -4646,6 +4668,7 @@ function staffWorkspaceCancelMovement(mode) {
     }
     staffTakingSetError('');
   } else if (mode === 'returning') {
+    staffReturningCloseDetail();
     STAFF_RETURNING_STATE = {};
     STAFF_RETURNING_SOURCE_BAR = '';
     STAFF_RETURNING_DOM_DRAFT = { contextKey: '', fields: {}, focus: null };
@@ -4707,6 +4730,7 @@ function showStaffShellView(view, options = {}) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
   if (view !== 'taking' && typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   if (view !== 'opening' && typeof staffOpeningCloseDetail === 'function') staffOpeningCloseDetail();
+  if (view !== 'returning' && typeof staffReturningCloseDetail === 'function') staffReturningCloseDetail();
   staffSetActiveSection(view);
   const scaleMode = ['taking', 'returning', 'transfer'].includes(view) ? view : '';
   const nextScaleView = view === 'dashboard' ? 'dashboard' : scaleMode;
@@ -6982,15 +7006,18 @@ function staffScannerFocusExistingAction(mode, item) {
     }
     const candidates = mode === 'opening'
       ? document.querySelectorAll('#staff-opening-grid [data-staff-item-id]')
-      : document.querySelectorAll('[data-staff-item-id]');
+      : mode === 'returning'
+        ? document.querySelectorAll('#staff-returning-grid .staff-returning-tile[data-staff-item-id]')
+        : document.querySelectorAll('[data-staff-item-id]');
     const card = Array.from(candidates).find(candidate => String(candidate.dataset.staffItemId) === id);
     if (!card) return;
     if (mode === 'opening') staffOpeningOpenDetail(id);
+    if (mode === 'returning') staffReturningOpenDetail(id);
     const selector = STAFF_SCANNER.actionMode === 'WEIGH'
       ? 'input[id^="staff-opening-weight-"], input[id^="staff-taking-weight-"], input[id^="staff-returning-weight-"]'
       : 'input[aria-label^="Opening "], input[aria-label^="Taking quantity"], input[aria-label^="Return "]';
     const control = card.querySelector(selector);
-    card.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    (mode === 'returning' ? control : card)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
     control?.focus?.({ preventScroll: true });
   }, 0);
 }
@@ -7579,7 +7606,119 @@ function staffDispatchDecorateReturningCards(candidates, source) {
     const weightInput = card.querySelector(`input[id^="staff-returning-weight-"]`);
     if (weightInput?.parentElement) weightInput.parentElement.classList.add('staff-card-scale');
     card.insertAdjacentHTML('beforeend', `<div class="staff-item-actions"><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',1)">+1 RETURN</button><button class="btn btn-sm staff-action-return" type="button" onclick="staffReturningAdjust('${esc(candidate.itemId)}',5)">+5 RETURN</button><button class="btn btn-sm staff-action-transfer" type="button" onclick="openStaffTransferForItem('${esc(candidate.itemId)}')">TRANSFER</button><button class="btn btn-sm staff-action-reset" type="button" onclick="staffDispatchResetItem('returning','${esc(candidate.itemId)}')">RESET</button></div>${staffDispatchSwitchMarkup('returning', STAFF_RETURNING_SOURCE_BAR)}`);
+    const id = String(candidate.itemId);
+    const focusTargets = [
+      ['.staff-item-stepper button:first-of-type', 'minus'], ['.staff-item-stepper button:last-child', 'plus'],
+      ['.staff-item-actions .staff-action-return:first-child', 'return-one'], ['.staff-item-actions .staff-action-return:nth-child(2)', 'return-five'],
+      ['.staff-action-transfer', 'transfer'], ['.staff-action-reset', 'reset'],
+      ['.staff-card-scale button:first-of-type', 'apply'], ['.staff-card-scale button:last-of-type', 'use'],
+      ['.staff-card-switch select', 'switch']
+    ];
+    for (const [selector, suffix] of focusTargets) {
+      const control = card.querySelector(selector);
+      if (control) control.id = `staff-returning-${suffix}-${id}`;
+    }
+    staffReturningWrapDetailCard(card, candidate, source, 'eligible');
   });
+}
+
+function staffReturningWrapDetailCard(card, candidate, source, eligibility) {
+  const id = String(candidate.itemId);
+  const item = staffReturningItemForCandidate(candidate);
+  const name = candidate.name || item.name || id;
+  const value = STAFF_RETURNING_STATE[id];
+  const selected = value && typeof value === 'object' ? value.qty : value || 0;
+  const summary = eligibility === 'eligible'
+    ? `Available ${staffFormatQuantity(candidate.remaining)} · Selected ${staffFormatQuantity(selected)}`
+    : eligibility === 'completed' ? 'Available 0 · Fully returned' : 'Availability unverified';
+  const status = eligibility === 'eligible' ? 'RETURNABLE'
+    : eligibility === 'completed' ? 'FULLY RETURNED · HISTORY ONLY' : 'QUANTITY NEEDS MANAGER REVIEW';
+  const tile = document.createElement('div');
+  tile.className = `staff-returning-tile${eligibility === 'eligible' ? '' : ' staff-returning-tile-history'}`;
+  tile.dataset.returnEligibility = eligibility;
+  if (eligibility === 'eligible') tile.dataset.staffItemId = id;
+  else tile.dataset.historyItemId = id;
+  tile.innerHTML = `<button class="staff-returning-tile-open" type="button" aria-label="Returning details for ${esc(name)}. ${esc(summary)}. ${esc(status)}">${staffDispatchItemImage(item)}<span class="staff-returning-tile-label">${esc(name)}<span class="staff-returning-tile-summary">${esc(summary)}</span><span class="staff-returning-tile-status">${esc(status)}</span></span></button>`;
+  const opener = tile.querySelector('.staff-returning-tile-open');
+  opener.addEventListener('click', () => staffReturningOpenDetail(id));
+  const dialog = document.createElement('dialog');
+  dialog.className = 'staff-returning-detail-dialog';
+  dialog.dataset.staffItemId = id;
+  dialog.dataset.returningContextKey = staffReturningHistoryContextKey();
+  dialog.setAttribute('aria-label', `Returning details for ${name}`);
+  dialog.addEventListener('close', () => {
+    if (!dialog.isConnected) return;
+    if (STAFF_RETURNING_DETAIL_ID === id) STAFF_RETURNING_DETAIL_ID = '';
+    const update = dialog.dataset.returningNeedsRender === '1' &&
+      dialog.dataset.returningContextKey === staffReturningHistoryContextKey() &&
+      document.getElementById('staff-dashboard')?.dataset.staffView === 'returning';
+    if (update) renderStaffReturning();
+    const next = update ? Array.from(document.querySelectorAll('#staff-returning-grid .staff-returning-tile-open'))
+      .find(button => button.parentElement?.dataset.staffItemId === id) : opener;
+    if (next?.getClientRects().length) next.focus({ preventScroll: true });
+  });
+  // The existing Transfer/Switch handlers run after this capture handler. Close only
+  // the presentation layer so their current authorization and draft guards still run.
+  dialog.addEventListener('click', event => {
+    const control = event.target.closest('button');
+    if (control?.id) dialog.dataset.lastActionFocus = control.id;
+    if (event.target.closest('.staff-action-transfer')) {
+      dialog.dataset.returningNeedsRender = '';
+      staffReturningCloseDetail();
+    }
+  }, true);
+  dialog.addEventListener('input', event => {
+    if (event.target.id) dialog.dataset.lastActionFocus = event.target.id;
+  }, true);
+  dialog.addEventListener('change', event => {
+    if (event.target.closest('.staff-card-switch select')) {
+      dialog.dataset.returningNeedsRender = '';
+      staffReturningCloseDetail();
+    }
+  }, true);
+  const top = document.createElement('div');
+  top.className = 'staff-returning-detail-top';
+  top.innerHTML = `<span class="staff-returning-detail-source">Source Bar · ${staffBarIdentityHtml(source)}</span><button class="btn btn-ghost btn-sm staff-returning-detail-done" id="staff-returning-done-${esc(id)}" type="button">DONE</button>`;
+  const done = top.querySelector('button');
+  // A number input's blur/change precedes a pointer or keyboard click. Its
+  // state update keeps this dialog mounted, so this same activation can close it.
+  done.addEventListener('click', () => {
+    const input = dialog.querySelector('input[id^="staff-returning-qty-"]');
+    const current = STAFF_RETURNING_STATE[id];
+    const committed = Number(current && typeof current === 'object' ? current.qty : current || 0);
+    if (input && (input.value.trim() === '' || !Number.isFinite(Number(input.value)) || Number(input.value) !== committed)) {
+      staffReturningInput(id, input.value);
+    }
+    if (dialog.open) staffReturningCloseDetail();
+  });
+  dialog.appendChild(top);
+  tile.appendChild(dialog);
+  card.replaceWith(tile);
+  dialog.appendChild(card);
+}
+
+function staffReturningDecorateHistoryCards(lookup, source) {
+  const grid = document.getElementById('staff-returning-grid');
+  if (!grid) return;
+  const history = new Map([...lookup.completedItems, ...lookup.unverifiedItems].map(candidate => [String(candidate.itemId), candidate]));
+  for (const card of Array.from(grid.children).filter(child => child.classList.contains('staff-returning-history-audit'))) {
+    const candidate = history.get(String(card.dataset.historyItemId));
+    if (candidate) staffReturningWrapDetailCard(card, candidate, source, card.dataset.returnEligibility);
+  }
+}
+
+let STAFF_RETURNING_DETAIL_ID = '';
+function staffReturningOpenDetail(itemId) {
+  if (!staffOperationalGuard()) return;
+  const dialog = Array.from(document.querySelectorAll('#staff-returning-grid .staff-returning-detail-dialog')).find(el => el.dataset.staffItemId === String(itemId));
+  if (!dialog || dialog.dataset.returningContextKey !== staffReturningHistoryContextKey() || typeof dialog.showModal !== 'function') return;
+  STAFF_RETURNING_DETAIL_ID = String(itemId);
+  if (!dialog.open) dialog.showModal();
+}
+function staffReturningCloseDetail() {
+  const dialog = document.querySelector('#staff-returning-grid .staff-returning-detail-dialog[open]');
+  STAFF_RETURNING_DETAIL_ID = '';
+  if (dialog) dialog.close();
 }
 
 function renderStaffTaking() {
@@ -7756,6 +7895,8 @@ function staffReturningLockControls() {
   const source = document.getElementById('staff-returning-source-bar');
   const controls = [...(grid?.querySelectorAll('input,button,select') || []), ...(source ? [source] : [])];
   for (const control of controls) {
+    // Reading or closing a detail is safe while an existing write is unverified.
+    if (control.matches('.staff-returning-tile-open, .staff-returning-detail-done')) continue;
     if (locked) {
       if (control.dataset.returningSubmitDisabled === undefined) control.dataset.returningSubmitDisabled = control.disabled ? '1' : '0';
       control.disabled = true;
@@ -8223,6 +8364,11 @@ function staffReturningCandidates() {
 
 function staffReturningInput(itemId, value) {
   if (!staffOperationalGuard() || !staffReturningCanEdit()) return;
+  const detail = document.querySelector('#staff-returning-grid .staff-returning-detail-dialog[open]');
+  if (detail && detail.dataset.returningContextKey !== staffReturningHistoryContextKey()) {
+    staffReturningSetError('Returning source context changed. Review the current Bar again.');
+    return;
+  }
   const candidate = staffReturningCandidates().find(row => String(row.itemId) === String(itemId));
   const qty = Number(value);
   if (!candidate || String(value).trim() === '' || !Number.isFinite(qty) || qty < 0) {
@@ -8233,9 +8379,30 @@ function staffReturningInput(itemId, value) {
     staffReturningSetError(`Return quantity cannot exceed ${candidate.remaining} available for this Item.`);
     return;
   }
+  const editingDetail = detail?.dataset.staffItemId === String(itemId);
+  if (editingDetail) staffReturningCaptureDrafts();
   STAFF_RETURNING_STATE[String(itemId)] = qty;
   staffReturningSetError('');
-  renderStaffReturning();
+  if (!editingDetail) { renderStaffReturning(); return; }
+  // Keep the focused dialog intact through blur so its Done button can receive
+  // the same tap or keyboard activation. Rebuild Preview after the dialog closes.
+  const applied = JSON.stringify(qty);
+  for (const kind of ['qty', 'weight']) {
+    const input = detail.querySelector(`input[id^="staff-returning-${kind}-"]`);
+    if (!input) continue;
+    input.dataset.returningApplied = applied;
+    if (STAFF_RETURNING_DOM_DRAFT.fields[input.id]) STAFF_RETURNING_DOM_DRAFT.fields[input.id].applied = applied;
+  }
+  const summary = `Available ${staffFormatQuantity(candidate.remaining)} · Selected ${staffFormatQuantity(qty)}`;
+  const tile = detail.closest('.staff-returning-tile');
+  const label = tile?.querySelector('.staff-returning-tile-summary');
+  if (label) label.textContent = summary;
+  const opener = tile?.querySelector('.staff-returning-tile-open');
+  if (opener) opener.setAttribute('aria-label', `Returning details for ${candidate.name || itemId}. ${summary}. RETURNABLE`);
+  const selected = detail.querySelector('.staff-item-chip-selected');
+  if (selected) selected.textContent = `SELECTED ${staffFormatQuantity(qty)}`;
+  detail.dataset.returningNeedsRender = '1';
+  staffReturningRenderSubmitState();
 }
 
 function staffReturningApplyWeight(itemId, rawWeight = null) {
@@ -8353,7 +8520,14 @@ function staffReturningHasDrafts() {
 }
 
 function renderStaffReturning() {
+  const grid = document.getElementById('staff-returning-grid');
+  const priorDetail = grid?.querySelector('.staff-returning-detail-dialog[open]');
+  const sameContext = STAFF_RETURNING_DOM_DRAFT.contextKey === staffReturningHistoryContextKey();
   staffReturningCaptureDrafts();
+  const detailId = sameContext ? (priorDetail?.dataset.staffItemId || STAFF_RETURNING_DETAIL_ID) : '';
+  const focusId = priorDetail?.dataset.lastActionFocus || (priorDetail?.contains(document.activeElement) ? document.activeElement.id : '');
+  if (priorDetail) priorDetail.close();
+  if (!sameContext) STAFF_RETURNING_DETAIL_ID = '';
   const bars = staffReturningBars();
   if (STAFF_RETURNING_SOURCE_BAR && !bars.some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR)) && !staffReturningSourceLocked()) STAFF_RETURNING_SOURCE_BAR = '';
   const source = bars.find(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR));
@@ -8361,7 +8535,6 @@ function renderStaffReturning() {
   const context = document.getElementById('staff-returning-context');
   const select = document.getElementById('staff-returning-source-bar');
   const summary = document.getElementById('staff-returning-summary');
-  const grid = document.getElementById('staff-returning-grid');
   const preview = document.getElementById('staff-returning-preview');
   const user = SESSION.user || {};
   if (!context || !select || !summary || !grid || !preview) return;
@@ -8401,10 +8574,18 @@ function renderStaffReturning() {
   }
   staffDispatchDecorateReturningCards(visibleCandidates, source);
   grid.insertAdjacentHTML('beforeend', staffReturningLookupMarkup(lookup));
+  staffReturningDecorateHistoryCards(lookup, source);
+  if (detailId && Array.from(grid.querySelectorAll('.staff-returning-detail-dialog')).some(dialog => dialog.dataset.staffItemId === detailId)) {
+    staffReturningOpenDetail(detailId);
+  } else STAFF_RETURNING_DETAIL_ID = '';
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source Bar</th><th>Return Qty</th><th>Destination</th></tr></thead><tbody>${rows.map(row => `<tr><td data-label="Item">${esc(row.candidate.name || row.candidate.itemId)}</td><td data-label="Source Bar">${esc(source?.name || row.candidate.barId)}</td><td data-label="Return Qty">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(staffReturningItemForCandidate(row.candidate), row.measurement))}` : ''}</td><td data-label="Destination">MAIN LIQUOR ROOM</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Return quantities recorded yet.</div>';
   staffReturningSetError(STAFF_RETURNING_ERROR, STAFF_RETURNING_ERROR_OK);
   staffReturningRenderSubmitState();
   staffReturningRestoreDrafts();
+  if (focusId) {
+    const control = document.getElementById(focusId);
+    if (control?.closest('.staff-returning-detail-dialog[open]')) control.focus({ preventScroll: true });
+  }
 }
 
 async function staffReturningSourceChanged(barId) {
