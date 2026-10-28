@@ -17710,8 +17710,10 @@ function bleParseQnksWeight(dataView) {
     for (let i = 0; i <= 16; i++) checksum = (checksum + dataView.getUint8(i)) & 0xff;
     if (checksum !== dataView.getUint8(17)) { bleParseQnksWeight.lastDebugReason = 'checksum'; return null; }
     const raw = (dataView.getUint8(9) << 8) | dataView.getUint8(10);
-    // Match the existing barback range rule; all other layouts retain ÷10.
-    const divisor = dataView.getUint8(8) === 0xe8 && dataView.getUint8(15) === 0x02 && raw >= 1000 && raw <= 10000 ? 1 : 10;
+    // Matched captures support whole grams for e8/e9 and tenths for f8; keep
+    // the existing unit field and raw range guard for these exact layouts.
+    const statusByte = dataView.getUint8(8);
+    const divisor = (statusByte === 0xe8 || statusByte === 0xe9) && dataView.getUint8(15) === 0x02 && raw >= 1000 && raw <= 10000 ? 1 : 10;
     const grams = raw / divisor;
     if (!Number.isFinite(grams) || grams < 0 || grams > 5500) { bleParseQnksWeight.lastDebugReason = 'range'; return null; }
     bleParseQnksWeight.lastDebugReason = `accepted stable=${dataView.getUint8(16) === 1}`;
