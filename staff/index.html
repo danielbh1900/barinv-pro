@@ -8671,7 +8671,7 @@ async function saveStaffReturning() {
     const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_RETURNING_ACK_FIELDS);
     if (!staffReturningSubmissionIsCurrent(batch)) return;
     if (error) {
-      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) {
+      if (/^(42501|23502|23503|23514|22023|22P02|P0001)$/.test(String(error.code || ''))) {
         batch.phase = 'rejected'; batch.writeStarted = false;
         staffReturningSetError(error.message || 'Returning was rejected. No rows from this batch were accepted.');
       } else staffReturningShowUnconfirmed(batch, error.message || 'Returning result is unknown.');
