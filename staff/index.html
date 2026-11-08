@@ -2389,6 +2389,14 @@ th.sortable span { font-size:10px; }
           <option>REQUEST</option><option>DELIVERED</option><option>RETURNED</option><option>TRANSFER</option><option>ADJUSTMENT</option>
         </select>
       </div>
+      <div class="fbar" style="align-items:center;">
+        <label for="ef-reference" style="font-size:12px;">Event or Client reference</label>
+        <input id="ef-reference" type="text" autocomplete="off" spellcheck="false" placeholder="Exact ID from receipt" aria-label="Event or Client reference" oninput="eventLogReferenceChanged()" style="min-width:200px;max-width:100%;">
+        <button class="btn btn-ghost btn-sm" type="button" onclick="eventLogFindReference()">Find reference</button>
+        <span id="event-log-reference-status" role="status" aria-live="polite" style="font-size:12px;color:var(--muted);"></span>
+      </div>
+      <div id="event-log-reference-results" aria-live="polite"></div>
+      <div id="events-load-status" role="status" aria-live="polite" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></div>
       <div class="fbar" id="event-review-toolbar" style="align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="eventReviewSelectPage()">Select Page</button>
         <button class="btn btn-ghost btn-sm" onclick="eventReviewSelectAllMatching()">Select All Matching</button>
@@ -3406,7 +3414,7 @@ th.sortable span { font-size:10px; }
       <div class="fg fg-2">
         <button class="btn btn-a btn-lg" id="staff-action-dispatch" onclick="showStaffShellView('dispatch')">DISPATCH</button>
         <button class="btn btn-a btn-lg" id="staff-action-scan" onclick="showStaffShellView('scan')">QUICK SCAN</button>
-        <button class="btn btn-a btn-lg" id="staff-action-history" onclick="showStaffShellView('history')">MY HISTORY</button>
+        <button class="btn btn-a btn-lg" id="staff-action-history" onclick="showStaffShellView('history')">NIGHT HISTORY</button>
         <button class="btn btn-ghost btn-lg" onclick="showStaffShellView('help')">HELP</button>
       </div>
     </div>
@@ -3433,7 +3441,7 @@ th.sortable span { font-size:10px; }
     <div id="staff-shell-dispatch" class="panel" style="display:none;padding:20px;">
       <button class="btn btn-ghost btn-sm staff-inline-nav" onclick="showStaffShellView('dashboard')">← Dashboard</button>
       <div class="panel-title" style="margin:18px 0 6px;">Dispatch</div>
-      <div class="empty-text" style="margin-bottom:16px;">Choose an authorized movement to continue.</div>
+      <div class="empty-text" style="margin-bottom:16px;">Choose an authorized movement to continue.</div><div id="staff-movement-receipt" class="alert" role="status" aria-live="polite" style="overflow-wrap:anywhere;"></div>
       <!-- Phase 2 compatibility marker: Opening is enabled only after Staff scope hydration. <button class="btn btn-dim" disabled>OPENING</button> -->
       <!-- Phase 2 compatibility marker: Taking is enabled only after Staff scope hydration. <button class="btn btn-dim" disabled>TAKING</button> -->
       <!-- Phase 2 compatibility marker: Returning is enabled only after approved history hydration. <button class="btn btn-dim" disabled>RETURNING</button> -->
@@ -3457,10 +3465,11 @@ th.sortable span { font-size:10px; }
         <div id="staff-opening-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('opening')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffAttemptCancelMovement('opening')">Cancel</button>
         <button class="btn btn-a" id="staff-opening-save" onclick="saveStaffOpening()">Save / Submit</button>
       </div>
     </div>
+    <div id="staff-taking-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-taking" class="panel" style="display:none;padding:20px;">
       <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
@@ -3487,7 +3496,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-taking-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('taking')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffAttemptCancelMovement('taking')">Cancel</button>
         <button class="btn btn-a" id="staff-taking-save" onclick="saveStaffTaking()">Save / Submit</button>
       </div>
     </div>
@@ -3512,10 +3521,11 @@ th.sortable span { font-size:10px; }
         <div id="staff-returning-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('returning')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffAttemptCancelMovement('returning')">Cancel</button>
         <button class="btn btn-a" id="staff-returning-save" onclick="saveStaffReturning()">Save / Submit</button>
       </div>
     </div>
+    <div id="staff-transfer-result" class="alert" role="status" aria-live="polite"></div>
     <div id="staff-shell-transfer" class="panel" style="display:none;padding:20px;">
       <div class="staff-inline-nav" style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dispatch')">← Dispatch</button>
@@ -3538,7 +3548,7 @@ th.sortable span { font-size:10px; }
         <div id="staff-transfer-preview"></div>
       </div>
       <div class="staff-movement-footer" style="display:flex;gap:8px;margin-top:16px;">
-        <button class="btn btn-ghost" type="button" onclick="staffWorkspaceCancelMovement('transfer')">Cancel</button>
+        <button class="btn btn-ghost" type="button" onclick="staffAttemptCancelMovement('transfer')">Cancel</button>
         <button class="btn btn-a" id="staff-transfer-save" onclick="saveStaffTransfer()">Save / Submit</button>
       </div>
     </div>
@@ -3552,7 +3562,15 @@ th.sortable span { font-size:10px; }
       <div id="staff-quick-scan-context" class="empty-text" style="margin-top:14px;"></div>
       <div id="staff-quick-scan-result" style="margin-top:12px;"></div>
     </div>
-    <div id="staff-shell-history" class="panel" style="display:none;padding:20px;"><button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">← Dashboard</button><div class="panel-title" style="margin:18px 0 6px;">My History</div><div class="empty-text">Staff-scoped history will be enabled in a later phase.</div></div>
+    <div id="staff-shell-history" class="panel" style="display:none;padding:20px;">
+      <button class="btn btn-ghost btn-sm" type="button" onclick="showStaffShellView('dashboard')">← Dashboard</button>
+      <div class="panel-title" style="margin:18px 0 6px;">Current Night Movements</div>
+      <p class="empty-text">Events visible to this Staff session for its current Night and authorized Bars. PENDING means awaiting Manager review, not approved inventory.</p>
+      <button id="staff-movement-history-refresh" class="btn btn-ghost btn-sm" type="button" onclick="staffMovementHistoryLoad(true)">Refresh history</button>
+      <div id="staff-movement-history-status" class="empty-text" role="status" aria-live="polite" style="margin:12px 0;"></div>
+      <div id="staff-movement-history-list"></div>
+      <button id="staff-movement-history-more" class="btn btn-ghost btn-sm" type="button" onclick="staffMovementHistoryLoad(false)" style="display:none;margin-top:12px;">Load older events</button>
+    </div>
     <div id="staff-shell-help" class="panel" style="display:none;padding:20px;"><button class="btn btn-ghost btn-sm" onclick="showStaffShellView('dashboard')">← Dashboard</button><div class="panel-title" style="margin:18px 0 6px;">Help</div><div class="empty-text">Use the Staff Access Code issued for this Night. Contact your manager if your Working Area or authorized Bars are incorrect.</div></div>
   </div>
   <div id="staff-scan-overlay" class="staff-scan-overlay" aria-hidden="true">
@@ -3598,6 +3616,8 @@ th.sortable span { font-size:10px; }
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <!-- Tesseract.js — OCR for receipt scanning -->
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="./staff-attempt-journal-v1.js"></script>
+<script src="./staff-recent-movement-review-v1.js"></script>
 
 <script>
 'use strict';
@@ -4534,7 +4554,7 @@ function renderStaffDashboard() {
 }
 
 function staffSetActiveSection(view) {
-  const labels = { dashboard: 'Staff actions', dispatch: 'Dispatch', opening: 'Opening', taking: 'Taking', transfer: 'Transfer', returning: 'Returning', scan: 'Quick Scan', history: 'My History', help: 'Help' };
+  const labels = { dashboard: 'Staff actions', dispatch: 'Dispatch', opening: 'Opening', taking: 'Taking', transfer: 'Transfer', returning: 'Returning', scan: 'Quick Scan', history: 'Night History', help: 'Help' };
   const key = Object.prototype.hasOwnProperty.call(labels, view) ? view : 'dashboard';
   const strip = document.getElementById('staff-active-section');
   const name = document.getElementById('staff-active-section-name');
@@ -4631,22 +4651,23 @@ function staffWorkspaceOpenMovement(mode) {
   const prior = STAFF_WORKSPACE_UI.entries[mode];
   const sameScope = !!current.key && prior && prior.user === current.user && prior.key === current.key;
   const hasDraft = mode === 'opening' ? (STAFF_OPENING_SUBMISSION?.phase !== 'completed' && (!!STAFF_OPENING_SUBMISSION || Object.keys(STAFF_OPENING_STATE).length > 0 || Object.values(staffOpeningDomDrafts()).some(field => Object.keys(field).length > 0)))
-    : mode === 'taking' ? Object.keys(STAFF_TAKING_STATE).length > 0 || Object.keys(staffTakingWeightDrafts()).length > 0
+    : mode === 'taking' ? (STAFF_TAKING_SUBMISSION?.phase !== 'completed' && (!!STAFF_TAKING_SUBMISSION || Object.keys(STAFF_TAKING_STATE).length > 0 || Object.keys(staffTakingWeightDrafts()).length > 0))
     : mode === 'transfer' ? !!STAFF_TRANSFER_STATE.itemId || !!STAFF_TRANSFER_STATE.sourceBar || !!STAFF_TRANSFER_STATE.destinationBar : false;
   // Returning owns its pending/draft/history restoration. Fresh/changed scopes use original open paths.
   const result = sameScope && hasDraft && mode !== 'returning' ? showStaffShellView(mode) : open();
   requestAnimationFrame(() => window.scrollTo(0, 0));
   return result;
 }
-function staffWorkspaceCancelMovement(mode) {
+function staffWorkspaceCancelMovement(mode, verifiedSafeDiscard = false) {
   const current = document.getElementById('staff-dashboard')?.dataset.staffView;
   if (current !== mode || !['opening', 'taking', 'returning', 'transfer'].includes(mode) || !staffOperationalGuard()) return false;
   if (mode === 'returning') staffReturningResetObsoleteSubmission();
-  const pending = mode === 'opening' ? STAFF_OPENING_SAVING || !!(STAFF_OPENING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_OPENING_SUBMISSION.phase))
-    : mode === 'taking' ? STAFF_TAKING_SAVING || STAFF_TAKING_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey())
+  const pending = mode === 'opening' ? STAFF_OPENING_SAVING || !!(staffOpeningRetainedCurrent() && staffOpeningRetainedCurrent().phase !== 'verified') || !!(STAFF_OPENING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_OPENING_SUBMISSION.phase))
+    : mode === 'taking' ? STAFF_TAKING_SAVING || !!(staffTakingSubmissionIsCurrent(STAFF_TAKING_SUBMISSION) && !['rejected', 'completed'].includes(STAFF_TAKING_SUBMISSION.phase)) ||
+      !!(STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey()) && STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey()).phase !== 'verified')
     : mode === 'returning' ? STAFF_RETURNING_SAVING || !!(STAFF_RETURNING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_RETURNING_SUBMISSION.phase))
-    : STAFF_TRANSFER_SAVING || STAFF_TRANSFER_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey());
-  if (pending) {
+    : STAFF_TRANSFER_SAVING || STAFF_TRANSFER_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey()) || !!(STAFF_TRANSFER_SUBMISSION && !['rejected', 'completed'].includes(STAFF_TRANSFER_SUBMISSION.phase));
+  if (pending && !verifiedSafeDiscard) {
     const message = 'This submission may still be in progress or unverified. Check its status or Log before discarding this draft.';
     ({ opening: staffOpeningSetError, taking: staffTakingSetError, returning: staffReturningSetError, transfer: staffTransferSetError })[mode](message);
     return false;
@@ -4657,19 +4678,26 @@ function staffWorkspaceCancelMovement(mode) {
     STAFF_OPENING_DOM_DRAFT = { contextKey: '', fields: {} };
     STAFF_OPENING_DETAIL_ID = '';
     STAFF_OPENING_SUBMISSION = null;
+    if (verifiedSafeDiscard || staffOpeningRetainedCurrent()?.phase === 'verified') STAFF_OPENING_RETAINED.delete(staffUnverifiedWriteScopeKey());
     staffOpeningSetError('');
+    staffOpeningRenderResult();
   } else if (mode === 'taking') {
+    const retained = STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey());
+    if (verifiedSafeDiscard || retained?.phase === 'verified') STAFF_TAKING_RETAINED.delete(staffUnverifiedWriteScopeKey());
     staffTakingCloseDetail();
     STAFF_TAKING_STATE = {};
     STAFF_TAKING_SELECTED_BARS = [];
     STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} };
     STAFF_TAKING_LOOKUP_DOM_CONTEXT = '';
+    STAFF_TAKING_SUBMISSION = null;
+    staffTakingRenderResult();
     for (const [id, value] of [['staff-taking-source', 'Main Liquor Room'], ['staff-taking-ticket', ''], ['staff-taking-note', '']]) {
       const field = document.getElementById(id);
       if (field) field.value = value;
     }
     staffTakingSetError('');
   } else if (mode === 'returning') {
+    if (verifiedSafeDiscard && STAFF_RETURNING_SOURCE_BAR) STAFF_RETURNING_RETAINED.delete(staffReturningAttemptKey(staffReturningContext()));
     staffReturningCloseDetail();
     STAFF_RETURNING_STATE = {};
     STAFF_RETURNING_SOURCE_BAR = '';
@@ -4679,6 +4707,8 @@ function staffWorkspaceCancelMovement(mode) {
     STAFF_RETURNING_SUBMISSION = null;
     staffReturningSetError('');
   } else {
+    if (verifiedSafeDiscard) STAFF_TRANSFER_WRITE_UNCERTAIN.delete(staffUnverifiedWriteScopeKey());
+    STAFF_TRANSFER_SUBMISSION = null;
     STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '', measurement: null };
     for (const id of ['staff-transfer-qty', 'staff-transfer-weight']) {
       const field = document.getElementById(id);
@@ -4730,6 +4760,13 @@ function showStaffLanding() {
 
 function showStaffShellView(view, options = {}) {
   if (view !== 'dashboard' && view !== 'help' && !staffOperationalGuard()) return;
+  const leaving = document.getElementById('staff-dashboard')?.dataset.staffView;
+  if (leaving !== view && leaving === 'opening' && STAFF_OPENING_SAVING && !['verified', 'completed'].includes(STAFF_OPENING_SUBMISSION?.phase)) {
+    staffOpeningSetError('Opening is still submitting. Wait for its status before leaving.'); return;
+  }
+  if (leaving !== view && leaving === 'taking' && STAFF_TAKING_SAVING && !['verified', 'completed'].includes(STAFF_TAKING_SUBMISSION?.phase)) {
+    staffTakingSetError('Taking is still submitting. Wait for its status before leaving.'); return;
+  }
   if (view !== 'taking' && typeof staffTakingCloseDetail === 'function') staffTakingCloseDetail();
   if (view !== 'opening' && typeof staffOpeningCloseDetail === 'function') staffOpeningCloseDetail();
   if (view !== 'returning' && typeof staffReturningCloseDetail === 'function') staffReturningCloseDetail();
@@ -4765,6 +4802,7 @@ function showStaffShellView(view, options = {}) {
   if (view === 'dispatch') {
     ['scan', 'history', 'help', 'dashboard', 'opening', 'taking', 'returning', 'transfer'].forEach(v => document.getElementById('staff-shell-' + v).style.display = 'none');
     document.getElementById('staff-shell-dispatch').style.display = 'block';
+    staffMovementRenderReceipt();
     return;
   }
   if (view === 'scan' || view === 'history' || view === 'help') {
@@ -4773,9 +4811,437 @@ function showStaffShellView(view, options = {}) {
       renderStaffQuickScan();
       staffQuickScanEnsureCandidates();
     }
+    if (view === 'history') staffMovementHistoryLoad(true);
     return;
   }
   showStaffDashboard();
+}
+
+
+// STAFF_ATTEMPT_INTEGRATION_START — frozen Staff attempts use same-origin IndexedDB.
+// No credentials or browser-cached password material are written here.
+let STAFF_ATTEMPT_JOURNAL = null;
+const STAFF_ATTEMPT_ENTRIES = new Map();
+const STAFF_ATTEMPT_PRIOR = new Map();
+const STAFF_ATTEMPT_EPOCH = new Map();
+function staffAttemptEntryKey(mode) { return staffUnverifiedWriteScopeKey() + '|' + mode; }
+function staffAttemptAdvance(mode) {
+  const key = staffAttemptEntryKey(mode), next = (STAFF_ATTEMPT_EPOCH.get(key) || 0) + 1;
+  STAFF_ATTEMPT_EPOCH.set(key, next);
+  return next;
+}
+function staffAttemptId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function staffAttemptClaims(mode, attemptId = '') {
+  const context = staffOpeningContext(), user = SESSION.user;
+  if (!context || !user || !['opening', 'taking', 'returning', 'transfer'].includes(mode)) throw new Error('Staff movement scope is unavailable. No write was sent.');
+  return { venueId: context.venueId, staffId: user.staff_id, nightId: context.nightId,
+    assignmentId: user.assignment_id, allowedBarIds: user.allowed_bar_ids.map(String),
+    entryId: STAFF_ATTEMPT_ENTRIES.get(staffAttemptEntryKey(mode)) || '', attemptId };
+}
+function staffAttemptJournal() {
+  if (!STAFF_ATTEMPT_JOURNAL) {
+    if (!globalThis.BarInvStaffAttemptJournal?.createStaffPageJournal || !globalThis.indexedDB || !SB?.supabaseUrl)
+      throw new Error('Secure Staff attempt storage is unavailable. No submission was sent.');
+    const host = new URL(SB.supabaseUrl).hostname;
+    if (!host.endsWith('.supabase.co')) throw new Error('Staff project scope could not be verified. No submission was sent.');
+    STAFF_ATTEMPT_JOURNAL = BarInvStaffAttemptJournal.createStaffPageJournal({ indexedDB, projectRef: host });
+  }
+  return STAFF_ATTEMPT_JOURNAL;
+}
+function staffAttemptRows(batch) { return batch.records || (batch.record ? [batch.record] : []); }
+function staffAttemptDraft(mode) {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  if (mode === 'opening') return { state: copy(STAFF_OPENING_STATE), domFields: copy(STAFF_OPENING_DOM_DRAFT.fields) };
+  if (mode === 'taking') return { state: copy(STAFF_TAKING_STATE), selectedBars: copy(STAFF_TAKING_SELECTED_BARS),
+    weightFields: copy(STAFF_TAKING_WEIGHT_DRAFT.fields), source: document.getElementById('staff-taking-source')?.value || '',
+    ticket: document.getElementById('staff-taking-ticket')?.value || '', note: document.getElementById('staff-taking-note')?.value || '' };
+  if (mode === 'returning') return { state: copy(STAFF_RETURNING_STATE), sourceBar: String(STAFF_RETURNING_SOURCE_BAR || ''), domFields: copy(STAFF_RETURNING_DOM_DRAFT.fields) };
+  return { state: copy(STAFF_TRANSFER_STATE), weight: document.getElementById('staff-transfer-weight')?.value || '' };
+}
+function staffAttemptSetStatus(mode, message, ok = false) {
+  ({ opening: staffOpeningSetError, taking: staffTakingSetError, returning: staffReturningSetError, transfer: staffTransferSetError })[mode](message, ok);
+  try { ({ opening: staffOpeningUpdateSaveButton, taking: staffTakingUpdateSaveButton,
+    returning: staffReturningUpdateSaveButton, transfer: staffTransferRenderSubmitState })[mode](); } catch (_) {}
+}
+function staffAttemptCurrent(mode, context) {
+  const current = staffOpeningContext();
+  return !!current && current.userRef === context.userRef && current.key === context.key &&
+    staffAttemptEntryKey(mode) === context.entryKey;
+}
+async function staffAttemptRestoreFrozen(mode, row, current) {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  const draft = row.draft || {};
+  if (mode === 'opening' && !Object.keys(STAFF_OPENING_STATE).length) {
+    STAFF_OPENING_STATE = copy(draft.state || {});
+    STAFF_OPENING_DOM_DRAFT = { contextKey: staffOpeningContext()?.key || '', fields: copy(draft.domFields || {}) };
+    renderStaffOpening(); return true;
+  }
+  if (mode === 'taking' && !Object.keys(STAFF_TAKING_STATE).length && !STAFF_TAKING_SELECTED_BARS.length) {
+    STAFF_TAKING_STATE = copy(draft.state || {}); STAFF_TAKING_SELECTED_BARS = copy(draft.selectedBars || []);
+    STAFF_TAKING_WEIGHT_DRAFT = { contextKey: staffTakingLookupDraftContextKey(), fields: copy(draft.weightFields || {}) };
+    for (const [id, value] of [['staff-taking-source', draft.source], ['staff-taking-ticket', draft.ticket], ['staff-taking-note', draft.note]]) {
+      const field = document.getElementById(id); if (field) field.value = value || '';
+    }
+    renderStaffTaking(); return true;
+  }
+  if (mode === 'returning' && !Object.keys(STAFF_RETURNING_STATE).length && !STAFF_RETURNING_SOURCE_BAR) {
+    const sourceBar = String(draft.sourceBar || row.records?.[0]?.bar_id || '');
+    if (!SESSION.user?.allowed_bar_ids?.map(String).includes(sourceBar)) return false;
+    STAFF_RETURNING_SOURCE_BAR = sourceBar;
+    try { await hydrateStaffReturningHistory(); } catch (_) { /* Keep the frozen draft even when readback fails. */ }
+    if (!current() || STAFF_RETURNING_SOURCE_BAR !== sourceBar || Object.keys(STAFF_RETURNING_STATE).length) return false;
+    STAFF_RETURNING_STATE = copy(draft.state || {});
+    STAFF_RETURNING_DOM_DRAFT = { contextKey: staffReturningHistoryContextKey(), fields: copy(draft.domFields || {}), focus: null };
+    renderStaffReturning(); return true;
+  }
+  if (mode === 'transfer' && !STAFF_TRANSFER_STATE.itemId && !Number(STAFF_TRANSFER_STATE.qty)) {
+    STAFF_TRANSFER_STATE = copy(draft.state || STAFF_TRANSFER_STATE);
+    const field = document.getElementById('staff-transfer-weight'); if (field) field.value = draft.weight || '';
+    renderStaffTransfer(); return true;
+  }
+  return false;
+}
+function staffAttemptVerifyRows(mode, stored, rows) {
+  const batch = { records: stored.records, record: stored.records[0] };
+  if (mode === 'transfer') {
+    const match = staffTransferAcknowledgment(batch, rows);
+    return match ? { total: 1, acknowledged: 1, missing: 0, mismatched: 0, unexpected: 0,
+      statuses: { [match.status]: 1 }, rows: [match] }
+      : { total: 1, acknowledged: 0, missing: 1, mismatched: 0, unexpected: 0, statuses: {}, rows: [] };
+  }
+  const ack = ({ opening: staffOpeningAcknowledgment, taking: staffTakingAcknowledgment,
+    returning: staffReturningAcknowledgment })[mode](batch, rows);
+  return { ...ack, rows: ack.rows || rows };
+}
+async function staffAttemptReadRows({ venueId, nightId, ids, mode }) {
+  const fields = mode === 'transfer' ? STAFF_TRANSFER_ACK_FIELDS : STAFF_OPENING_ACK_FIELDS;
+  const { data, error } = await SB.from('events').select(fields).eq('venue_id', venueId).eq('night_id', nightId)
+    .in('client_event_id', ids).limit(ids.length + 1);
+  if (error || !Array.isArray(data)) throw new Error('Exact Staff attempt status is unavailable.');
+  return data;
+}
+async function staffAttemptHandlePrior(mode) {
+  const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode);
+  const context = staffOpeningContext(); context.entryKey = staffAttemptEntryKey(mode);
+  const epoch = staffAttemptAdvance(mode);
+  const current = () => staffAttemptCurrent(mode, context) && STAFF_ATTEMPT_EPOCH.get(context.entryKey) === epoch &&
+    document.getElementById('staff-dashboard')?.dataset.staffView === mode;
+  let row = await journal.get(mode, claims);
+  if (!current()) return true;
+  if (!row) { if (!claims.entryId && !STAFF_ATTEMPT_ENTRIES.has(context.entryKey)) STAFF_ATTEMPT_ENTRIES.set(context.entryKey, staffAttemptId()); return false; }
+  if (row.state === 'new_entry') {
+    if (claims.entryId && claims.entryId !== row.entryId) {
+      staffAttemptSetStatus(mode, 'Another tab started a new movement. Return to Dispatch and re-enter before submitting.'); return true;
+    }
+    STAFF_ATTEMPT_ENTRIES.set(context.entryKey, row.entryId); STAFF_ATTEMPT_PRIOR.delete(context.entryKey); return false;
+  }
+  await staffAttemptRestoreFrozen(mode, row, current);
+  if (!current()) return true;
+  if (row.state === 'verified') {
+    STAFF_ATTEMPT_PRIOR.set(context.entryKey, row);
+    if (row.receipt) staffMovementRecordVerified(mode, { context, records: row.records, ack: row.receipt, operationId: row.attemptId });
+    staffAttemptSetStatus(mode, `Earlier ${mode} saved and verified (${row.records.length} rows). Press Cancel to discard this frozen draft before starting new work.`, true);
+    return true;
+  }
+  if (row.state === 'rejected') {
+    const next = staffAttemptId(); await journal.release(mode, claims, next);
+    if (!current()) return true;
+    STAFF_ATTEMPT_ENTRIES.set(context.entryKey, next); STAFF_ATTEMPT_PRIOR.delete(context.entryKey);
+    staffAttemptSetStatus(mode, `Earlier ${mode} was definitely rejected. Its draft is available for correction.`);
+    return true;
+  }
+  if (row.state === 'frozen') {
+    STAFF_ATTEMPT_PRIOR.set(context.entryKey, row);
+    staffAttemptSetStatus(mode, `A frozen ${mode} attempt was never sent. Reference ${row.attemptId}. Press Cancel to discard it safely; no new write will be sent.`);
+    return true;
+  }
+  const result = await journal.reconcile(mode, claims,
+    async request => { const rows = await staffAttemptReadRows(request); if (!current()) throw new Error('Staff context changed during status read.'); return rows; },
+    (stored, rows) => { if (!current()) throw new Error('Staff context changed during status check.'); return staffAttemptVerifyRows(mode, stored, rows); });
+  if (!current()) return true;
+  if (result.state === 'verified') {
+    row = await journal.get(mode, claims);
+    if (!current() || row?.state !== 'verified') return true;
+    STAFF_ATTEMPT_PRIOR.set(context.entryKey, row);
+    staffMovementRecordVerified(mode, { context, records: row.records, ack: result.receipt, operationId: row.attemptId });
+    staffAttemptSetStatus(mode, `Earlier ${mode} saved and verified (${row.records.length} rows). Press Cancel to discard this frozen draft before starting new work.`, true);
+  } else {
+    row = await journal.get(mode, claims);
+    if (!current() || !row?.records?.length || row.state === 'new_entry') return true;
+    STAFF_ATTEMPT_PRIOR.set(context.entryKey, row);
+    staffAttemptSetStatus(mode, `Earlier ${mode} remains unverified (${result.acknowledged || 0}/${row.records.length} rows). Frozen draft and reference ${row.attemptId} are retained. Check status; do not resubmit.`);
+  }
+  return true;
+}
+async function staffAttemptBeforeWrite(mode, batch) {
+  const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode, staffAttemptRows(batch)[0]?.client_event_id);
+  const context = staffOpeningContext(); context.entryKey = staffAttemptEntryKey(mode);
+  const prior = await journal.get(mode, claims);
+  if (!staffAttemptCurrent(mode, context)) throw new Error('Staff context changed before submission. No write was sent.');
+  if (prior && prior.state !== 'new_entry') throw new Error('A prior frozen movement exists. Check its exact status; no new write was sent.');
+  if (prior?.state === 'new_entry' && claims.entryId && claims.entryId !== prior.entryId)
+    throw new Error('Another tab started a new movement. Re-enter before submitting.');
+  claims.entryId = prior?.entryId || claims.entryId || staffAttemptId();
+  STAFF_ATTEMPT_ENTRIES.set(context.entryKey, claims.entryId);
+  const claim = await journal.claim(mode, claims, staffAttemptRows(batch), staffAttemptDraft(mode));
+  if (!claim.claimed) throw new Error('Another tab owns this movement attempt. Check its status; no new write was sent.');
+  if (!staffAttemptCurrent(mode, context)) throw new Error('Staff context changed before submission. The never-sent frozen attempt can be canceled.');
+  await journal.markSending(mode, claims, claim.attemptId);
+  if (!staffAttemptCurrent(mode, context)) throw new Error('Staff context changed before submission. The frozen attempt is retained; no write was sent.');
+  batch.journalAttemptId = claim.attemptId;
+  batch.journalClaims = claims;
+  batch.journalEntryKey = context.entryKey;
+  staffAttemptAdvance(mode);
+}
+function staffAttemptReceiptAck(mode, batch) {
+  if (mode !== 'transfer') return batch.ack;
+  const row = batch.ack;
+  return row ? { total: 1, acknowledged: 1, missing: 0, mismatched: 0, unexpected: 0,
+    statuses: { [row.status]: 1 }, rows: [row] } : null;
+}
+function staffAttemptReportVerifiedLocalFailure(mode, batch) {
+  const ack = staffAttemptReceiptAck(mode, batch), expected = staffAttemptRows(batch).length;
+  if (!ack || ack.acknowledged !== expected || ack.missing || ack.mismatched || ack.unexpected ||
+      !Array.isArray(ack.rows) || ack.rows.length !== expected) return false;
+  const entryKey = batch.journalEntryKey || staffAttemptEntryKey(mode);
+  if (staffAttemptEntryKey(mode) === entryKey)
+    STAFF_ATTEMPT_PRIOR.set(entryKey, { state: batch.phase === 'completed' ? 'verified' : 'unknown',
+      records: staffAttemptRows(batch), attemptId: batch.journalAttemptId });
+  if (batch.phase !== 'completed') batch.phase = 'unknown';
+  const message = `${mode[0].toUpperCase() + mode.slice(1)}: all ${expected} server rows were verified by exact ID, ` +
+    'but local recovery/completion did not finish. Keep this attempt; use Check status. Do not submit it again.';
+  staffAttemptSetStatus(mode, message, true);
+  if (batch.phase === 'completed') {
+    const receipt = document.getElementById('staff-movement-receipt');
+    if (receipt) receipt.textContent += ` ${message}`;
+  }
+  return true;
+}
+async function staffAttemptVerified(mode, batch, ack) {
+  if (!batch.journalAttemptId) throw new Error('Frozen Staff attempt identity is unavailable. Draft retained.');
+  const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode, batch.journalAttemptId);
+  if (claims.venueId !== batch.journalClaims?.venueId || claims.staffId !== batch.journalClaims?.staffId ||
+      claims.nightId !== batch.journalClaims?.nightId || claims.assignmentId !== batch.journalClaims?.assignmentId)
+    throw new Error('Staff scope changed after submission. Draft retained for status review.');
+  const entryKey = staffAttemptEntryKey(mode), userRef = staffOpeningContext()?.userRef;
+  await journal.markVerified(mode, claims, batch.journalAttemptId, ack);
+  if (staffAttemptEntryKey(mode) === entryKey && staffOpeningContext()?.userRef === userRef) staffAttemptAdvance(mode);
+}
+async function staffAttemptReleaseCompleted(mode, batch) {
+  if (batch.phase !== 'completed' || !batch.journalAttemptId || batch.journalReleased) return;
+  const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode, batch.journalAttemptId);
+  if (claims.venueId !== batch.journalClaims?.venueId || claims.staffId !== batch.journalClaims?.staffId ||
+      claims.nightId !== batch.journalClaims?.nightId || claims.assignmentId !== batch.journalClaims?.assignmentId) return;
+  const entryKey = staffAttemptEntryKey(mode), userRef = staffOpeningContext()?.userRef;
+  const next = staffAttemptId(); await journal.release(mode, claims, next);
+  batch.journalReleased = true;
+  if (staffAttemptEntryKey(mode) === entryKey && staffOpeningContext()?.userRef === userRef) {
+    STAFF_ATTEMPT_ENTRIES.set(entryKey, next);
+    STAFF_ATTEMPT_PRIOR.delete(entryKey);
+  }
+}
+async function staffAttemptRejected(mode, batch, sqlstate) {
+  if (!batch?.journalAttemptId) return;
+  const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode, batch.journalAttemptId);
+  const entryKey = staffAttemptEntryKey(mode), userRef = staffOpeningContext()?.userRef;
+  await journal.markRejected(mode, claims, batch.journalAttemptId, sqlstate);
+  const next = staffAttemptId(); await journal.release(mode, claims, next);
+  if (staffAttemptEntryKey(mode) === entryKey && staffOpeningContext()?.userRef === userRef) {
+    STAFF_ATTEMPT_ENTRIES.set(entryKey, next);
+    STAFF_ATTEMPT_PRIOR.delete(entryKey);
+  }
+}
+async function staffMovementReviewBeforeWrite(mode, batch, isCurrent) {
+  if (typeof staffRecentMovementReview !== 'function') throw new Error('Prior movement review is unavailable. No write was sent.');
+  const user = SESSION.user;
+  const result = await staffRecentMovementReview({ mode, records: staffAttemptRows(batch),
+    scope: { venueId: SESSION.venueId, nightId: user?.nightId, allowedBarIds: user?.allowed_bar_ids },
+    isCurrent, client: SB, confirmFn: message => confirm(message) });
+  if (!isCurrent() || result.outcome === 'stale') throw new Error('Staff scope changed during movement review. No write was sent.');
+  if (result.outcome === 'proceed') return;
+  if (result.outcome === 'cancel') throw new Error('New movement was not confirmed. Your draft is retained; no write was sent.');
+  if (result.outcome === 'identified_attempt') throw new Error('These exact event IDs already exist. Check status; no new write was sent.');
+  throw new Error('Recent movement review is unavailable or incomplete. No write was sent; your draft is retained.');
+}
+async function staffAttemptOnEntry(mode) {
+  if (({ opening: STAFF_OPENING_SAVING, taking: STAFF_TAKING_SAVING,
+    returning: STAFF_RETURNING_SAVING, transfer: STAFF_TRANSFER_SAVING })[mode]) return;
+  const userRef = SESSION.user;
+  const key = staffAttemptEntryKey(mode), before = STAFF_ATTEMPT_EPOCH.get(key) || 0;
+  try { await staffAttemptHandlePrior(mode); }
+  catch (error) {
+    if (SESSION.user === userRef && STAFF_ATTEMPT_EPOCH.get(key) === before + 1 &&
+        document.getElementById('staff-dashboard')?.dataset.staffView === mode)
+      staffAttemptSetStatus(mode, error?.message || 'Prior movement status is unavailable. No new write will be sent.');
+  }
+}
+async function staffAttemptCancelMovement(mode) {
+  if (!['opening', 'taking', 'returning', 'transfer'].includes(mode) ||
+      document.getElementById('staff-dashboard')?.dataset.staffView !== mode || !staffOperationalGuard()) return false;
+  const context = staffOpeningContext();
+  if (!context) return false;
+  context.entryKey = staffAttemptEntryKey(mode);
+  staffAttemptAdvance(mode);
+  const current = () => staffAttemptCurrent(mode, context) && document.getElementById('staff-dashboard')?.dataset.staffView === mode;
+  try {
+    const journal = staffAttemptJournal(), claims = staffAttemptClaims(mode);
+    const row = await journal.get(mode, claims);
+    if (!current()) return false;
+    if (row && !['new_entry', 'verified', 'rejected', 'frozen'].includes(row.state)) {
+      staffAttemptSetStatus(mode, 'This frozen submission remains unverified. Check status; its draft cannot be discarded.');
+      return false;
+    }
+    const safeDiscard = !!row && ['verified', 'rejected', 'frozen'].includes(row.state);
+    if (safeDiscard) {
+      const active = ({ opening: STAFF_OPENING_SUBMISSION, taking: STAFF_TAKING_SUBMISSION,
+        returning: STAFF_RETURNING_SUBMISSION, transfer: STAFF_TRANSFER_SUBMISSION })[mode];
+      if (active && active.phase !== 'completed' && active.phase !== 'rejected') {
+        const activeIds = staffAttemptRows(active).map(record => record.client_event_id).sort();
+        const storedIds = row.records.map(record => record.client_event_id).sort();
+        if (JSON.stringify(activeIds) !== JSON.stringify(storedIds)) throw new Error('Another movement is active. Its draft was retained.');
+      }
+    }
+    const next = safeDiscard ? staffAttemptId() : '';
+    if (row?.state === 'frozen') {
+      await journal.abandonFrozen(mode, claims, row.attemptId, next);
+      if (!current()) return false;
+    }
+    if (!staffWorkspaceCancelMovement(mode, safeDiscard)) return false;
+    if (row && ['verified', 'rejected'].includes(row.state)) await journal.release(mode, claims, next);
+    if (safeDiscard && staffAttemptCurrent(mode, context)) {
+      STAFF_ATTEMPT_ENTRIES.set(context.entryKey, next);
+      STAFF_ATTEMPT_PRIOR.delete(context.entryKey);
+    }
+    return true;
+  } catch (error) {
+    if (current()) staffAttemptSetStatus(mode, error?.message || 'Attempt status is unavailable. The draft was retained.');
+    return false;
+  }
+}
+// STAFF_ATTEMPT_INTEGRATION_END
+
+// Read-only Staff movement history. The current INSERT contract leaves staff_id
+// null, so these are scoped Night/Bar events, not an attribution claim.
+const STAFF_MOVEMENT_HISTORY = { token: 0, scope: '', userRef: null, barsRef: null, rows: [], offset: 0, hasMore: false, busy: false };
+let STAFF_MOVEMENT_RECEIPT = null;
+function staffMovementHistoryContext() {
+  const context = staffOpeningContext();
+  const barsRef = SESSION.cache.authorizedBars;
+  if (!context || !Array.isArray(barsRef)) return null;
+  const allowed = new Set(context.userRef.allowed_bar_ids.map(String));
+  const barIds = [...new Set(barsRef.filter(bar => bar && bar.active !== false && allowed.has(String(bar.id))).map(bar => String(bar.id)))].sort();
+  if (!barIds.length) return null;
+  return { ...context, barsRef, barIds, scope: JSON.stringify([context.key, barIds]) };
+}
+function staffMovementHistoryOwns(context, token) {
+  const current = staffMovementHistoryContext();
+  return !!current && STAFF_MOVEMENT_HISTORY.token === token && current.userRef === context.userRef &&
+    current.barsRef === context.barsRef && current.scope === context.scope &&
+    document.getElementById('staff-dashboard')?.dataset.staffView === 'history';
+}
+function staffMovementRenderReceipt() {
+  const element = document.getElementById('staff-movement-receipt');
+  if (!element) return;
+  const current = staffOpeningContext(), receipt = STAFF_MOVEMENT_RECEIPT;
+  if (!current || !receipt || receipt.userRef !== current.userRef || receipt.scope !== current.key) {
+    element.textContent = '';
+    element.className = 'alert';
+    return;
+  }
+  const statuses = Object.entries(receipt.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
+  element.textContent = `${receipt.mode} submission verified: ${receipt.count} event row${receipt.count === 1 ? '' : 's'}. ${statuses}. Reference: ${receipt.reference}. PENDING requires Manager review. View Night History for current status.`;
+  element.className = 'alert alert-ok show';
+}
+function staffMovementRecordVerified(mode, batch) {
+  const context = staffOpeningContext();
+  const records = Array.isArray(batch?.records) ? batch.records : batch?.record ? [batch.record] : [];
+  if (!context || !['opening', 'taking', 'returning', 'transfer'].includes(mode) || !records.length ||
+      batch?.context?.userRef !== context.userRef || batch.context.venueId !== context.venueId ||
+      batch.context.nightId !== context.nightId || !batch.ack) return false;
+  const statuses = batch.ack.statuses || (batch.ack.status ? { [batch.ack.status]: 1 } : null);
+  const statusCount = statuses && Object.values(statuses).reduce((sum, value) => sum + Number(value), 0);
+  if (!statuses || statusCount !== records.length || batch.ack.missing || batch.ack.mismatched || batch.ack.unexpected ||
+      (batch.ack.acknowledged != null && batch.ack.acknowledged !== records.length) ||
+      (batch.ack.total != null && batch.ack.total !== records.length)) return false;
+  const reference = String(batch.attemptId || batch.operationId || records[0].client_event_id || batch.ack.id || '');
+  if (!reference) return false;
+  STAFF_MOVEMENT_RECEIPT = {
+    userRef: context.userRef, scope: context.key, mode: mode[0].toUpperCase() + mode.slice(1),
+    count: records.length, statuses: { ...statuses }, reference
+  };
+  staffMovementRenderReceipt();
+  return true;
+}
+function staffMovementHistoryRender() {
+  const list = document.getElementById('staff-movement-history-list');
+  const more = document.getElementById('staff-movement-history-more');
+  if (!list || !more) return;
+  const rows = STAFF_MOVEMENT_HISTORY.rows;
+  list.innerHTML = rows.map(row => {
+    const item = row.items?.name || row.item_id || 'Item unavailable';
+    const source = row.bars?.name || row.bar_id || 'Bar unavailable';
+    const destination = row.destination_bar?.name || row.destination_bar_id || '';
+    const when = row.created_at ? new Date(row.created_at).toLocaleString() : 'Time unavailable';
+    const status = String(row.status || 'UNKNOWN').toUpperCase();
+    return `<div class="panel" style="padding:12px;margin:8px 0;overflow-wrap:anywhere;">
+      <div><strong>${esc(row.action || 'EVENT')}</strong> · ${esc(item)} · ${esc(row.qty)}</div>
+      <div class="empty-text">${esc(source)}${destination ? ' → ' + esc(destination) : ''} · ${esc(when)} · ${esc(status)}</div>
+      <details><summary>Record reference</summary><div class="empty-text">Event ${esc(row.id || '—')}${row.client_event_id ? ' · Client ' + esc(row.client_event_id) : ''}</div></details>
+    </div>`;
+  }).join('');
+  more.style.display = STAFF_MOVEMENT_HISTORY.hasMore ? 'inline-flex' : 'none';
+  more.disabled = STAFF_MOVEMENT_HISTORY.busy;
+}
+async function staffMovementHistoryLoad(reset = true) {
+  const context = staffMovementHistoryContext();
+  const state = STAFF_MOVEMENT_HISTORY;
+  const status = document.getElementById('staff-movement-history-status');
+  const refresh = document.getElementById('staff-movement-history-refresh');
+  if (!status || !refresh) return;
+  if (!context) {
+    state.token += 1; state.scope = ''; state.userRef = null; state.barsRef = null; state.rows = []; state.offset = 0; state.hasMore = false; state.busy = false;
+    status.textContent = 'Current Staff/Night/Bar scope is unavailable; history could not be loaded.';
+    staffMovementHistoryRender();
+    return;
+  }
+  const contextChanged = state.scope !== context.scope || state.userRef !== context.userRef || state.barsRef !== context.barsRef;
+  if (state.busy && !contextChanged) return;
+  if (reset || contextChanged) {
+    state.rows = []; state.offset = 0; state.hasMore = false; state.scope = context.scope;
+    state.userRef = context.userRef; state.barsRef = context.barsRef;
+    staffMovementHistoryRender();
+  } else if (!state.hasMore) return;
+  const token = ++state.token, offset = state.offset, pageSize = 50;
+  state.busy = true;
+  refresh.disabled = true;
+  status.textContent = offset ? 'Loading older events…' : 'Loading current Night events…';
+  staffMovementHistoryRender();
+  try {
+    const { data, error } = await SB.from('events')
+      .select('id,client_event_id,created_at,venue_id,night_id,bar_id,destination_bar_id,item_id,qty,action,status,items(name),bars:bars!events_bar_id_fkey(name),destination_bar:bars!events_destination_bar_id_fkey(name)')
+      .eq('venue_id', context.venueId).eq('night_id', context.nightId).in('bar_id', context.barIds)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + pageSize);
+    if (!staffMovementHistoryOwns(context, token)) return;
+    if (error || !Array.isArray(data)) throw new Error('History lookup failed.');
+    const page = data.slice(0, pageSize), seen = new Set(state.rows.map(row => String(row.id)));
+    state.rows.push(...page.filter(row => !seen.has(String(row.id))));
+    state.offset += page.length;
+    state.hasMore = data.length > pageSize;
+    status.textContent = state.rows.length
+      ? `Showing ${state.rows.length} visible event${state.rows.length === 1 ? '' : 's'} for this Night and authorized Bars.${state.hasMore ? ' Load older for more.' : ''} Filtered history is not an exact-ID submission check.`
+      : 'No events visible in this Night/Bar scope. Use exact-ID Check status for an uncertain submission.';
+  } catch (_) {
+    if (!staffMovementHistoryOwns(context, token)) return;
+    if (offset === 0) { state.rows = []; state.offset = 0; state.hasMore = false; }
+    status.textContent = 'History is unavailable. Existing records may still be present; use exact-ID Check status for an uncertain submission.';
+  } finally {
+    if (state.token === token) {
+      state.busy = false; refresh.disabled = false;
+      if (staffMovementHistoryOwns(context, token)) staffMovementHistoryRender();
+    }
+  }
 }
 
 function isAdminSession() {
@@ -4791,6 +5257,8 @@ let STAFF_OPENING_ERROR_OK = false;
 
 // STAFF_OPENING_ACK_START — one frozen batch; unknown outcomes use read-only checks.
 let STAFF_OPENING_SUBMISSION = null;
+// Keep frozen IDs for a write whose controller became obsolete after the POST.
+const STAFF_OPENING_RETAINED = new Map();
 const STAFF_OPENING_ACK_FIELDS = 'id,client_event_id,venue_id,night_id,bar_id,item_id,qty,action,status,submitted_by,notes,staff_id,source,session_id';
 function staffOpeningContext() {
   const user = SESSION.user;
@@ -4801,16 +5269,36 @@ function staffOpeningSubmissionIsCurrent(batch) {
   const context = staffOpeningContext();
   return !!batch && STAFF_OPENING_SUBMISSION === batch && !!context && context.key === batch.context.key && context.userRef === batch.context.userRef;
 }
+function staffOpeningRetainedCurrent() {
+  const retained = STAFF_OPENING_RETAINED.get(staffUnverifiedWriteScopeKey()) || null;
+  return retained && !staffOpeningSubmissionIsCurrent(STAFF_OPENING_SUBMISSION) ? retained : null;
+}
 function staffOpeningResetObsoleteSubmission() {
   if (STAFF_OPENING_SUBMISSION && !staffOpeningSubmissionIsCurrent(STAFF_OPENING_SUBMISSION)) {
+    const prior = STAFF_OPENING_SUBMISSION;
+    if (prior.writeStarted && !['rejected', 'completed'].includes(prior.phase)) {
+      prior.phase = prior.phase === 'verified' ? 'verified' : 'unknown';
+      STAFF_OPENING_RETAINED.set(prior.writeScope, prior);
+    }
     STAFF_OPENING_SUBMISSION = null;
     STAFF_OPENING_SAVING = false;
     staffOpeningRenderResult();
   }
 }
 function staffOpeningCanEdit() {
+  if (STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey('opening'))) {
+    staffOpeningSetError('A prior opening attempt is retained. Check its status before editing or starting new work.');
+    return false;
+  }
   staffOpeningResetObsoleteSubmission();
   const batch = STAFF_OPENING_SUBMISSION;
+  const retained = staffOpeningRetainedCurrent();
+  if (retained) {
+    staffOpeningSetError(retained.phase === 'verified'
+      ? 'An earlier Opening is verified saved. Cancel this draft before starting another Opening.'
+      : 'An earlier Opening write is unverified. Use Check previous status; no second write will be sent.');
+    return false;
+  }
   if (STAFF_OPENING_SAVING || (batch && batch.phase !== 'rejected')) {
     staffOpeningSetError(batch?.phase === 'verified' || batch?.phase === 'completed'
       ? 'This Opening is already saved. Return to Dispatch; no additional write will be sent.'
@@ -4824,9 +5312,18 @@ function staffOpeningUpdateSaveButton() {
   const button = document.getElementById('staff-opening-save');
   if (!button) return;
   const batch = staffOpeningSubmissionIsCurrent(STAFF_OPENING_SUBMISSION) ? STAFF_OPENING_SUBMISSION : null;
-  button.disabled = STAFF_OPENING_SAVING;
-  button.textContent = STAFF_OPENING_SAVING ? (batch?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+  const retained = staffOpeningRetainedCurrent();
+  const prior = STAFF_ATTEMPT_PRIOR.get(staffAttemptEntryKey('opening'));
+  button.disabled = STAFF_OPENING_SAVING || prior?.state === 'verified';
+  button.textContent = STAFF_OPENING_SAVING ? (batch?.phase === 'checking' || retained?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+    : prior?.state === 'verified' ? 'Prior saved — Cancel' : prior ? 'Check previous status'
+    : retained?.phase === 'verified' ? 'Earlier Opening saved' : retained ? 'Check previous status'
     : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
+  const locked = STAFF_OPENING_SAVING || !!prior || !!retained || !!(batch && !['rejected', 'completed'].includes(batch.phase));
+  document.getElementById('staff-shell-opening')?.querySelectorAll('input,select,textarea,#staff-opening-grid button').forEach(input => {
+    if (input.id?.startsWith('staff-opening-done-') || input.getAttribute('onclick')?.includes('staffOpeningCloseDetail')) return;
+    input.disabled = locked;
+  });
 }
 function staffOpeningNewClientId() {
   const uuid = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
@@ -4837,7 +5334,7 @@ function staffOpeningAcknowledgment(batch, data) {
   const expected = new Map(batch.records.map(record => [record.client_event_id, record]));
   const present = new Set(), verified = new Map(), databaseIds = new Set();
   let mismatched = 0, unexpected = 0;
-  if (!Array.isArray(data)) return { total: expected.size, acknowledged: 0, missing: expected.size, mismatched: 0, unexpected: 0, statuses: {} };
+  if (!Array.isArray(data)) return { total: expected.size, acknowledged: 0, missing: expected.size, mismatched: 0, unexpected: 0, statuses: {}, rows: [] };
   for (const row of data) {
     const record = expected.get(row?.client_event_id);
     if (!record) { unexpected += 1; continue; }
@@ -4854,7 +5351,7 @@ function staffOpeningAcknowledgment(batch, data) {
   }
   const statuses = {};
   for (const row of verified.values()) statuses[row.status] = (statuses[row.status] || 0) + 1;
-  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses };
+  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses, rows: [...verified.values()] };
 }
 function staffOpeningSavedSummary(batch) {
   const statuses = Object.entries(batch.ack.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
@@ -4864,15 +5361,22 @@ function staffOpeningRenderResult() {
   const element = document.getElementById('staff-opening-result');
   if (!element) return;
   const batch = STAFF_OPENING_SUBMISSION;
-  if (!staffOpeningSubmissionIsCurrent(batch) || !['verified', 'completed'].includes(batch.phase)) {
+  const saved = staffOpeningSubmissionIsCurrent(batch) && ['verified', 'completed'].includes(batch.phase)
+    ? batch : staffOpeningRetainedCurrent()?.phase === 'verified' ? staffOpeningRetainedCurrent() : null;
+  if (!saved) {
     element.textContent = ''; element.className = 'alert'; return;
   }
-  element.textContent = staffOpeningSavedSummary(batch) + (batch.completionError ? ' Return to Dispatch is available; the saved rows will not be submitted again.' : '');
+  element.textContent = staffOpeningSavedSummary(saved) + (saved.completionError ? ' Return to Dispatch is available; the saved rows will not be submitted again.' : '');
   element.className = 'alert alert-ok show';
 }
 function staffOpeningComplete(batch, forceReturn = false) {
   if (!staffOpeningSubmissionIsCurrent(batch)) return;
+  if (!batch.ack || batch.ack.acknowledged !== batch.records.length || batch.ack.missing || batch.ack.mismatched || batch.ack.unexpected) return;
   batch.phase = 'verified';
+  if (!batch.receiptRecorded) {
+    batch.receiptRecorded = true;
+    try { if (typeof staffMovementRecordVerified === 'function') staffMovementRecordVerified('opening', batch); } catch (_) {}
+  }
   try {
     if (JSON.stringify(STAFF_OPENING_STATE) === batch.draftKey) STAFF_OPENING_STATE = {};
     staffOpeningSetError(staffOpeningSavedSummary(batch), true);
@@ -4889,6 +5393,7 @@ function staffOpeningComplete(batch, forceReturn = false) {
       return;
     }
     batch.phase = 'completed'; batch.completionError = false;
+    STAFF_OPENING_RETAINED.delete(batch.writeScope);
     staffOpeningRenderResult();
   } catch (_) {
     batch.completionError = true;
@@ -4917,9 +5422,62 @@ async function staffOpeningCheckStatus(batch) {
       rows.push(...data);
     }
     batch.ack = staffOpeningAcknowledgment(batch, rows);
-    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) staffOpeningComplete(batch);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) { await staffAttemptVerified('opening', batch, staffAttemptReceiptAck('opening', batch)); staffOpeningComplete(batch); await staffAttemptReleaseCompleted('opening', batch); }
     else staffOpeningShowUnconfirmed(batch, 'Opening is not fully verified.');
-  } catch (_) { staffOpeningShowUnconfirmed(batch, 'Opening status is unavailable. The earlier result remains unconfirmed.'); }
+  } catch (_) { if (!staffAttemptReportVerifiedLocalFailure('opening', batch)) staffOpeningShowUnconfirmed(batch, 'Opening status is unavailable. The earlier result remains unconfirmed.'); }
+}
+async function staffOpeningCheckRetained(retained, writeScope) {
+  const context = staffOpeningContext();
+  const oldUser = retained.context.userRef, currentUser = context?.userRef;
+  const sameAssignment = !!currentUser && currentUser.assignment_id === oldUser.assignment_id &&
+    JSON.stringify(currentUser.allowed_bar_ids.map(String).sort()) === JSON.stringify(oldUser.allowed_bar_ids.map(String).sort());
+  if (!context || staffUnverifiedWriteScopeKey() !== writeScope || !sameAssignment) {
+    staffOpeningSetError('An earlier Opening write remains unverified under a changed Staff assignment. Review its exact IDs with an authorized Manager before another submission.');
+    return;
+  }
+  const owns = () => STAFF_OPENING_RETAINED.get(writeScope) === retained &&
+    staffUnverifiedWriteScopeKey() === writeScope && staffOpeningContext()?.userRef === context.userRef &&
+    staffOpeningContext()?.key === context.key;
+  if (retained.phase === 'verified') {
+    staffOpeningSetError(staffOpeningSavedSummary(retained) + ' The current draft was preserved. Use Cancel to discard it before a new Opening.', true);
+    return;
+  }
+  retained.phase = 'checking';
+  staffOpeningUpdateSaveButton();
+  try {
+    const rows = [];
+    for (let offset = 0; offset < retained.records.length; offset += 100) {
+      const ids = retained.records.slice(offset, offset + 100).map(record => record.client_event_id);
+      const { data, error } = await SB.from('events').select(STAFF_OPENING_ACK_FIELDS)
+        .eq('venue_id', retained.context.venueId).eq('night_id', retained.context.nightId)
+        .in('client_event_id', ids).limit(ids.length + 1);
+      if (!owns()) return;
+      if (error || !Array.isArray(data)) throw new Error('Opening status could not be read.');
+      rows.push(...data);
+    }
+    retained.ack = staffOpeningAcknowledgment(retained, rows);
+    if (retained.ack.acknowledged === retained.records.length && !retained.ack.missing && !retained.ack.mismatched && !retained.ack.unexpected) {
+      await staffAttemptVerified('opening', retained, retained.ack);
+      retained.phase = 'verified';
+      if (!retained.receiptRecorded) {
+        try { if (typeof staffMovementRecordVerified === 'function')
+          retained.receiptRecorded = staffMovementRecordVerified('opening', { ...retained, context: { ...retained.context, userRef: context.userRef } }) === true;
+        } catch (_) {}
+      }
+      staffOpeningSetError(staffOpeningSavedSummary(retained) + ' The current draft was preserved. Use Cancel to discard it before a new Opening.', true);
+      staffOpeningRenderResult();
+    } else {
+      retained.phase = 'unknown';
+      staffOpeningSetError(`Earlier Opening is not fully verified. Verified ${retained.ack.acknowledged}/${retained.ack.total}; missing from acknowledgment ${retained.ack.missing}; mismatched ${retained.ack.mismatched}; unexpected ${retained.ack.unexpected}. No second write will be sent.`);
+    }
+  } catch (_) {
+    if (owns()) {
+      retained.phase = 'unknown';
+      staffOpeningSetError('Earlier Opening status is unavailable. Its frozen IDs remain retained; no second write will be sent.');
+    }
+  } finally {
+    if (owns()) staffOpeningUpdateSaveButton();
+  }
 }
 // STAFF_OPENING_ACK_END
 
@@ -5003,7 +5561,7 @@ window.staffOpeningAdjust = function(itemId, barId, delta) {
   const key = staffOpeningKey(itemId, barId);
   if (staffOpeningMeasurement(itemId, barId)) delete staffOpeningDomDraft(itemId, barId).grams;
   delete staffOpeningDomDraft(itemId, barId).qty;
-  const current = Object.prototype.hasOwnProperty.call(STAFF_OPENING_STATE, key) ? Number(staffOpeningQuantity(item, bar)) : Number(item.par_level);
+  const current = Number(staffOpeningQuantity(item, bar));
   STAFF_OPENING_STATE[key] = Math.max(0, Math.round((current + Number(delta || 0)) * 100) / 100);
   staffOpeningSetError('');
   renderStaffOpening();
@@ -5166,33 +5724,48 @@ function renderStaffOpening() {
 function openStaffOpening() {
   if (!staffOperationalGuard()) return;
   staffOpeningResetObsoleteSubmission();
-  if (!STAFF_OPENING_SUBMISSION || STAFF_OPENING_SUBMISSION.phase === 'completed') {
+  const retained = staffOpeningRetainedCurrent();
+  if (!retained && (!STAFF_OPENING_SUBMISSION || STAFF_OPENING_SUBMISSION.phase === 'completed')) {
     STAFF_OPENING_STATE = {};
     STAFF_OPENING_DOM_DRAFT = { contextKey: '', fields: {} };
     STAFF_OPENING_DETAIL_ID = '';
     STAFF_OPENING_SUBMISSION = null;
     staffOpeningSetError('');
+    staffOpeningRenderResult();
   }
   showStaffShellView('opening');
+  void staffAttemptOnEntry('opening');
+  if (retained) staffOpeningSetError(retained.phase === 'verified'
+    ? 'An earlier Opening is verified saved. Cancel this draft before starting another Opening.'
+    : 'An earlier Opening write is unverified. Use Check previous status; no second write will be sent.');
 }
 
 async function saveStaffOpening() {
   staffOpeningResetObsoleteSubmission();
   if (STAFF_OPENING_SAVING || !staffOperationalGuard()) return;
+  const retained = staffOpeningRetainedCurrent();
+  if (retained) {
+    STAFF_OPENING_SAVING = true;
+    try { await staffOpeningCheckRetained(retained, staffUnverifiedWriteScopeKey()); }
+    finally { STAFF_OPENING_SAVING = false; staffOpeningUpdateSaveButton(); }
+    return;
+  }
   let batch = STAFF_OPENING_SUBMISSION;
   STAFF_OPENING_SAVING = true;
   try {
-    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffOpeningComplete(batch, true); return; }
+    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffOpeningComplete(batch, true); await staffAttemptReleaseCompleted('opening', batch); return; }
     if (batch && batch.phase !== 'rejected') { await staffOpeningCheckStatus(batch); return; }
+    if (batch?.phase === 'rejected') { STAFF_OPENING_SUBMISSION = null; batch = null; }
     const context = staffOpeningContext();
     if (!context) throw new Error('Staff Opening context is invalid.');
+    if (!batch && await staffAttemptHandlePrior('opening')) return;
     if (!batch) {
       staffOpeningValidateState();
       const rows = staffOpeningRows();
       if (!rows.length) { staffOpeningSetError('No opening stock recorded — all quantities are zero.'); return; }
       const user = SESSION.user;
       batch = {
-        context, phase: 'sending', writeStarted: false, draftKey: JSON.stringify(STAFF_OPENING_STATE),
+        context, writeScope: staffUnverifiedWriteScopeKey(), phase: 'sending', writeStarted: false, draftKey: JSON.stringify(STAFF_OPENING_STATE),
         records: rows.map(row => ({
           venue_id: context.venueId, night_id: context.nightId, bar_id: row.bar.id, item_id: row.item.id, qty: row.qty,
           action: 'DELIVERED', status: 'PENDING', submitted_by: user.name, client_event_id: staffOpeningNewClientId(),
@@ -5212,26 +5785,33 @@ async function saveStaffOpening() {
     const authorized = new Set(staffOpeningBars().map(bar => String(bar.id)));
     const items = new Set(staffOpeningItems().map(item => String(item.id)));
     if (!authorized.size || batch.records.some(record => !authorized.has(String(record.bar_id)) || !items.has(String(record.item_id)))) throw new Error('Opening destination or Item is outside the current Staff scope.');
+    await staffMovementReviewBeforeWrite('opening', batch, () => staffOpeningSubmissionIsCurrent(batch));
+    if (!staffOpeningSubmissionIsCurrent(batch)) return;
+    await staffAttemptBeforeWrite('opening', batch);
+    if (!staffOpeningSubmissionIsCurrent(batch)) return;
     batch.writeStarted = true;
+    STAFF_OPENING_RETAINED.set(batch.writeScope, batch);
     const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_OPENING_ACK_FIELDS);
     if (!staffOpeningSubmissionIsCurrent(batch)) return;
     if (error) {
       // Known database rejections abort the bulk statement. Unknown transport/
       // gateway outcomes and uniqueness conflicts require exact-ID reads.
       if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) {
+        await staffAttemptRejected('opening', batch, String(error.code || ''));
         batch.phase = 'rejected'; batch.writeStarted = false;
+        STAFF_OPENING_RETAINED.delete(batch.writeScope);
         staffOpeningSetError(error.message || 'Opening was rejected. No rows from this batch were accepted.');
       } else staffOpeningShowUnconfirmed(batch, error.message || 'Opening result is unknown.');
       return;
     }
     batch.ack = staffOpeningAcknowledgment(batch, data);
-    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) staffOpeningComplete(batch);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) { await staffAttemptVerified('opening', batch, staffAttemptReceiptAck('opening', batch)); staffOpeningComplete(batch); await staffAttemptReleaseCompleted('opening', batch); }
     else staffOpeningShowUnconfirmed(batch, 'Opening acknowledgment is incomplete.');
   } catch (error) {
     if (batch && !staffOpeningSubmissionIsCurrent(batch)) return;
-    if (batch?.writeStarted) staffOpeningShowUnconfirmed(batch, 'Opening response was not verified.');
+    if (batch?.writeStarted && !staffAttemptReportVerifiedLocalFailure('opening', batch)) staffOpeningShowUnconfirmed(batch, 'Opening response was not verified.');
     else {
-      if (batch) batch.phase = 'rejected';
+      if (batch) { batch.phase = 'rejected'; STAFF_OPENING_RETAINED.delete(batch.writeScope); }
       staffOpeningSetError(error?.message || 'Opening save failed.');
     }
   } finally {
@@ -5247,12 +5827,15 @@ let STAFF_TAKING_SELECTED_BARS = [];
 let STAFF_TAKING_CONTEXT_KEY = '';
 let STAFF_TAKING_SAVING = false;
 let STAFF_TAKING_ERROR = '';
+let STAFF_TAKING_ERROR_OK = false;
+let STAFF_TAKING_SUBMISSION = null;
+// Frozen IDs stay in page memory across a restored session object until exact-ID reconciliation.
+const STAFF_TAKING_RETAINED = new Map();
+const STAFF_TAKING_ACK_FIELDS = STAFF_OPENING_ACK_FIELDS;
 function staffUnverifiedWriteScopeKey() {
   const user = SESSION.user || {};
   return JSON.stringify([SESSION.venueId || '', user.staff_id || '', user.nightId || '']);
 }
-const STAFF_TAKING_WRITE_UNCERTAIN = new Set();
-
 let STAFF_SCALE_ACTIVE_MODE = '';
 let STAFF_SCALE_LIVE_WEIGHT = null;
 let STAFF_SCALE_CONTEXT = { mode: '', itemId: '' };
@@ -5553,8 +6136,208 @@ function staffTakingContextKey() {
   return [SESSION.venueId || '', user.nightId || '', user.staff_id || '', user.assignment_id || '', authorizedBarIds].join('|');
 }
 
+function staffTakingSubmissionIsCurrent(batch) {
+  const context = staffOpeningContext();
+  return !!batch && STAFF_TAKING_SUBMISSION === batch && !!context && context.key === batch.context.key && context.userRef === batch.context.userRef;
+}
+function staffTakingDraftKey() {
+  return JSON.stringify([STAFF_TAKING_STATE, STAFF_TAKING_SELECTED_BARS,
+    document.getElementById('staff-taking-source')?.value || '',
+    document.getElementById('staff-taking-ticket')?.value || '',
+    document.getElementById('staff-taking-note')?.value || '', staffTakingWeightDrafts()]);
+}
+function staffTakingCanEdit() {
+  if (STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey('taking'))) {
+    staffTakingSetError('A prior taking attempt is retained. Check its status before editing or starting new work.');
+    return false;
+  }
+  const batch = STAFF_TAKING_SUBMISSION;
+  const retained = STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey());
+  if (retained && !staffTakingSubmissionIsCurrent(retained)) {
+    staffTakingSetError(retained.phase === 'verified' ? 'A prior Taking was verified. Cancel to start a fresh movement.' : 'A prior Taking is unverified. Check previous status before editing.');
+    return false;
+  }
+  if (STAFF_TAKING_SAVING || (staffTakingSubmissionIsCurrent(batch) && !['rejected', 'completed'].includes(batch.phase))) {
+    staffTakingSetError(batch?.phase === 'verified' ? 'Taking is already saved. Return to Dispatch; no additional write will be sent.'
+      : 'Taking is pending verification. Use Check status before changing this draft.');
+    return false;
+  }
+  if (batch?.phase === 'rejected') STAFF_TAKING_SUBMISSION = null;
+  return true;
+}
+function staffTakingUpdateSaveButton() {
+  const button = document.getElementById('staff-taking-save');
+  const batch = staffTakingSubmissionIsCurrent(STAFF_TAKING_SUBMISSION) ? STAFF_TAKING_SUBMISSION : null;
+  const retained = STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey());
+  const prior = STAFF_ATTEMPT_PRIOR.get(staffAttemptEntryKey('taking'));
+  if (button) {
+    button.disabled = STAFF_TAKING_SAVING || prior?.state === 'verified' || !!retained?.reconcileBusy || (!batch && retained?.phase === 'verified');
+    button.textContent = prior ? (prior.state === 'verified' ? 'Prior saved — Cancel' : 'Check previous status') : !batch && retained ? (retained.phase === 'verified' ? 'Prior saved — Cancel' : 'Check previous status') : STAFF_TAKING_SAVING ? (batch?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+      : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
+  }
+  const locked = STAFF_TAKING_SAVING || !!prior || !!retained || !!(batch && !['rejected', 'completed'].includes(batch.phase));
+  const panel = document.getElementById('staff-shell-taking');
+  panel?.querySelectorAll('input,select,textarea,#staff-taking-grid button,#staff-taking-bars button').forEach(input => {
+    if (input.getAttribute('onclick')?.includes('staffTakingCloseDetail')) return;
+    input.disabled = locked;
+  });
+}
+function staffTakingNewOperationId() {
+  return globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function staffTakingAcknowledgment(batch, data) {
+  const expected = new Map(batch.records.map(record => [record.client_event_id, record]));
+  const present = new Set(), verified = new Map(), databaseIds = new Set();
+  let mismatched = 0, unexpected = 0;
+  if (!Array.isArray(data)) return { total: expected.size, acknowledged: 0, missing: expected.size, mismatched, unexpected, statuses: {}, rows: [] };
+  for (const row of data) {
+    const record = expected.get(row?.client_event_id);
+    if (!record) { unexpected++; continue; }
+    if (present.has(row.client_event_id)) { mismatched++; verified.delete(row.client_event_id); continue; }
+    present.add(row.client_event_id);
+    const matches = typeof row.id === 'string' && !!row.id && !databaseIds.has(row.id) &&
+      row.venue_id === record.venue_id && row.night_id === record.night_id && row.bar_id === record.bar_id && row.item_id === record.item_id &&
+      Number.isFinite(Number(row.qty)) && Number(row.qty) === record.qty && row.action === record.action &&
+      ['PENDING', 'APPROVED', 'REJECTED', 'VOID'].includes(row.status) && row.submitted_by === record.submitted_by &&
+      String(row.notes || '') === record.notes && row.staff_id === null && row.source === null && row.session_id === null;
+    if (!matches) { mismatched++; continue; }
+    databaseIds.add(row.id);
+    verified.set(row.client_event_id, row);
+  }
+  const statuses = {};
+  for (const row of verified.values()) statuses[row.status] = (statuses[row.status] || 0) + 1;
+  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses, rows: [...verified.values()] };
+}
+function staffTakingSavedSummary(batch) {
+  const statuses = Object.entries(batch.ack.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
+  return `Taking saved: ${batch.records.length} rows. ${statuses}. Attempt ${batch.operationId}.`;
+}
+function staffTakingRenderResult() {
+  const element = document.getElementById('staff-taking-result'), batch = STAFF_TAKING_SUBMISSION;
+  if (!element) return;
+  if (!staffTakingSubmissionIsCurrent(batch) || !['verified', 'completed'].includes(batch.phase)) {
+    element.textContent = ''; element.className = 'alert'; return;
+  }
+  element.textContent = staffTakingSavedSummary(batch) + (batch.completionError ? ' Return to Dispatch is available; no further write will be sent.' : '');
+  element.className = 'alert alert-ok show';
+}
+function staffTakingComplete(batch, forceReturn = false) {
+  if (!staffTakingSubmissionIsCurrent(batch) || !batch.ack || batch.ack.acknowledged !== batch.records.length ||
+      batch.ack.missing || batch.ack.mismatched || batch.ack.unexpected) return;
+  batch.phase = 'verified';
+  if (STAFF_TAKING_RETAINED.get(batch.writeScope) === batch) STAFF_TAKING_RETAINED.delete(batch.writeScope);
+  if (!batch.receiptRecorded) {
+    batch.receiptRecorded = true;
+    try { if (typeof staffMovementRecordVerified === 'function') staffMovementRecordVerified('taking', batch); } catch (_) {}
+  }
+  try {
+    if (staffTakingDraftKey() === batch.draftKey) {
+      STAFF_TAKING_STATE = {};
+      STAFF_TAKING_SELECTED_BARS = [];
+      STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} };
+      for (const [id, value] of [['staff-taking-source', 'Main Liquor Room'], ['staff-taking-ticket', ''], ['staff-taking-note', '']]) {
+        const field = document.getElementById(id); if (field) field.value = value;
+      }
+      STAFF_ITEM_FILTERS.taking.query = ''; STAFF_ITEM_FILTERS.taking.category = '';
+    } else {
+      batch.completionError = true;
+      staffTakingSetError(staffTakingSavedSummary(batch) + ' A newer unsent edit remains; review before leaving. No further write will be sent.', true);
+      staffTakingRenderResult(); return;
+    }
+    staffTakingSetError(staffTakingSavedSummary(batch), true);
+    staffTakingRenderResult();
+    const taking = document.getElementById('staff-shell-taking'), dispatch = document.getElementById('staff-shell-dispatch');
+    if (forceReturn || !taking || taking.style.display !== 'none') {
+      showStaffShellView('dispatch');
+      if (!taking || taking.style.display !== 'none' || !dispatch || dispatch.style.display === 'none') throw new Error('Taking completion navigation is not confirmed.');
+    } else if (!dispatch || dispatch.style.display === 'none') return;
+    batch.phase = 'completed'; batch.completionError = false;
+    staffTakingRenderResult();
+  } catch (_) {
+    batch.completionError = true;
+    try { staffTakingSetError(staffTakingSavedSummary(batch) + ' Could not return to Dispatch. Use Return to Dispatch; no additional write will be sent.', true); } catch (_) {}
+    try { staffTakingRenderResult(); } catch (_) {}
+  }
+}
+function staffTakingShowUnconfirmed(batch, message) {
+  if (!staffTakingSubmissionIsCurrent(batch)) return;
+  batch.phase = 'unknown';
+  const ack = batch.ack || { total: batch.records.length, acknowledged: 0, missing: batch.records.length, mismatched: 0, unexpected: 0 };
+  staffTakingSetError(`${message} Verified ${ack.acknowledged}/${ack.total}; missing from acknowledgment ${ack.missing}; mismatched ${ack.mismatched}; unexpected ${ack.unexpected}. Use Check status. No further write will be sent.`);
+}
+// A session object can be restored while an INSERT is in flight. Preserve the frozen
+// IDs and reconcile them read-only before allowing another same-scope Taking write.
+async function staffTakingCheckRetained(batch, writeScope) {
+  if (batch.reconcileBusy) return;
+  const context = staffOpeningContext();
+  const stillAuthorized = () => {
+    const current = staffOpeningContext();
+    return !!current && current.key === batch.context.key &&
+      staffUnverifiedWriteScopeKey() === writeScope && STAFF_TAKING_RETAINED.get(writeScope) === batch;
+  };
+  if (!context || !stillAuthorized()) {
+    staffTakingSetError('A prior Taking may be saved, but this Staff assignment or Night changed. Do not submit again. Review the scoped Log with a Manager.');
+    return;
+  }
+  if (batch.phase === 'verified') {
+    staffTakingSetError(staffTakingSavedSummary(batch) + ' Cancel to start a fresh movement; no additional write was sent.', true);
+    return;
+  }
+  batch.reconcileBusy = true;
+  staffTakingSetError('Checking the prior Taking by its original row IDs…');
+  staffTakingUpdateSaveButton();
+  try {
+    const rows = [];
+    for (let offset = 0; offset < batch.records.length; offset += 100) {
+      const ids = batch.records.slice(offset, offset + 100).map(record => record.client_event_id);
+      const { data, error } = await SB.from('events').select(STAFF_TAKING_ACK_FIELDS)
+        .eq('venue_id', batch.context.venueId).eq('night_id', batch.context.nightId).in('client_event_id', ids).limit(ids.length + 1);
+      if (!stillAuthorized()) return;
+      if (error || !Array.isArray(data)) throw new Error('Taking status could not be read.');
+      rows.push(...data);
+    }
+    batch.ack = staffTakingAcknowledgment(batch, rows);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) {
+      await staffAttemptVerified('taking', batch, batch.ack);
+      batch.phase = 'verified';
+      if (!batch.receiptRecorded) {
+        try { batch.receiptRecorded = staffMovementRecordVerified('taking', { ...batch, context: { ...batch.context, userRef: context.userRef } }) === true; } catch (_) {}
+      }
+      staffTakingSetError(staffTakingSavedSummary(batch) + ' Cancel to start a fresh movement; no additional write was sent.', true);
+    } else {
+      batch.phase = 'unknown';
+      staffTakingSetError(`Prior Taking is not fully verified: ${batch.ack.acknowledged}/${batch.records.length} rows match. Do not submit again; review the scoped Log.`);
+    }
+  } catch (_) {
+    batch.phase = 'unknown';
+    if (stillAuthorized()) staffTakingSetError('Prior Taking status is unavailable. Do not submit again; review the scoped Log.');
+  } finally {
+    batch.reconcileBusy = false;
+    staffTakingUpdateSaveButton();
+  }
+}
+async function staffTakingCheckStatus(batch) {
+  batch.phase = 'checking'; staffTakingUpdateSaveButton();
+  try {
+    const rows = [];
+    for (let offset = 0; offset < batch.records.length; offset += 100) {
+      const ids = batch.records.slice(offset, offset + 100).map(record => record.client_event_id);
+      const { data, error } = await SB.from('events').select(STAFF_TAKING_ACK_FIELDS)
+        .eq('venue_id', batch.context.venueId).eq('night_id', batch.context.nightId).in('client_event_id', ids).limit(ids.length + 1);
+      if (!staffTakingSubmissionIsCurrent(batch)) return;
+      if (error || !Array.isArray(data)) throw new Error('Taking status could not be read.');
+      rows.push(...data);
+    }
+    batch.ack = staffTakingAcknowledgment(batch, rows);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) { await staffAttemptVerified('taking', batch, staffAttemptReceiptAck('taking', batch)); staffTakingComplete(batch); await staffAttemptReleaseCompleted('taking', batch); }
+    else staffTakingShowUnconfirmed(batch, 'Taking is not fully verified.');
+  } catch (_) { if (!staffAttemptReportVerifiedLocalFailure('taking', batch)) staffTakingShowUnconfirmed(batch, 'Taking status is unavailable. The earlier result remains unconfirmed.'); }
+}
+
 function staffTakingSetError(message, ok = false) {
   STAFF_TAKING_ERROR = message || '';
+  STAFF_TAKING_ERROR_OK = !!ok;
   const el = document.getElementById('staff-taking-error');
   if (!el) return;
   el.textContent = STAFF_TAKING_ERROR;
@@ -5573,7 +6356,7 @@ function staffTakingReadQty(itemId) {
 }
 
 function staffTakingAdjust(itemId, type, delta) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffTakingCanEdit()) return;
   const item = staffTakingItems().find(candidate => String(candidate.id) === String(itemId));
   if (!item || !['taken', 'comp', 'shot'].includes(type)) { staffTakingSetError('That Taking Item or action is not available.'); return; }
   const amount = Number(delta);
@@ -5607,7 +6390,7 @@ function staffTakingWeightFeedback(itemId, message, ok = false) {
 }
 
 function staffTakingApplyWeight(itemId, rawWeight = null) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffTakingCanEdit()) return;
   if (STAFF_TAKING_SELECTED_BARS.length !== 1) { staffTakingWeightFeedback(itemId, 'Weighed Taking requires exactly one authorized destination Bar. Select one destination above; your grams draft is unchanged.'); return; }
   const item = staffTakingItems().find(candidate => String(candidate.id) === String(itemId));
   const input = document.getElementById('staff-taking-weight-' + itemId);
@@ -5623,7 +6406,7 @@ function staffTakingApplyWeight(itemId, rawWeight = null) {
 }
 
 function staffTakingToggleBar(barId, checked) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffTakingCanEdit()) return;
   const id = String(barId);
   const allowed = new Set((SESSION.cache.authorizedBars || []).map(bar => String(bar.id)));
   if (!allowed.has(id)) { staffTakingSetError('That destination Bar is outside the Staff scope.'); renderStaffTaking(); return; }
@@ -7069,7 +7852,10 @@ function staffScannerFocusItem(mode, item, barcode = '') {
 
 function staffScannerApplyResolved(match) {
   const mode = STAFF_SCANNER.mode;
+  if (mode === 'opening' && !staffOpeningCanEdit()) { staffScannerSetFeedback('Opening submission is awaiting verification. Use its status controls.', 'warn'); return { status: 'SUBMISSION_PENDING' }; }
+  if (mode === 'taking' && !staffTakingCanEdit()) { staffScannerSetFeedback('Taking submission is awaiting verification. Use its status controls.', 'warn'); return { status: 'SUBMISSION_PENDING' }; }
   if (mode === 'returning' && !staffReturningCanEdit()) { staffScannerSetFeedback('Returning submission is awaiting verification. Use its status controls.', 'warn'); return { status: 'SUBMISSION_PENDING' }; }
+  if (mode === 'transfer' && !staffTransferCanEdit()) { staffScannerSetFeedback('Transfer submission is awaiting verification. Use its status controls.', 'warn'); return { status: 'SUBMISSION_PENDING' }; }
   const item = match.item || {};
   STAFF_SCANNER.result = match;
   if (mode === 'quick') {
@@ -7435,6 +8221,7 @@ async function staffQuickScanOpenWorkflow(mode, itemId) {
   await staffScannerClose();
   if (mode === 'returning' && !STAFF_RETURNING_SOURCE_BAR) STAFF_RETURNING_SOURCE_BAR = String(staffReturningBars()[0]?.id || '');
   if (mode === 'transfer') {
+    if (!staffTransferCanEdit()) return;
     const bars = staffTransferBars();
     if (bars.length < 2) return;
     if (!bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.sourceBar))) STAFF_TRANSFER_STATE.sourceBar = String(bars[0].id);
@@ -7468,7 +8255,7 @@ function staffDispatchSwitchMarkup(mode, selectedId) {
 function staffDispatchResetItem(mode, itemId) {
   if (!staffOperationalGuard()) return;
   const id = String(itemId);
-  if (mode === 'taking') { delete STAFF_TAKING_STATE[id]; delete staffTakingWeightDrafts()[id]; renderStaffTaking(); }
+  if (mode === 'taking') { if (!staffTakingCanEdit()) return; delete STAFF_TAKING_STATE[id]; delete staffTakingWeightDrafts()[id]; renderStaffTaking(); }
   else if (mode === 'returning') {
     if (!staffReturningCanEdit()) return;
     delete STAFF_RETURNING_STATE[id];
@@ -7498,6 +8285,7 @@ function staffReturningAdjust(itemId, delta) {
 
 function staffDispatchSwitchBar(mode, barId) {
   if (!staffOperationalGuard()) return;
+  if (mode === 'taking' && !staffTakingCanEdit()) return;
   const id = String(barId || '');
   if (!staffDispatchAuthorizedBars().some(bar => String(bar.id) === id)) {
     if (mode === 'taking') staffTakingSetError('That Bar is outside the Staff scope.');
@@ -7506,11 +8294,12 @@ function staffDispatchSwitchBar(mode, barId) {
   }
   if (mode === 'taking') { STAFF_TAKING_SELECTED_BARS = [id]; renderStaffTaking(); }
   else if (mode === 'returning') staffReturningSourceChanged(id);
-  else if (mode === 'transfer') { STAFF_TRANSFER_STATE.sourceBar = id; if (String(STAFF_TRANSFER_STATE.destinationBar) === id) STAFF_TRANSFER_STATE.destinationBar = String(staffDispatchAuthorizedBars().find(bar => String(bar.id) !== id)?.id || ''); renderStaffTransfer(); }
+  else if (mode === 'transfer') { if (!staffTransferCanEdit()) return; STAFF_TRANSFER_STATE.sourceBar = id; if (String(STAFF_TRANSFER_STATE.destinationBar) === id) STAFF_TRANSFER_STATE.destinationBar = String(staffDispatchAuthorizedBars().find(bar => String(bar.id) !== id)?.id || ''); renderStaffTransfer(); }
 }
 
 function openStaffTransferForItem(itemId) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffTransferCanEdit()) return;
+  if (document.getElementById('staff-dashboard')?.dataset.staffView === 'taking' && !staffTakingCanEdit()) return;
   const bars = staffDispatchAuthorizedBars();
   const item = staffTransferItems().find(candidate => String(candidate.id) === String(itemId));
   if (bars.length < 2 || !item) { staffTransferSetError('Transfer requires two authorized Bars and an active Item.'); return; }
@@ -7771,11 +8560,19 @@ function renderStaffTaking() {
     else STAFF_TAKING_DETAIL_ID = '';
   }
   preview.innerHTML = rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Destination Bar</th><th>Action</th><th>Quantity</th></tr></thead><tbody>${[...rows].sort((a, b) => staffBarDisplayCompare(a.bar, b.bar)).map(row => `<tr><td data-label="Item">${esc(row.item.name)}</td><td data-label="Destination Bar" data-staff-bar-display="${esc(row.bar.id)}">${esc(staffBarIdentityDisplayText(row.bar))}</td><td data-label="Action">${esc(row.action)}</td><td data-label="Quantity">${esc(staffFormatQuantity(row.qty))}${row.measurement ? ` · ${esc(staffScaleMeasurementSummary(row.item, row.measurement))}` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-text">No Taking movements recorded yet.</div>';
-  staffTakingSetError(STAFF_TAKING_ERROR);
+  staffTakingSetError(STAFF_TAKING_ERROR, STAFF_TAKING_ERROR_OK);
+  staffTakingUpdateSaveButton();
 }
 
 function openStaffTaking() {
   if (!staffOperationalGuard()) return;
+  const retained = STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey());
+  if (retained && retained.phase !== 'rejected') {
+    showStaffShellView('taking');
+    staffTakingSetError(retained.phase === 'verified' ? 'A prior Taking was verified. Cancel to start a fresh movement; no new write will be sent.' : 'A prior Taking is unverified. Use Check previous status; no new write will be sent.');
+    staffTakingUpdateSaveButton();
+    return;
+  }
   const contextKey = staffTakingContextKey();
   if (STAFF_TAKING_CONTEXT_KEY !== contextKey) {
     STAFF_TAKING_CONTEXT_KEY = contextKey;
@@ -7784,52 +8581,94 @@ function openStaffTaking() {
   } else {
     STAFF_TAKING_STATE = {};
   }
+  STAFF_TAKING_SELECTED_BARS = [];
+  STAFF_TAKING_WEIGHT_DRAFT = { contextKey: '', fields: {} };
+  if (STAFF_TAKING_SUBMISSION?.phase === 'completed') STAFF_TAKING_SUBMISSION = null;
+  staffTakingRenderResult();
+  for (const [id, value] of [['staff-taking-source', 'Main Liquor Room'], ['staff-taking-ticket', ''], ['staff-taking-note', '']]) {
+    const field = document.getElementById(id); if (field) field.value = value;
+  }
   STAFF_TAKING_ERROR = '';
+  STAFF_TAKING_ERROR_OK = false;
   showStaffShellView('taking');
+  void staffAttemptOnEntry('taking');
 }
 
 async function saveStaffTaking() {
   if (STAFF_TAKING_SAVING || !staffOperationalGuard()) return;
   const writeScope = staffUnverifiedWriteScopeKey();
-  if (STAFF_TAKING_WRITE_UNCERTAIN.has(writeScope)) { staffTakingSetError('A previous Taking response is unverified. Check the Log before another submission.'); return; }
+  const retained = STAFF_TAKING_RETAINED.get(writeScope);
+  if (retained && !staffTakingSubmissionIsCurrent(retained)) { await staffTakingCheckRetained(retained, writeScope); return; }
+  let batch = STAFF_TAKING_SUBMISSION;
+  if (batch && !staffTakingSubmissionIsCurrent(batch)) { STAFF_TAKING_SUBMISSION = null; batch = null; }
   STAFF_TAKING_SAVING = true;
-  let writeStarted = false;
-  const button = document.getElementById('staff-taking-save');
-  if (button) button.disabled = true;
   try {
+    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffTakingComplete(batch, true); await staffAttemptReleaseCompleted('taking', batch); return; }
+    if (batch && batch.phase !== 'rejected') { await staffTakingCheckStatus(batch); return; }
+    if (batch) { STAFF_TAKING_SUBMISSION = null; batch = null; }
     const user = SESSION.user || {};
-    if (SESSION.type !== 'barback' || APP_MODE !== 'staff' || !SESSION.venueId || !user.nightId || !user.name || !Array.isArray(user.allowed_bar_ids)) throw new Error('Staff Taking context is invalid.');
-    await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids });
-    await hydrateStaffTakingItems();
+    const context = staffOpeningContext();
+    if (!context) throw new Error('Staff Taking context is invalid.');
+    if (await staffAttemptHandlePrior('taking')) return;
     staffTakingValidateState();
     const rows = staffTakingRows();
     if (!rows.length) throw new Error('Nothing to save — adjust a Taking Item first.');
     const source = document.getElementById('staff-taking-source')?.value || 'Main Liquor Room';
     const ticket = document.getElementById('staff-taking-ticket')?.value.trim() || '';
     const note = document.getElementById('staff-taking-note')?.value.trim() || '';
-    const records = rows.map(row => {
+    const operationId = staffTakingNewOperationId();
+    const records = rows.map((row, index) => {
       const label = row.type === 'taken' ? `Dispatch from ${source}` : `${row.type === 'comp' ? 'COMP' : 'SHOT'} from ${source}`;
       const noteParts = [label, note ? `Note: ${note}` : '', ticket ? `Ticket: ${ticket}` : ''].filter(Boolean);
       const measurementNote = row.measurement ? staffScaleNote(row.measurement) : '';
-      return { venue_id: SESSION.venueId, night_id: user.nightId, bar_id: row.bar.id, item_id: row.item.id, qty: row.measurement ? 1 : row.qty, action: row.action, status: 'PENDING', submitted_by: user.name, notes: [noteParts.join(' | '), measurementNote].filter(Boolean).join(' | ') };
+      return { venue_id: context.venueId, night_id: context.nightId, bar_id: row.bar.id, item_id: row.item.id,
+        qty: row.measurement ? 1 : row.qty, action: row.action, status: 'PENDING', submitted_by: user.name,
+        client_event_id: `staff-taking-${operationId}-${index}`, notes: [noteParts.join(' | '), measurementNote].filter(Boolean).join(' | ') };
     });
-    writeStarted = true;
-    const { error } = await SB.from('events').insert(records);
+    batch = { context, operationId, records, phase: 'sending', writeStarted: false, writeScope, draftKey: staffTakingDraftKey() };
+    STAFF_TAKING_SUBMISSION = batch;
+    staffTakingSetError('Submitting Taking…');
+    staffTakingUpdateSaveButton();
+    // Stage fresh authorization/catalog reads without allowing stale responses to mutate the active session.
+    const bars = await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: [...user.allowed_bar_ids] }, { stageOnly: true });
+    if (!staffTakingSubmissionIsCurrent(batch)) return;
+    const items = await hydrateStaffTakingItems({ stageOnly: true });
+    if (!staffTakingSubmissionIsCurrent(batch)) return;
+    const authorized = new Set(bars.map(bar => String(bar.id)));
+    const hasVipDestination = bars.some(bar => STAFF_TAKING_SELECTED_BARS.includes(String(bar.id)) && String(bar.bar_type || '').toLowerCase() === 'vip');
+    const activeItems = new Map(items.filter(item => hasVipDestination || (item.service_mode || 'regular_bar') !== 'vip_only' || item.service_mode === 'all_bars')
+      .map(item => [String(item.id), item]));
+    if (records.some(record => !authorized.has(String(record.bar_id)) || !activeItems.has(String(record.item_id))))
+      throw new Error('Taking destination or Item is outside the current Staff scope.');
+    if (rows.some(row => row.measurement && !staffScreenRefreshEqual(staffScaleProfile(row.item), staffScaleProfile(activeItems.get(String(row.item.id))))))
+      throw new Error('Taking bottle profile changed. Review the measured Item before saving.');
+    await staffMovementReviewBeforeWrite('taking', batch, () => staffTakingSubmissionIsCurrent(batch));
+    if (!staffTakingSubmissionIsCurrent(batch)) return;
+    await staffAttemptBeforeWrite('taking', batch);
+    if (!staffTakingSubmissionIsCurrent(batch)) return;
+    batch.writeStarted = true;
+    STAFF_TAKING_RETAINED.set(writeScope, batch);
+    const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_TAKING_ACK_FIELDS);
+    if (!staffTakingSubmissionIsCurrent(batch)) return;
     if (error) {
-      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) writeStarted = false;
-      throw new Error(error.message || 'Taking save failed.');
+      if (/^(42501|23502|23503|23514|22023|22P02|P0001)$/.test(String(error.code || ''))) {
+        await staffAttemptRejected('taking', batch, String(error.code || ''));
+        batch.phase = 'rejected'; batch.writeStarted = false;
+        if (STAFF_TAKING_RETAINED.get(writeScope) === batch) STAFF_TAKING_RETAINED.delete(writeScope);
+        staffTakingSetError(error.message || 'Taking was rejected. No rows from this batch were accepted.');
+      } else staffTakingShowUnconfirmed(batch, error.message || 'Taking result is unknown.');
+      return;
     }
-    writeStarted = false;
-    STAFF_TAKING_WRITE_UNCERTAIN.delete(writeScope);
-    STAFF_TAKING_STATE = {};
-    staffTakingSetError(`Taking submitted: ${records.length} movement rows across ${new Set(records.map(record => record.bar_id)).size} authorized Bars.`, true);
-    renderStaffTaking();
+    batch.ack = staffTakingAcknowledgment(batch, data);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) { await staffAttemptVerified('taking', batch, staffAttemptReceiptAck('taking', batch)); staffTakingComplete(batch); await staffAttemptReleaseCompleted('taking', batch); }
+    else staffTakingShowUnconfirmed(batch, 'Taking acknowledgment is incomplete.');
   } catch (error) {
-    if (writeStarted) STAFF_TAKING_WRITE_UNCERTAIN.add(writeScope);
-    staffTakingSetError(writeStarted ? 'Taking response could not be verified. Check the Log before another submission.' : error?.message || 'Taking save failed.');
+    if (batch && !staffTakingSubmissionIsCurrent(batch)) return;
+    if (batch?.writeStarted && !staffAttemptReportVerifiedLocalFailure('taking', batch)) staffTakingShowUnconfirmed(batch, 'Taking response was not verified.');
+    else { if (batch) batch.phase = 'rejected'; staffTakingSetError(error?.message || 'Taking save failed.'); }
   } finally {
     STAFF_TAKING_SAVING = false;
-    if (button) button.disabled = false;
+    staffTakingUpdateSaveButton();
   }
 }
 
@@ -7882,6 +8721,10 @@ function staffReturningResetObsoleteSubmission() {
 }
 
 function staffReturningCanEdit() {
+  if (STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey('returning'))) {
+    staffReturningSetError('A prior returning attempt is retained. Check its status before editing or starting new work.');
+    return false;
+  }
   staffReturningResetObsoleteSubmission();
   const batch = STAFF_RETURNING_SUBMISSION;
   if (STAFF_RETURNING_SAVING || (batch && batch.phase !== 'rejected')) {
@@ -7895,7 +8738,7 @@ function staffReturningCanEdit() {
 }
 function staffReturningLockControls() {
   const batch = staffReturningSubmissionIsCurrent(STAFF_RETURNING_SUBMISSION) ? STAFF_RETURNING_SUBMISSION : null;
-  const locked = STAFF_RETURNING_SAVING || !!(batch && batch.phase !== 'rejected');
+  const locked = STAFF_RETURNING_SAVING || STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey('returning')) || !!(batch && batch.phase !== 'rejected');
   const grid = document.getElementById('staff-returning-grid');
   const source = document.getElementById('staff-returning-source-bar');
   const controls = [...(grid?.querySelectorAll('input,button,select') || []), ...(source ? [source] : [])];
@@ -7933,32 +8776,16 @@ function staffReturningValidateFrozen(batch) {
 }
 function staffReturningClearSubmittedDraft(batch) {
   if (batch.preserveCurrentDraft) return;
-  for (const record of batch.records) {
-    const itemId = String(record.item_id), submitted = batch.frozenState[itemId];
-    const applied = JSON.stringify(submitted ?? null);
-    if (JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null) === applied) delete STAFF_RETURNING_STATE[itemId];
-    const currentApplied = JSON.stringify(STAFF_RETURNING_STATE[itemId] ?? null);
-    for (const kind of ['qty', 'weight']) {
-      const id = 'staff-returning-' + kind + '-' + itemId;
-      const input = document.getElementById(id);
-      const field = STAFF_RETURNING_DOM_DRAFT.fields[id];
-      const captured = batch.domFields[id];
-      const value = input ? input.value : field?.value;
-      if (value === undefined) continue;
-      const selectedQty = Number(submitted && typeof submitted === 'object' ? submitted.qty : submitted);
-      const manualWeightDraft = kind === 'weight' && (input?.dataset.staffWeightEdited === '1' || field?.weightEdited === true);
-      const consumed = !manualWeightDraft && currentApplied === 'null' && captured && value === captured.value &&
-        (kind === 'qty' ? Number(value) === selectedQty : submitted?.measurement && Number(value) === Number(submitted.measurement.weightG));
-      if (consumed) {
-        delete STAFF_RETURNING_DOM_DRAFT.fields[id];
-        if (input) { input.value = kind === 'qty' ? '0' : ''; input.dataset.returningApplied = currentApplied; }
-      } else {
-        // Unapplied or newer raw text is retained as a draft, never a movement.
-        STAFF_RETURNING_DOM_DRAFT.fields[id] = { value, applied: currentApplied, ...(manualWeightDraft ? { weightEdited: true } : {}) };
-        if (input) input.dataset.returningApplied = currentApplied;
-      }
-    }
-  }
+  // These controls were frozen before the write. A verified operation consumes
+  // the whole source-Bar draft, including grams that were never applied.
+  STAFF_RETURNING_STATE = {};
+  STAFF_RETURNING_DOM_DRAFT = { contextKey: '', fields: {}, focus: null };
+  STAFF_RETURNING_DETAIL_ID = '';
+  document.querySelectorAll('#staff-returning-grid input[id^="staff-returning-qty-"], #staff-returning-grid input[id^="staff-returning-weight-"]').forEach(input => {
+    input.value = input.id.startsWith('staff-returning-qty-') ? '0' : '';
+    delete input.dataset.staffWeightEdited;
+    delete input.dataset.staffWeightOrigin;
+  });
 }
 function staffReturningNewClientId() {
   const uuid = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
@@ -7986,7 +8813,7 @@ function staffReturningAcknowledgment(batch, data) {
   }
   const statuses = {};
   for (const row of verified.values()) statuses[row.status] = (statuses[row.status] || 0) + 1;
-  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses };
+  return { total: expected.size, acknowledged: verified.size, missing: expected.size - present.size, mismatched, unexpected, statuses, rows: [...verified.values()] };
 }
 function staffReturningSavedSummary(batch) {
   const statuses = Object.entries(batch.ack.statuses).map(([status, count]) => `${status}: ${count}`).join(' · ');
@@ -8007,6 +8834,7 @@ function staffReturningComplete(batch, forceReturn = false) {
   batch.phase = 'verified';
   try {
     staffReturningClearSubmittedDraft(batch);
+    if (!batch.receiptRecorded) { try { if (typeof staffMovementRecordVerified === 'function') staffMovementRecordVerified('returning', batch); } catch (_) {} batch.receiptRecorded = true; }
     staffReturningSetError(staffReturningSavedSummary(batch), true);
     staffReturningRenderResult();
     const returning = document.getElementById('staff-shell-returning');
@@ -8050,9 +8878,9 @@ async function staffReturningCheckStatus(batch) {
       rows.push(...data);
     }
     batch.ack = staffReturningAcknowledgment(batch, rows);
-    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) staffReturningComplete(batch);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.mismatched && !batch.ack.unexpected && !batch.ack.missing) { await staffAttemptVerified('returning', batch, staffAttemptReceiptAck('returning', batch)); staffReturningComplete(batch); await staffAttemptReleaseCompleted('returning', batch); }
     else staffReturningShowUnconfirmed(batch, 'Returning is not fully verified.');
-  } catch (_) { staffReturningShowUnconfirmed(batch, 'Returning status is unavailable. The earlier result remains unconfirmed.'); }
+  } catch (_) { if (!staffAttemptReportVerifiedLocalFailure('returning', batch)) staffReturningShowUnconfirmed(batch, 'Returning status is unavailable. The earlier result remains unconfirmed.'); }
 }
 // STAFF_RETURNING_ACK_END
 
@@ -8457,13 +9285,15 @@ function staffReturningRenderSubmitState() {
   const button = document.getElementById('staff-returning-save');
   if (!button) return;
   const batch = staffReturningSubmissionIsCurrent(STAFF_RETURNING_SUBMISSION) ? STAFF_RETURNING_SUBMISSION : null;
-  const readOnly = batch && ['unknown', 'verified', 'completed'].includes(batch.phase);
+  const prior = STAFF_ATTEMPT_PRIOR.get(staffAttemptEntryKey('returning'));
+  const readOnly = !!prior || (batch && ['unknown', 'verified', 'completed'].includes(batch.phase));
   let validSelection = false;
   if (!readOnly && staffReturningHistoryState().status === 'ready') {
     try { staffReturningValidateState(); validSelection = staffReturningRows().length > 0; } catch {}
   }
-  button.disabled = STAFF_RETURNING_SAVING || (!readOnly && !validSelection);
+  button.disabled = STAFF_RETURNING_SAVING || prior?.state === 'verified' || (!readOnly && !validSelection);
   button.textContent = STAFF_RETURNING_SAVING ? (batch?.phase === 'checking' ? 'Checking status…' : 'Submitting…')
+    : prior ? (prior.state === 'verified' ? 'Prior saved — Cancel' : 'Check previous status')
     : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
   button.setAttribute('aria-describedby', 'staff-returning-interaction-help');
   staffReturningLockControls();
@@ -8617,7 +9447,10 @@ async function openStaffReturning() {
     return;
   }
   if (batch) { STAFF_RETURNING_SUBMISSION = null; staffReturningRenderResult(); }
+  // Check the current screen's draft before changing its source scope; capture
+  // uses the source Bar to bind quantity and grams to the correct history.
   if (staffReturningHasDrafts()) { showStaffShellView('returning'); staffReturningSetError('Your unsaved Returning draft is preserved. Review it before switching Bar.'); return; }
+  if (batch) STAFF_RETURNING_SOURCE_BAR = '';
   STAFF_RETURNING_STATE = {};
   const currentScope = staffWorkspaceScope();
   const priorScope = STAFF_WORKSPACE_UI.entries.returning;
@@ -8625,6 +9458,7 @@ async function openStaffReturning() {
   if (!sameScope || !staffReturningBars().some(bar => String(bar.id) === String(STAFF_RETURNING_SOURCE_BAR))) STAFF_RETURNING_SOURCE_BAR = '';
   STAFF_RETURNING_ERROR = '';
   showStaffShellView('returning');
+  void staffAttemptOnEntry('returning');
   if (!STAFF_RETURNING_SOURCE_BAR) return;
   try { await hydrateStaffReturningHistory(); renderStaffReturning(); }
   catch (error) { if (!error?.staffLookupStale) staffReturningSetError(error?.message || 'Approved return history could not be loaded.'); }
@@ -8636,10 +9470,12 @@ async function saveStaffReturning() {
   let batch = STAFF_RETURNING_SUBMISSION;
   STAFF_RETURNING_SAVING = true;
   try {
-    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffReturningComplete(batch, true); return; }
+    if (batch && ['verified', 'completed'].includes(batch.phase)) { staffReturningComplete(batch, true); await staffAttemptReleaseCompleted('returning', batch); return; }
     if (batch && batch.phase !== 'rejected') { await staffReturningCheckStatus(batch); return; }
+    if (batch?.phase === 'rejected') { STAFF_RETURNING_SUBMISSION = null; batch = null; }
     const context = staffReturningContext();
     if (!context) throw new Error('Staff Returning context is invalid.');
+    if (!batch && await staffAttemptHandlePrior('returning')) return;
     if (!batch) {
       staffReturningCaptureDrafts();
       const frozenState = JSON.parse(JSON.stringify(STAFF_RETURNING_STATE));
@@ -8667,22 +9503,27 @@ async function saveStaffReturning() {
     staffReturningFrozenMeasurementSafe(batch);
     staffReturningValidateFrozen(batch);
     staffReturningFrozenMeasurementSafe(batch);
+    await staffMovementReviewBeforeWrite('returning', batch, () => staffReturningSubmissionIsCurrent(batch));
+    if (!staffReturningSubmissionIsCurrent(batch)) return;
+    await staffAttemptBeforeWrite('returning', batch);
+    if (!staffReturningSubmissionIsCurrent(batch)) return;
     batch.writeStarted = true;
     const { data, error } = await SB.from('events').insert(batch.records).select(STAFF_RETURNING_ACK_FIELDS);
     if (!staffReturningSubmissionIsCurrent(batch)) return;
     if (error) {
       if (/^(42501|23502|23503|23514|22023|22P02|P0001)$/.test(String(error.code || ''))) {
+        await staffAttemptRejected('returning', batch, String(error.code || ''));
         batch.phase = 'rejected'; batch.writeStarted = false;
         staffReturningSetError(error.message || 'Returning was rejected. No rows from this batch were accepted.');
       } else staffReturningShowUnconfirmed(batch, error.message || 'Returning result is unknown.');
       return;
     }
     batch.ack = staffReturningAcknowledgment(batch, data);
-    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) staffReturningComplete(batch);
+    if (batch.ack.acknowledged === batch.records.length && !batch.ack.missing && !batch.ack.mismatched && !batch.ack.unexpected) { await staffAttemptVerified('returning', batch, staffAttemptReceiptAck('returning', batch)); staffReturningComplete(batch); await staffAttemptReleaseCompleted('returning', batch); }
     else staffReturningShowUnconfirmed(batch, 'Returning acknowledgment is incomplete.');
   } catch (error) {
     if (batch && !staffReturningSubmissionIsCurrent(batch)) return;
-    if (batch?.writeStarted) staffReturningShowUnconfirmed(batch, 'Returning response was not verified.');
+    if (batch?.writeStarted && !staffAttemptReportVerifiedLocalFailure('returning', batch)) staffReturningShowUnconfirmed(batch, 'Returning response was not verified.');
     else { if (batch) batch.phase = 'rejected'; staffReturningSetError(error?.message || 'Returning save failed.'); }
   } finally {
     if (!batch || staffReturningSubmissionIsCurrent(batch)) {
@@ -8700,6 +9541,134 @@ let STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty:
 let STAFF_TRANSFER_SAVING = false;
 let STAFF_TRANSFER_ERROR = '';
 const STAFF_TRANSFER_WRITE_UNCERTAIN = new Set();
+const STAFF_TRANSFER_ACK_FIELDS = 'id,client_event_id,venue_id,night_id,bar_id,destination_bar_id,item_id,qty,action,status,submitted_by,notes,staff_id,source,session_id';
+let STAFF_TRANSFER_SUBMISSION = null;
+let STAFF_TRANSFER_ERROR_OK = false;
+function staffTransferContext() {
+  const user = SESSION.user;
+  if (APP_MODE !== 'staff' || SESSION.type !== 'barback' || !SESSION.venueId || !user?.staff_id || !user.assignment_id || !user.nightId || !user.name || !Array.isArray(user.allowed_bar_ids)) return null;
+  return { userRef: user, key: JSON.stringify([SESSION.venueId, user.staff_id, user.assignment_id, user.nightId, user.session_id || '', user.allowed_bar_ids.map(String).sort()]), venueId: SESSION.venueId, nightId: user.nightId };
+}
+function staffTransferOwns(batch) {
+  const context = staffTransferContext();
+  return !!batch && STAFF_TRANSFER_SUBMISSION === batch && !!context && context.userRef === batch.context.userRef && context.key === batch.context.key;
+}
+function staffTransferResetObsolete() {
+  const batch = STAFF_TRANSFER_SUBMISSION;
+  if (!batch || staffTransferOwns(batch)) return;
+  if (batch.writeStarted && batch.phase !== 'completed') STAFF_TRANSFER_WRITE_UNCERTAIN.add(batch.writeScope);
+  STAFF_TRANSFER_SUBMISSION = null; STAFF_TRANSFER_SAVING = false;
+  staffTransferRenderResult();
+}
+function staffTransferCanEdit() {
+  if (STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey('transfer'))) {
+    staffTransferSetError('A prior transfer attempt is retained. Check its status before editing or starting new work.');
+    return false;
+  }
+  staffTransferResetObsolete();
+  const batch = STAFF_TRANSFER_SUBMISSION;
+  if (STAFF_TRANSFER_SAVING || (batch && !['rejected', 'completed'].includes(batch.phase))) {
+    staffTransferSetError('This Transfer is pending verification. Use Check status; no second write will be sent.');
+    return false;
+  }
+  if (batch?.phase === 'rejected') STAFF_TRANSFER_SUBMISSION = null;
+  return true;
+}
+function staffTransferRenderSubmitState() {
+  const batch = staffTransferOwns(STAFF_TRANSFER_SUBMISSION) ? STAFF_TRANSFER_SUBMISSION : null;
+  const prior = STAFF_ATTEMPT_PRIOR.get(staffAttemptEntryKey('transfer'));
+  const button = document.getElementById('staff-transfer-save');
+  if (button) {
+    button.disabled = STAFF_TRANSFER_SAVING || prior?.state === 'verified';
+    button.textContent = STAFF_TRANSFER_SAVING ? (batch?.phase === 'checking' ? 'Checking status...' : 'Submitting...')
+      : prior ? (prior.state === 'verified' ? 'Prior saved — Cancel' : 'Check previous status')
+      : batch?.phase === 'unknown' ? 'Check status' : batch && ['verified', 'completed'].includes(batch.phase) ? 'Return to Dispatch' : 'Save / Submit';
+  }
+  const locked = STAFF_TRANSFER_SAVING || !!prior || !!(batch && !['rejected', 'completed'].includes(batch.phase));
+  document.querySelectorAll('#staff-shell-transfer select, #staff-shell-transfer input, #staff-shell-transfer .field button').forEach(control => {
+    if (locked) {
+      if (control.dataset.transferSubmitDisabled === undefined) control.dataset.transferSubmitDisabled = control.disabled ? '1' : '0';
+      control.disabled = true;
+    } else if (control.dataset.transferSubmitDisabled !== undefined) {
+      control.disabled = control.dataset.transferSubmitDisabled === '1';
+      delete control.dataset.transferSubmitDisabled;
+    }
+  });
+}
+function staffTransferAcknowledgment(batch, data) {
+  if (!Array.isArray(data) || data.length !== 1) return null;
+  const row = data[0], record = batch.record;
+  if (!row || !record || typeof row.id !== 'string' || !row.id || row.client_event_id !== record.client_event_id ||
+      row.venue_id !== record.venue_id || row.night_id !== record.night_id || row.bar_id !== record.bar_id ||
+      row.destination_bar_id !== record.destination_bar_id || row.item_id !== record.item_id ||
+      !Number.isFinite(Number(row.qty)) || Number(row.qty) !== record.qty || row.action !== record.action ||
+      !['PENDING', 'APPROVED', 'REJECTED', 'VOID'].includes(row.status) ||
+      row.submitted_by !== record.submitted_by || String(row.notes || '') !== record.notes ||
+      row.staff_id !== null || row.source !== null || row.session_id !== null) return null;
+  return row;
+}
+function staffTransferSavedSummary(batch) {
+  return 'Transfer saved: Event ' + batch.ack.id + ' - ' + batch.ack.status + ' review.';
+}
+function staffTransferRenderResult() {
+  const element = document.getElementById('staff-transfer-result');
+  if (!element) return;
+  const batch = STAFF_TRANSFER_SUBMISSION;
+  if (!staffTransferOwns(batch) || !['verified', 'completed'].includes(batch.phase)) {
+    element.textContent = ''; element.className = 'alert'; return;
+  }
+  element.textContent = staffTransferSavedSummary(batch) + (batch.completionError ? ' Use Return to Dispatch; no additional write will be sent.' : '');
+  element.className = 'alert alert-ok show';
+}
+function staffTransferComplete(batch, forceReturn = false) {
+  if (!staffTransferOwns(batch)) return;
+  batch.phase = 'verified';
+  try {
+    if (!batch.draftCleared) {
+      if (JSON.stringify(STAFF_TRANSFER_STATE) !== JSON.stringify(batch.frozenState)) throw new Error('Transfer draft changed after submission.');
+      STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '', measurement: null };
+      const weight = document.getElementById('staff-transfer-weight');
+      if (weight) { weight.value = ''; delete weight.dataset.staffWeightEdited; delete weight.dataset.staffWeightOrigin; }
+      batch.draftCleared = true;
+    }
+    if (!batch.receiptRecorded) { try { if (typeof staffMovementRecordVerified === 'function') staffMovementRecordVerified('transfer', batch); } catch (_) {} batch.receiptRecorded = true; }
+    staffTransferSetError(staffTransferSavedSummary(batch), true);
+    staffTransferRenderResult();
+    const transfer = document.getElementById('staff-shell-transfer');
+    const dispatch = document.getElementById('staff-shell-dispatch');
+    if (forceReturn || !transfer || transfer.style.display !== 'none') {
+      showStaffShellView('dispatch');
+      if (!transfer || transfer.style.display !== 'none' || !dispatch || dispatch.style.display === 'none') throw new Error('Transfer completion navigation is not confirmed.');
+    }
+    batch.phase = 'completed'; batch.completionError = false;
+    STAFF_TRANSFER_WRITE_UNCERTAIN.delete(batch.writeScope);
+    staffTransferRenderResult();
+  } catch (_) {
+    batch.completionError = true;
+    staffTransferSetError(staffTransferSavedSummary(batch) + ' Completion could not be verified. Use Return to Dispatch; no additional write will be sent.', true);
+    staffTransferRenderResult();
+  }
+}
+function staffTransferShowUnknown(batch, message) {
+  if (!staffTransferOwns(batch)) return;
+  batch.phase = 'unknown';
+  if (batch.writeStarted) STAFF_TRANSFER_WRITE_UNCERTAIN.add(batch.writeScope);
+  staffTransferSetError(message + ' Use Check status. No further write will be sent.');
+}
+async function staffTransferCheckStatus(batch) {
+  batch.phase = 'checking';
+  staffTransferRenderSubmitState();
+  try {
+    const { data, error } = await SB.from('events').select(STAFF_TRANSFER_ACK_FIELDS)
+      .eq('venue_id', batch.record.venue_id).eq('night_id', batch.record.night_id)
+      .eq('bar_id', batch.record.bar_id).eq('client_event_id', batch.record.client_event_id).limit(2);
+    if (!staffTransferOwns(batch)) return;
+    if (error || !Array.isArray(data)) throw new Error('Transfer status could not be read.');
+    batch.ack = staffTransferAcknowledgment(batch, data);
+    if (batch.ack) { await staffAttemptVerified('transfer', batch, staffAttemptReceiptAck('transfer', batch)); staffTransferComplete(batch); await staffAttemptReleaseCompleted('transfer', batch); }
+    else staffTransferShowUnknown(batch, 'Transfer is not fully verified.');
+  } catch (_) { if (!staffAttemptReportVerifiedLocalFailure('transfer', batch)) staffTransferShowUnknown(batch, 'Transfer status is unavailable. The earlier result remains unconfirmed.'); }
+}
 
 function staffTransferBars() {
   return (SESSION.cache.authorizedBars || []).filter(bar => bar && bar.active !== false);
@@ -8711,6 +9680,7 @@ function staffTransferItems() {
 
 function staffTransferSetError(message, success = false) {
   STAFF_TRANSFER_ERROR = message || '';
+  STAFF_TRANSFER_ERROR_OK = !!success;
   const el = document.getElementById('staff-transfer-error');
   if (el) { el.textContent = STAFF_TRANSFER_ERROR; el.className = `alert ${STAFF_TRANSFER_ERROR ? (success ? 'alert-ok' : 'alert-err') + ' show' : ''}`; }
 }
@@ -8744,6 +9714,7 @@ function staffTransferValidate() {
 }
 
 function renderStaffTransfer() {
+  staffTransferResetObsolete();
   const bars = staffTransferBars();
   const items = staffTransferItems();
   const source = document.getElementById('staff-transfer-source-bar');
@@ -8760,6 +9731,7 @@ function renderStaffTransfer() {
     if (destination) destination.innerHTML = '';
     if (item) item.innerHTML = '';
     if (preview) preview.innerHTML = '<div class="empty-text">Transfer requires at least two authorized Bars and an active Item.</div>';
+    staffTransferRenderSubmitState();
     return;
   }
   if (STAFF_TRANSFER_STATE.sourceBar && !bars.some(bar => String(bar.id) === String(STAFF_TRANSFER_STATE.sourceBar))) STAFF_TRANSFER_STATE.sourceBar = '';
@@ -8784,10 +9756,12 @@ function renderStaffTransfer() {
   if (preview) preview.innerHTML = selectedItem && from && to && Number.isFinite(Number(STAFF_TRANSFER_STATE.qty)) && Number(STAFF_TRANSFER_STATE.qty) > 0
     ? `<div style="overflow-x:auto;"><table><thead><tr><th>Item</th><th>Source</th><th>Destination</th><th>Qty</th></tr></thead><tbody><tr><td data-label="Item">${esc(selectedItem.name || selectedItem.id)}</td><td data-label="Source">${esc(from.name || from.id)}</td><td data-label="Destination">${esc(to.name || to.id)}</td><td data-label="Qty">${esc(staffFormatQuantity(STAFF_TRANSFER_STATE.qty))}${STAFF_TRANSFER_STATE.measurement ? ` · ${esc(staffScaleMeasurementSummary(selectedItem, STAFF_TRANSFER_STATE.measurement))} · ONE MEASUREMENT` : ''}</td></tr></tbody></table></div>`
     : '<div class="empty-text">Enter a valid Transfer quantity to preview.</div>';
-  staffTransferSetError(STAFF_TRANSFER_ERROR);
+  staffTransferSetError(STAFF_TRANSFER_ERROR, STAFF_TRANSFER_ERROR_OK);
+  staffTransferRenderSubmitState();
 }
 
 function staffTransferSourceChanged(value) {
+  if (!staffTransferCanEdit()) { renderStaffTransfer(); return; }
   STAFF_TRANSFER_STATE.sourceBar = String(value || '');
   STAFF_TRANSFER_STATE.measurement = null;
   if (STAFF_TRANSFER_STATE.sourceBar === STAFF_TRANSFER_STATE.destinationBar) {
@@ -8797,25 +9771,28 @@ function staffTransferSourceChanged(value) {
 }
 
 function staffTransferDestinationChanged(value) {
+  if (!staffTransferCanEdit()) { renderStaffTransfer(); return; }
   STAFF_TRANSFER_STATE.destinationBar = String(value || '');
   STAFF_TRANSFER_STATE.measurement = null;
   renderStaffTransfer();
 }
 
 function staffTransferItemChanged(value) {
+  if (!staffTransferCanEdit()) { renderStaffTransfer(); return; }
   STAFF_TRANSFER_STATE.itemId = String(value || '');
   STAFF_TRANSFER_STATE.measurement = null;
   renderStaffTransfer();
 }
 
 function staffTransferQtyChanged(value) {
+  if (!staffTransferCanEdit()) { renderStaffTransfer(); return; }
   STAFF_TRANSFER_STATE.qty = Number(value);
   STAFF_TRANSFER_STATE.measurement = null;
   renderStaffTransfer();
 }
 
 function staffTransferApplyWeight(rawWeight = null) {
-  if (!staffOperationalGuard()) return;
+  if (!staffOperationalGuard() || !staffTransferCanEdit()) return;
   const item = staffTransferItems().find(candidate => String(candidate.id) === String(STAFF_TRANSFER_STATE.itemId));
   try {
     const input = document.getElementById('staff-transfer-weight');
@@ -8833,62 +9810,93 @@ function openStaffTransfer() {
     staffTransferSetError('Transfer requires at least two authorized active Bars.');
     return;
   }
-  STAFF_TRANSFER_ERROR = '';
-  STAFF_TRANSFER_STATE = {
-    sourceBar: '',
-    destinationBar: '',
-    itemId: '',
-    qty: 0,
-    measurement: null,
-    clientEventId: ''
-  };
+  staffTransferResetObsolete();
+  const batch = STAFF_TRANSFER_SUBMISSION;
+  if (batch && batch.phase !== 'completed') {
+    showStaffShellView('transfer');
+    staffTransferRenderSubmitState();
+    return;
+  }
+  if (batch) { STAFF_TRANSFER_SUBMISSION = null; staffTransferRenderResult(); }
+  STAFF_TRANSFER_ERROR = ''; STAFF_TRANSFER_ERROR_OK = false;
+  STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, measurement: null, clientEventId: '' };
   showStaffShellView('transfer');
+  void staffAttemptOnEntry('transfer');
 }
 
 async function saveStaffTransfer() {
+  staffTransferResetObsolete();
   if (STAFF_TRANSFER_SAVING || !staffOperationalGuard()) return;
+  let batch = STAFF_TRANSFER_SUBMISSION;
   const writeScope = staffUnverifiedWriteScopeKey();
-  if (STAFF_TRANSFER_WRITE_UNCERTAIN.has(writeScope)) { staffTransferSetError('A previous Transfer response is unverified. Check the Log before another submission.'); return; }
+  if (batch && ['verified', 'completed'].includes(batch.phase)) { staffTransferComplete(batch, true);
+    try { await staffAttemptReleaseCompleted('transfer', batch); } catch (_) { staffAttemptReportVerifiedLocalFailure('transfer', batch); } return; }
+  if (batch && batch.phase !== 'rejected') {
+    STAFF_TRANSFER_SAVING = true;
+    try { await staffTransferCheckStatus(batch); }
+    finally { if (staffTransferOwns(batch)) { STAFF_TRANSFER_SAVING = false; staffTransferRenderSubmitState(); } }
+    return;
+  }
+  if (STAFF_TRANSFER_WRITE_UNCERTAIN.has(writeScope)) {
+    STAFF_TRANSFER_SAVING = true;
+    try { await staffAttemptHandlePrior('transfer'); }
+    catch (error) { staffTransferSetError(error?.message || 'Earlier Transfer status is unavailable. No write was sent.'); }
+    finally { STAFF_TRANSFER_SAVING = false; staffTransferRenderSubmitState(); }
+    return;
+  }
   STAFF_TRANSFER_SAVING = true;
-  let writeStarted = false;
-  const button = document.getElementById('staff-transfer-save');
-  if (button) button.disabled = true;
   try {
-    const user = SESSION.user || {};
+    const context = staffTransferContext();
+    if (!context) throw new Error('Staff Transfer context is invalid.');
+    if (await staffAttemptHandlePrior('transfer')) return;
+    staffTransferClientEventId();
+    batch = { context, writeScope, frozenState: JSON.parse(JSON.stringify(STAFF_TRANSFER_STATE)),
+      phase: 'preparing', writeStarted: false, record: null, ack: null };
+    STAFF_TRANSFER_SUBMISSION = batch;
+    staffTransferRenderSubmitState();
+    const user = SESSION.user;
     await hydrateStaffAuthorizedBars({ night_id: user.nightId, allowed_bar_ids: user.allowed_bar_ids || [] });
+    if (!staffTransferOwns(batch)) return;
+    if (JSON.stringify(STAFF_TRANSFER_STATE) !== JSON.stringify(batch.frozenState)) throw new Error('Transfer draft changed while preparing. Review it again.');
     const validated = staffTransferValidate();
     const bars = new Map(staffTransferBars().map(bar => [String(bar.id), bar]));
-    const notes = `Transfer: ${staffBarIdentityText(bars.get(validated.sourceBar))} → ${staffBarIdentityText(bars.get(validated.destinationBar))}`;
-    const record = {
-      venue_id: SESSION.venueId,
-      night_id: user.nightId,
-      bar_id: validated.sourceBar,
-      destination_bar_id: validated.destinationBar,
-      item_id: validated.item.id,
-      qty: validated.measurement ? 1 : validated.qty,
-      action: 'TRANSFER',
-      status: 'PENDING',
-      submitted_by: user.name,
-      client_event_id: staffTransferClientEventId(),
+    const notes = 'Transfer: ' + staffBarIdentityText(bars.get(validated.sourceBar)) + ' → ' + staffBarIdentityText(bars.get(validated.destinationBar));
+    batch.record = {
+      venue_id: context.venueId, night_id: context.nightId,
+      bar_id: validated.sourceBar, destination_bar_id: validated.destinationBar,
+      item_id: validated.item.id, qty: validated.measurement ? 1 : validated.qty,
+      action: 'TRANSFER', status: 'PENDING', submitted_by: user.name,
+      client_event_id: batch.frozenState.clientEventId,
       notes: [notes, validated.measurement ? staffScaleNote(validated.measurement) : ''].filter(Boolean).join(' | ')
     };
-    writeStarted = true;
-    const { error } = await SB.from('events').insert(record);
+    await staffMovementReviewBeforeWrite('transfer', batch, () => staffTransferOwns(batch));
+    if (!staffTransferOwns(batch)) return;
+    await staffAttemptBeforeWrite('transfer', batch);
+    if (!staffTransferOwns(batch)) return;
+    batch.phase = 'sending'; batch.writeStarted = true;
+    staffTransferRenderSubmitState();
+    const { data, error } = await SB.from('events').insert(batch.record).select(STAFF_TRANSFER_ACK_FIELDS);
+    if (!staffTransferOwns(batch)) return;
     if (error) {
-      if (/^(42501|23502|23503|23514|22P02|P0001)$/.test(String(error.code || ''))) writeStarted = false;
-      throw new Error(error.message || 'Transfer save failed.');
+      if (/^(42501|23502|23503|23514|22023|22P02|P0001)$/.test(String(error.code || ''))) {
+        await staffAttemptRejected('transfer', batch, String(error.code || ''));
+        batch.phase = 'rejected'; batch.writeStarted = false;
+        staffTransferSetError(error.message || 'Transfer was rejected. No row was accepted.');
+      } else staffTransferShowUnknown(batch, error.message || 'Transfer result is unknown.');
+      return;
     }
-    writeStarted = false;
-    STAFF_TRANSFER_WRITE_UNCERTAIN.delete(writeScope);
-    STAFF_TRANSFER_STATE = { sourceBar: '', destinationBar: '', itemId: '', qty: 0, clientEventId: '', measurement: null };
-    staffTransferSetError(`Transfer submitted pending review: ${validated.qty}× ${validated.item.name || validated.item.id}.`, true);
-    renderStaffTransfer();
+    batch.ack = staffTransferAcknowledgment(batch, data);
+    if (batch.ack) { await staffAttemptVerified('transfer', batch, staffAttemptReceiptAck('transfer', batch)); staffTransferComplete(batch); await staffAttemptReleaseCompleted('transfer', batch); }
+    else staffTransferShowUnknown(batch, 'Transfer acknowledgment is incomplete.');
   } catch (error) {
-    if (writeStarted) STAFF_TRANSFER_WRITE_UNCERTAIN.add(writeScope);
-    staffTransferSetError(writeStarted ? 'Transfer response could not be verified. Check the Log before another submission.' : error?.message || 'Transfer save failed.');
+    if (batch && !staffTransferOwns(batch)) return;
+    if (batch?.writeStarted && !staffAttemptReportVerifiedLocalFailure('transfer', batch)) staffTransferShowUnknown(batch, 'Transfer response was not verified.');
+    else { if (batch) batch.phase = 'rejected'; staffTransferSetError(error?.message || 'Transfer save failed.'); }
   } finally {
-    STAFF_TRANSFER_SAVING = false;
-    if (button) button.disabled = false;
+    if (!batch || staffTransferOwns(batch)) {
+      STAFF_TRANSFER_SAVING = false;
+      staffTransferRenderSubmitState();
+    }
   }
 }
 // STAFF_TRANSFER_PHASE3D_END
@@ -8955,8 +9963,12 @@ function staffScreenRefreshStateRestore(state) {
   STAFF_OPENING_SUBMISSION = state.openingSubmission; STAFF_RETURNING_SUBMISSION = state.returningSubmission;
 }
 function staffScreenRefreshBlocked() {
-  return STAFF_OPENING_SAVING || STAFF_TAKING_SAVING || STAFF_RETURNING_SAVING || STAFF_TRANSFER_SAVING ||
+  return ['opening', 'taking', 'returning', 'transfer'].some(mode => STAFF_ATTEMPT_PRIOR.has(staffAttemptEntryKey(mode))) ||
+    STAFF_OPENING_SAVING || STAFF_OPENING_RETAINED.has(staffUnverifiedWriteScopeKey()) || STAFF_TAKING_SAVING || STAFF_RETURNING_SAVING || STAFF_TRANSFER_SAVING || STAFF_TRANSFER_WRITE_UNCERTAIN.has(staffUnverifiedWriteScopeKey()) ||
+    !!(STAFF_TRANSFER_SUBMISSION && !['rejected', 'completed'].includes(STAFF_TRANSFER_SUBMISSION.phase)) ||
     !!(STAFF_OPENING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_OPENING_SUBMISSION.phase)) ||
+    !!(staffTakingSubmissionIsCurrent(STAFF_TAKING_SUBMISSION) && !['rejected', 'completed'].includes(STAFF_TAKING_SUBMISSION.phase)) ||
+    !!(STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey()) && STAFF_TAKING_RETAINED.get(staffUnverifiedWriteScopeKey()).phase !== 'verified') ||
     !!(STAFF_RETURNING_SUBMISSION && !['rejected', 'completed'].includes(STAFF_RETURNING_SUBMISSION.phase));
 }
 function staffScreenRefreshConflict() {
@@ -11898,7 +12910,87 @@ async function saveEventCorrection() {
   await loadEvents();
 }
 
+// Reference lookup is read-only and intentionally separate from bulk review/CSV
+// filters, whose server RPC does not accept a client-event reference.
+let EVENT_LOG_REFERENCE_TOKEN = 0;
+let EVENT_LOG_REFERENCE_VENUE = '';
+let EVENT_LOG_LOAD_TOKEN = 0;
+function eventLogReferenceChanged() {
+  EVENT_LOG_REFERENCE_TOKEN++;
+  const status = document.getElementById('event-log-reference-status');
+  const results = document.getElementById('event-log-reference-results');
+  if (status) status.textContent = 'Press Find reference to check the current Manager venue.';
+  if (results) results.innerHTML = '';
+}
+async function eventLogFindReference() {
+  const input = document.getElementById('ef-reference');
+  const status = document.getElementById('event-log-reference-status');
+  const results = document.getElementById('event-log-reference-results');
+  if (!input || !status || !results) return;
+  results.innerHTML = '';
+  const reference = String(input.value || '').trim();
+  if (!isAdminSession() || !SESSION.venueId) { status.textContent = 'Choose an authorized Manager venue before searching.'; return; }
+  if (!/^[A-Za-z0-9_-]{6,160}$/.test(reference)) { status.textContent = 'Enter one exact Event, Client, or Taking attempt reference.'; return; }
+  const token = ++EVENT_LOG_REFERENCE_TOKEN, venueId = SESSION.venueId, userRef = SESSION.user;
+  EVENT_LOG_REFERENCE_VENUE = venueId;
+  const owns = () => token === EVENT_LOG_REFERENCE_TOKEN && isAdminSession() && SESSION.venueId === venueId &&
+    SESSION.user === userRef && String(input.value || '').trim() === reference;
+  const fields = 'id,client_event_id,created_at,venue_id,night_id,bar_id,destination_bar_id,item_id,qty,action,status,items(name),bars:bars!events_bar_id_fkey(name),destination_bar:bars!events_destination_bar_id_fkey(name)';
+  const query = () => SB.from('events').select(fields).eq('venue_id', venueId);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reference);
+  const isTakingAttempt = isUuid || /^[0-9]{10,}-[a-z0-9]+$/.test(reference);
+  status.textContent = 'Checking exact reference…';
+  try {
+    let rows = [];
+    if (isUuid) {
+      const result = await query().eq('id', reference).limit(1);
+      if (!owns()) return;
+      if (result.error || !Array.isArray(result.data)) throw new Error('reference lookup failed');
+      rows = result.data;
+    }
+    if (!rows.length) {
+      const result = await query().eq('client_event_id', reference).limit(1);
+      if (!owns()) return;
+      if (result.error || !Array.isArray(result.data)) throw new Error('reference lookup failed');
+      rows = result.data;
+    }
+    if (!rows.length && isTakingAttempt) {
+      const result = await query().like('client_event_id', `staff-taking-${reference}-%`).order('created_at', { ascending: false }).limit(201);
+      if (!owns()) return;
+      if (result.error || !Array.isArray(result.data)) throw new Error('reference lookup failed');
+      rows = result.data;
+    }
+    if (!rows.length) {
+      status.textContent = 'No event visible for this exact reference in the current Manager venue. This is not proof that an operation did not commit.';
+      return;
+    }
+    const shown = rows.slice(0, 200);
+    results.innerHTML = shown.map(row => `<div class="panel" style="padding:10px;margin:6px 0;overflow-wrap:anywhere;">
+      <strong>${esc(row.action || 'EVENT')}</strong> · ${esc(row.items?.name || row.item_id || 'Item unavailable')} · ${esc(row.qty)} · ${esc(row.status || 'UNKNOWN')}
+      <div class="empty-text">${esc(row.bars?.name || row.bar_id || 'Bar unavailable')}${row.destination_bar_id ? ' → ' + esc(row.destination_bar?.name || row.destination_bar_id) : ''} · ${esc(row.created_at ? new Date(row.created_at).toLocaleString() : 'Time unavailable')}</div>
+      <div class="empty-text">Event ${esc(row.id || '—')} · Client ${esc(row.client_event_id || '—')}</div>
+    </div>`).join('');
+    status.textContent = rows.length > 200
+      ? 'Showing first 200 matching rows; more may exist. Use a full Client event ID for one row.'
+      : `Found ${rows.length} matching event${rows.length === 1 ? '' : 's'} with current status in this Manager venue.`;
+  } catch (_) {
+    if (owns()) status.textContent = 'Reference lookup unavailable. Existing records may still be present; do not retry a submission based on this result.';
+  } finally {
+    if (token === EVENT_LOG_REFERENCE_TOKEN && !owns()) status.textContent = 'Manager context changed; search again.';
+  }
+}
+
 async function loadEvents() {
+  if (!isAdminSession()) return;
+  const loadToken = ++EVENT_LOG_LOAD_TOKEN, venueId = SESSION.venueId, userRef = SESSION.user;
+  if (EVENT_LOG_REFERENCE_VENUE && EVENT_LOG_REFERENCE_VENUE !== venueId) {
+    EVENT_LOG_REFERENCE_TOKEN++;
+    EVENT_LOG_REFERENCE_VENUE = venueId;
+    const referenceStatus = document.getElementById('event-log-reference-status');
+    const referenceResults = document.getElementById('event-log-reference-results');
+    if (referenceStatus) referenceStatus.textContent = 'Manager venue changed; search again.';
+    if (referenceResults) referenceResults.innerHTML = '';
+  }
   // Populate filters
   const { nights, bars } = SESSION.cache;
   const nf = document.getElementById('ef-night');
@@ -11909,6 +13001,7 @@ async function loadEvents() {
   nf.value = nv; bf.value = bv;
 
   let q = SB.from('events').select('*, bars:bars!events_bar_id_fkey(name), destination_bar:bars!events_destination_bar_id_fkey(name), stations(name), items(name, sku, unit, units_per_case)').order('created_at', { ascending: false }).limit(200);
+  if (venueId) q = q.eq('venue_id', venueId);
   if (nf.value) q = q.eq('night_id', nf.value);
   if (bf.value) q = q.eq('bar_id', bf.value);
   const sv = document.getElementById('ef-status').value;
@@ -11916,7 +13009,24 @@ async function loadEvents() {
   const av = document.getElementById('ef-action').value;
   if (av) q = q.eq('action', av);
 
+  const requestedFilters = eventReviewCurrentFilters();
   const { data: events, error } = await q;
+  if (loadToken !== EVENT_LOG_LOAD_TOKEN || !isAdminSession() || SESSION.venueId !== venueId || SESSION.user !== userRef ||
+      eventReviewFilterKey(eventReviewCurrentFilters()) !== eventReviewFilterKey(requestedFilters)) return;
+  const tbody = document.getElementById('events-tbody');
+  const loadStatus = document.getElementById('events-load-status');
+  if (error || !Array.isArray(events)) {
+    EVENT_REVIEW.rows = [];
+    eventReviewClearSelection(true);
+    if (tbody) tbody.innerHTML = '<tr><td colspan="9"><div class="empty-text">Event Log unavailable. Existing records may still be present; use exact reference lookup for an uncertain submission.</div></td></tr>';
+    if (loadStatus) loadStatus.textContent = 'Event Log lookup failed; no absence or submission result can be inferred.';
+    eventReviewUpdateToolbar();
+    return;
+  }
+  if (loadStatus) loadStatus.textContent = events.length === 200
+    ? 'Showing the latest 200 events matching these filters; older events may exist. Use exact reference lookup.'
+    : events.length ? `Showing ${events.length} visible event${events.length === 1 ? '' : 's'} matching these filters.`
+    : 'No events visible with these filters. This is not proof that a submission did not commit.';
   const filters = eventReviewCurrentFilters();
   const filterKey = eventReviewFilterKey(filters);
   if (EVENT_REVIEW.filterKey && EVENT_REVIEW.filterKey !== filterKey) {
@@ -11943,9 +13053,8 @@ async function loadEvents() {
     );
   }
 
-  const tbody = document.getElementById('events-tbody');
-  if (!events?.length) {
-    tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events</div></div></td></tr>';
+  if (!events.length) {
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No events visible with current filters</div></div></td></tr>';
     eventReviewUpdateToolbar();
     eventCsvRenderStoredImportHint();
     return;
