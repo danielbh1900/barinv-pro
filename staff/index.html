@@ -11406,6 +11406,51 @@ async function deletePosMapping(id) {
 }
 
 // ── POS DATE RANGE HELPERS ──
+// This web reader cannot prove the historical provider/location for a
+// corrected Night. Only a fresh, explicitly unbound Night may use legacy
+// dates. Cached or partial rows cannot establish that it is unbound.
+async function webLegacyNightReadable(client, venueId, nightId, expectedDate) {
+  if (!client || !venueId || !nightId || !expectedDate) return false;
+  try {
+    const { data, error } = await client.from('nights').select('id,venue_id,date,pos_financial_binding')
+      .eq('id', nightId).eq('venue_id', venueId).maybeSingle();
+    return !error && data?.id === nightId && data.venue_id === venueId &&
+      data.date === expectedDate && data.pos_financial_binding === null;
+  } catch (_) {
+    return false;
+  }
+}
+
+const WEB_NIGHT_FINANCIAL_UNAVAILABLE = 'POS results are unavailable for this Night in this version.';
+
+function pmFinancialSelection() {
+  return ['pm-night', 'pm-connection', 'pm-from', 'pm-to'].map(id => document.getElementById(id)?.value || '');
+}
+
+function pmFinancialSelectionCurrent(scope) {
+  return !!scope?.venueId && !!scope.user && SB === scope.client && SESSION.venueId === scope.venueId &&
+    SESSION.user === scope.user && pmFinancialSelection().every((value, i) => value === scope.selection[i]);
+}
+
+function pmClearFinancialResults(message = '') {
+  window.POS_MONITOR_FINANCIAL_SCOPE = null;
+  window.POS_MONITOR_BARS = [];
+  window.POS_MONITOR_PRODUCTS = [];
+  for (const id of ['pm-kpis', 'pm-bars-table', 'pm-selected-kpis']) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = '';
+  }
+  const info = document.getElementById('pm-selected-info');
+  if (info) info.textContent = message;
+  destroyChart('bars');
+  destroyChart('products');
+}
+
+async function pmFinancialScopeReadable(scope) {
+  return pmFinancialSelectionCurrent(scope) && (!scope.nightId ||
+    await webLegacyNightReadable(scope.client, scope.venueId, scope.nightId, scope.nightDate)) &&
+    pmFinancialSelectionCurrent(scope);
+}
 function pmLocalToISO(el) {
   if (!el || !el.value) return null;
   return new Date(el.value).toISOString();
@@ -11458,11 +11503,17 @@ function pmVanWallToUTC(dateStr, hour) {
 }
 // Event night runs 6:00 PM Vancouver → 6:00 AM next day (12h window).
 function pmSetWindowFromNight(night) {
-  if (!night || !night.date) return;
+  const from = document.getElementById('pm-from');
+  const to = document.getElementById('pm-to');
+  if (!night?.date || night.pos_financial_binding !== null) {
+    if (from) from.value = '';
+    if (to) to.value = '';
+    return;
+  }
   const start = pmVanWallToUTC(night.date, 18);
   const end = new Date(start.getTime() + 12 * 3600 * 1000);
-  pmSetLocal(document.getElementById('pm-from'), start);
-  pmSetLocal(document.getElementById('pm-to'), end);
+  pmSetLocal(from, start);
+  pmSetLocal(to, end);
   const rng = document.getElementById('pm-range'); if (rng) rng.value = '';
 }
 function pmNightChanged() {
@@ -11530,20 +11581,41 @@ function getPosDateRange() {
 }
 
 async function loadPosMonitor() {
+  const client = SB, venueId = SESSION.venueId, user = SESSION.user;
+  const run = Symbol();
+  loadPosMonitor.run = run;
+  const owns = () => loadPosMonitor.run === run && SB === client && SESSION.venueId === venueId && SESSION.user === user;
+  pmClearFinancialResults();
   try {
     await loadPosConnections();
+    if (!owns()) return;
     ensurePmNightOptions();
     const connectionId = document.getElementById('pm-connection')?.value || '';
     const metric = document.getElementById('pm-metric')?.value || 'sales_net';
     const nightId = document.getElementById('pm-night')?.value || '';
+    const night = (SESSION.cache.nights || []).find(row => row.id === nightId);
+    const nightDate = night?.date;
+    const scope = { client, venueId, user, nightId, nightDate, connectionId, selection: pmFinancialSelection() };
+    if (!(await pmFinancialScopeReadable(scope))) {
+      if (owns() && pmFinancialSelectionCurrent(scope)) pmClearFinancialResults(WEB_NIGHT_FINANCIAL_UNAVAILABLE);
+      return;
+    }
+    if (!owns()) return;
+    // Pre-migration cached rows have no binding field. A fresh explicit
+    // null can release their original default without using a stale range.
+    if (nightId && night?.pos_financial_binding !== null && !scope.selection[2] && !scope.selection[3]) {
+      pmSetWindowFromNight({ date: nightDate, pos_financial_binding: null });
+    }
     const { since, until } = getPosDateRange();
+    Object.assign(scope, { since, until, selection: pmFinancialSelection() });
 
-    let q = SB.from('pos_bar_snapshots').select('bar_id, snapshot_ts, sales_net, tips_total, cash_total, card_total, transactions, bars(name)')
+    let q = client.from('pos_bar_snapshots').select('bar_id, snapshot_ts, sales_net, tips_total, cash_total, card_total, transactions, bars(name)')
       .gte('snapshot_ts', since)
       .lte('snapshot_ts', until)
       .order('snapshot_ts', { ascending:false });
     if (connectionId) q = q.eq('connection_id', connectionId);
     const { data, error } = await q;
+    if (!owns() || !pmFinancialSelectionCurrent(scope)) return;
     if (error) throw error;
     const rows = data || [];
 
@@ -11570,9 +11642,10 @@ async function loadPosMonitor() {
     // hides a POS-selling entity and drops template noise (e.g. Maala 57 → 18 real bars).
     let activeBars = [];
     if (nightId) {
-      const { data: nbs, error: nbErr } = await SB.from('night_bars')
+      const { data: nbs, error: nbErr } = await client.from('night_bars')
         .select('bar_id, bars(name, active, bar_type)')
         .eq('night_id', nightId);
+      if (!owns() || !pmFinancialSelectionCurrent(scope)) return;
       if (nbErr) throw nbErr;
       const seen = new Set();
       (nbs || []).forEach(nb => {
@@ -11587,7 +11660,7 @@ async function loadPosMonitor() {
     // ── Active POS source mappings (location → bar), for status/source column ──
     const mapByBar = new Map();
     try {
-      const { data: maps } = await SB.from('pos_bar_mappings').select('bar_id, pos_location_id, pos_location_name').eq('is_active', true);
+      const { data: maps } = await client.from('pos_bar_mappings').select('bar_id, pos_location_id, pos_location_name').eq('is_active', true);
       (maps || []).forEach(m => { if (m.bar_id) mapByBar.set(m.bar_id, m); });
     } catch (_) {}
 
@@ -11615,7 +11688,14 @@ async function loadPosMonitor() {
         return { ...o, pos_source: m ? (m.pos_location_name || m.pos_location_id || '—') : null, status };
       });
     }
+    if (!owns()) return;
+    if (!(await pmFinancialScopeReadable(scope))) {
+      if (owns() && pmFinancialSelectionCurrent(scope)) pmClearFinancialResults(WEB_NIGHT_FINANCIAL_UNAVAILABLE);
+      return;
+    }
+    if (!owns()) return;
     bars.sort((a,b) => Number(b[metric] || 0) - Number(a[metric] || 0));
+    window.POS_MONITOR_FINANCIAL_SCOPE = scope;
     window.POS_MONITOR_BARS = bars;
     renderPmBarsTable(bars);
     pmSyncStatus();
@@ -11654,7 +11734,7 @@ async function loadPosMonitor() {
         responsive:true,
         plugins:{ legend:{ display:false } },
         onClick: (evt, elements) => {
-          if (!elements?.length) return;
+          if (!elements?.length || window.POS_MONITOR_FINANCIAL_SCOPE !== scope || !pmFinancialSelectionCurrent(scope)) return;
           const idx = elements[0].index;
           const bar = bars[idx];
           window.POS_MONITOR_SELECTED_BAR = bar.bar_id;
@@ -11670,25 +11750,43 @@ async function loadPosMonitor() {
       await loadPosMonitorProducts(selected?.bar_id, selected);
     }
   } catch (e) {
-    toast('POS Monitor error: ' + e.message, 't-err');
+    if (owns()) toast('POS Monitor error: ' + e.message, 't-err');
   }
 }
 async function loadPosMonitorProducts(barId, barSummary) {
+  const scope = window.POS_MONITOR_FINANCIAL_SCOPE;
+  if (!scope || !pmFinancialSelectionCurrent(scope)) return;
+  const run = Symbol();
+  loadPosMonitorProducts.run = run;
+  const owns = () => loadPosMonitorProducts.run === run && window.POS_MONITOR_FINANCIAL_SCOPE === scope &&
+    pmFinancialSelectionCurrent(scope);
+  window.POS_MONITOR_PRODUCTS = [];
   const info = document.getElementById('pm-selected-info');
   const sk = document.getElementById('pm-selected-kpis');
+  if (info) info.textContent = '';
+  if (sk) sk.textContent = '';
+  destroyChart('products');
   if (!barId) {
     if (info) info.textContent = 'Click a bar in the chart to see product breakdown.';
-    if (sk) sk.innerHTML = '';
-    destroyChart('products');
     return;
   }
   try {
-    const connectionId = document.getElementById('pm-connection')?.value || '';
-    const { since, until } = getPosDateRange();
-    let q = SB.from('pos_bar_product_snapshots').select('product_key, product_name, qty, revenue_net, snapshot_ts').eq('bar_id', barId).gte('snapshot_ts', since).lte('snapshot_ts', until).order('snapshot_ts', { ascending:false });
+    if (!(await pmFinancialScopeReadable(scope))) {
+      if (owns()) pmClearFinancialResults(WEB_NIGHT_FINANCIAL_UNAVAILABLE);
+      return;
+    }
+    if (!owns()) return;
+    const { client, since, until, connectionId } = scope;
+    let q = client.from('pos_bar_product_snapshots').select('product_key, product_name, qty, revenue_net, snapshot_ts').eq('bar_id', barId).gte('snapshot_ts', since).lte('snapshot_ts', until).order('snapshot_ts', { ascending:false });
     if (connectionId) q = q.eq('connection_id', connectionId);
     const { data, error } = await q;
+    if (!owns()) return;
     if (error) throw error;
+    if (!(await pmFinancialScopeReadable(scope))) {
+      if (owns()) pmClearFinancialResults(WEB_NIGHT_FINANCIAL_UNAVAILABLE);
+      return;
+    }
+    if (!owns()) return;
     const rows = data || [];
     const byProd = new Map();
     rows.forEach(r => {
@@ -11725,11 +11823,18 @@ async function loadPosMonitorProducts(barId, barSummary) {
       options:{ maintainAspectRatio:false, responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
     });
   } catch (e) {
-    toast('Product monitor error: ' + e.message, 't-err');
+    if (owns()) toast('Product monitor error: ' + e.message, 't-err');
   }
 }
 
-function exportPosMonitorCSV(fmt) {
+async function exportPosMonitorCSV(fmt) {
+  const scope = window.POS_MONITOR_FINANCIAL_SCOPE;
+  if (!scope || !(await pmFinancialScopeReadable(scope))) {
+    if (scope && window.POS_MONITOR_FINANCIAL_SCOPE === scope) pmClearFinancialResults(WEB_NIGHT_FINANCIAL_UNAVAILABLE);
+    toast('POS data unavailable — refresh first', 't-err');
+    return;
+  }
+  if (window.POS_MONITOR_FINANCIAL_SCOPE !== scope) return;
   const bars = window.POS_MONITOR_BARS || [];
   const products = window.POS_MONITOR_PRODUCTS || [];
   if(!bars.length && !products.length) { toast('No POS data to export — refresh first','t-err'); return; }
@@ -16727,7 +16832,15 @@ async function exportAllNights() {
 // ACCOUNTABILITY REPORT — POS vs Inventory Shot Reconciliation
 // ══════════════════════════════════════════════════════
 async function loadAccountability() {
+  const client = SB, venueId = SESSION.venueId, user = SESSION.user;
+  const run = Symbol();
+  loadAccountability.run = run;
+  const current = () => loadAccountability.run === run && SB === client &&
+    SESSION.venueId === venueId && SESSION.user === user;
+  const content = document.getElementById('acc-content');
+  if (content) content.textContent = '';
   await preload();
+  if (!current()) return;
   const { nights, bars, items } = SESSION.cache;
 
   const nSel = document.getElementById('acc-night');
@@ -16740,15 +16853,23 @@ async function loadAccountability() {
     bars.filter(b=>b.active).map(b => `<option value="${esc(b.id)}" ${b.id===bv?'selected':''}>${esc(b.name)}</option>`).join('');
   nSel.value = nv; bSel.value = bv;
 
-  const content = document.getElementById('acc-content');
   if(!nv) { content.innerHTML = '<div class="empty"><div class="empty-icon">⚖</div><div class="empty-text">Select a night to view accountability</div></div>'; return; }
+  const night = nights.find(n => n.id === nv);
+  const owns = () => current() && nSel.value === nv && bSel.value === bv;
+  const scopeReadable = async () => await webLegacyNightReadable(client, venueId, nv, night?.date);
+  if (!(await scopeReadable())) {
+    if (owns()) content.textContent = WEB_NIGHT_FINANCIAL_UNAVAILABLE;
+    return;
+  }
+  if (!owns()) return;
 
   // 1. Fetch dispatch events with cost/price data
-  let evQ = SB.from('events')
+  let evQ = client.from('events')
     .select('*, items(name,full_shots,shot_weight_g,empty_bottle_weight_g,category,unit,cost_price,sale_price), bars:bars!events_bar_id_fkey(name)')
     .eq('night_id', nv).eq('status','APPROVED');
   if(bv) evQ = evQ.eq('bar_id', bv);
   const { data: events } = await evQ;
+  if (!owns()) return;
   if(!events) { content.innerHTML = '<div class="empty"><div class="empty-text">Error loading events</div></div>'; return; }
 
   // 2. Build per-item inventory data (only bottles with full_shots)
@@ -16777,19 +16898,21 @@ async function loadAccountability() {
     }
   });
 
-  // 3. Fetch POS product sales for the night date range
-  const night = nights.find(n => n.id === nv);
-  let posProducts = [];
-  if(night?.date) {
-    const since = night.date + 'T00:00:00Z';
-    const until = night.date + 'T23:59:59Z';
-    let posQ = SB.from('pos_bar_product_snapshots')
-      .select('product_name, qty, revenue_net, bar_id')
-      .gte('snapshot_ts', since).lte('snapshot_ts', until);
-    if(bv) posQ = posQ.eq('bar_id', bv);
-    const { data: posData } = await posQ;
-    posProducts = posData || [];
+  // 3. Fetch POS product sales for the verified legacy Night date.
+  const since = night.date + 'T00:00:00Z';
+  const until = night.date + 'T23:59:59Z';
+  let posQ = client.from('pos_bar_product_snapshots')
+    .select('product_name, qty, revenue_net, bar_id')
+    .gte('snapshot_ts', since).lte('snapshot_ts', until);
+  if(bv) posQ = posQ.eq('bar_id', bv);
+  const { data: posData, error: posError } = await posQ;
+  if (!owns()) return;
+  if (posError || !(await scopeReadable())) {
+    if (owns()) content.textContent = WEB_NIGHT_FINANCIAL_UNAVAILABLE;
+    return;
   }
+  if (!owns()) return;
+  const posProducts = posData || [];
 
   const posMap = {};
   posProducts.forEach(p => {
