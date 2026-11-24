@@ -4,8 +4,8 @@ const SHELL = new URL('index.html', SCOPE);
 const MANIFEST = new URL('manifest.json', SCOPE);
 const STAFF = new URL('staff/', SCOPE);
 const CACHE_PREFIX = 'barinv:' + SCOPE.pathname + ':shell:';
-const CACHE = CACHE_PREFIX + 'night-reader-20261123-ready-r1';
-const SHELL_SHA256 = '68261c4d7456c17d1483bdf2fa1f4e822bc794c493f57d0067cd8596d6e50c6e';
+const CACHE = CACHE_PREFIX + 'night-operational-edit-20261124-r1';
+const SHELL_SHA256 = '490c3e0d7f74480ea59a8e733e8301dd13435fae5b62d0f8e89cc8184a25fc12';
 
 async function verifiedShell() {
   const response = await fetch(SHELL.href, { cache: 'no-store' });

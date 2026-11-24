@@ -2080,7 +2080,7 @@ th.sortable span { font-size:10px; }
       </div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Date</th><th>Room Code</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Operational Date</th><th>Room Code</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="nights-tbody"></tbody>
         </table>
       </div>
@@ -4960,7 +4960,7 @@ async function loadSubmitPage() {
   // Night selector
   const nightSel = document.getElementById('ev-night');
   nightSel.innerHTML = '<option value="">— select night —</option>' +
-    nights.filter(n => n.active).map(n => `<option value="${esc(n.id)}">${esc(n.name)} (${esc(n.date)})</option>`).join('');
+    nights.filter(n => n.active).map(n => `<option value="${esc(n.id)}">${esc(n.name)} (${esc(SESSION.role === 'admin' ? nightOperationalDate(n) : n.date)})</option>`).join('');
 
   // Pre-select for barback
   if (SESSION.role === 'barback' && SESSION.user.nightId) {
@@ -7450,7 +7450,7 @@ window.openStaffPrimaryRoleById = function(id) {
        Manager selection for <b>${esc(staff.name)}</b>. If two eligible roles exist in one Night, login fails closed until one exact assignment is selected. Permissions are never combined.
      </div>
      <div class="field"><label>Night</label>
-       <select id="m-primary-night" onchange="loadStaffPrimaryRoleOptions('${esc(id)}')">${nights.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNight?.id ? 'selected' : ''}>${esc(n.name)} (${esc(n.date || '')})</option>`).join('')}</select>
+       <select id="m-primary-night" onchange="loadStaffPrimaryRoleOptions('${esc(id)}')">${nights.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNight?.id ? 'selected' : ''}>${esc(n.name)} (${esc(nightOperationalDate(n))})</option>`).join('')}</select>
      </div>
      <div class="field"><label>Primary Role assignment</label>
        <select id="m-primary-assignment" disabled><option value="">Loading…</option></select>
@@ -7970,9 +7970,40 @@ async function deleteRow(table, id, reloadFn) {
 // ══════════════════════════════════════════════════════
 // NIGHTS
 // ══════════════════════════════════════════════════════
+function nightOperationalDate(night) {
+  return night?.operational_date ?? night?.date ?? '';
+}
+
+function nightLocalDateValid(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith('0000-')) return false;
+  const instant = new Date(date + 'T00:00:00Z');
+  return Number.isFinite(instant.getTime()) && instant.toISOString().slice(0, 10) === date;
+}
+
+async function editNightOperationalAvailable(client, venueId) {
+  try {
+    const { data, error } = await client.rpc('barinv_edit_night_operational_available', {
+      p_venue_id: venueId
+    }, { get: true });
+    return !error && data === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function loadNights() {
+  const client = SB, venueId = SESSION.venueId, user = SESSION.user, role = SESSION.role;
+  const request = Symbol();
+  loadNights.request = request;
+  const current = () => loadNights.request === request && client === SB && SESSION.venueId === venueId
+    && SESSION.user === user && SESSION.role === role && document.getElementById('pg-nights')?.classList.contains('active');
   await preload();
-  const { nights } = SESSION.cache;
+  if (!current()) return;
+  const nights = SESSION.cache.nights.slice().sort((a, b) => nightOperationalDate(b).localeCompare(nightOperationalDate(a)));
+  const editAvailable = !!user?.id && !!venueId && role === 'admin'
+    && nights.some(n => n.venue_id === venueId && Object.hasOwn(n, 'operational_date'))
+    && await editNightOperationalAvailable(client, venueId);
+  if (!current()) return;
   const tbody = document.getElementById('nights-tbody');
   if (!nights.length) {
     tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="empty-icon">🌙</div><div class="empty-text">No nights yet</div></div></td></tr>';
@@ -7981,7 +8012,7 @@ async function loadNights() {
   tbody.innerHTML = nights.map(n => `
     <tr>
       <td style="font-weight:700;">${esc(n.name)}</td>
-      <td style="font-family:'Fira Mono',monospace;">${esc(n.date)}</td>
+      <td style="font-family:'Fira Mono',monospace;">${esc(nightOperationalDate(n))}</td>
       <td>
         <div class="night-code-display">
           <div>
@@ -7993,13 +8024,107 @@ async function loadNights() {
       </td>
       <td><span class="badge ${n.active ? 'b-active' : 'b-inactive'}">${n.active ? 'Active' : 'Closed'}</span></td>
       <td>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${editAvailable && n.venue_id === venueId && Object.hasOwn(n, 'operational_date') ? `<button class="btn btn-ghost btn-xs night-edit-action" type="button" aria-label="Edit Night: ${esc(n.name)}" data-night-id="${esc(n.id)}" onclick="openEditNight(this.dataset.nightId)">Edit</button>` : ''}
           <button class="btn btn-ghost btn-xs" onclick="toggleNight('${esc(n.id)}',${!n.active})">${n.active ? 'Close' : 'Reopen'}</button>
           <button class="btn btn-danger btn-xs" onclick="deleteRow('nights','${esc(n.id)}',loadNights)">×</button>
         </div>
       </td>
     </tr>
   `).join('');
+}
+
+async function openEditNight(id) {
+  const client = SB, venueId = SESSION.venueId, user = SESSION.user, roster = loadNights.request;
+  if (!user?.id || !venueId || SESSION.role !== 'admin') return;
+  const request = Symbol();
+  openEditNight.request = request;
+  const current = () => openEditNight.request === request && loadNights.request === roster && client === SB
+    && SESSION.venueId === venueId && SESSION.user === user && SESSION.role === 'admin'
+    && document.getElementById('pg-nights')?.classList.contains('active');
+  const initialModal = SESSION.modalCb;
+  try {
+    const { data: night, error } = await client.from('nights').select('*')
+      .eq('id', id).eq('venue_id', venueId).maybeSingle();
+    if (!current() || SESSION.modalCb !== initialModal) return;
+    const available = !error && night?.id === id && night.venue_id === venueId
+      && Object.hasOwn(night, 'operational_date') && await editNightOperationalAvailable(client, venueId);
+    if (!current() || SESSION.modalCb !== initialModal) return;
+    if (!available) {
+      toast('Edit Night is unavailable for this venue on the current backend.', 't-err');
+      return;
+    }
+
+    const operationalDate = nightOperationalDate(night);
+    const save = async () => {
+      if (save.pending || !current() || SESSION.modalCb !== save) return;
+      const name = document.getElementById('m-night-name').value.trim();
+      const date = document.getElementById('m-night-date').value;
+      const reason = document.getElementById('m-night-reason').value.trim();
+      const problem = document.getElementById('m-night-error');
+      const showError = message => { problem.textContent = message; problem.classList.add('show'); };
+      problem.classList.remove('show');
+      if (!name || !nightLocalDateValid(date)) return showError('Enter a Night name and valid operational date.');
+      if (name === night.name && date === operationalDate) { closeModal(); return; }
+      const reasonLength = [...reason].length;
+      if (reasonLength < 5 || reasonLength > 500) return showError('Enter a reason of 5 to 500 characters.');
+      const saveButton = document.getElementById('m-night-edit-save');
+      save.pending = true;
+      saveButton.disabled = true;
+      let saved;
+      try {
+        saved = await client.rpc('barinv_edit_night_operational', {
+          p_night_id: night.id, p_venue_id: night.venue_id,
+          p_expected_name: night.name, p_expected_operational_date: operationalDate,
+          p_expected_code: night.code, p_expected_active: night.active,
+          p_name: name, p_operational_date: date, p_reason: reason
+        });
+      } catch (_) {
+        if (current() && SESSION.modalCb === save) showError('Save could not be confirmed. Refresh Nights before retrying.');
+        return;
+      } finally {
+        save.pending = false;
+        saveButton.disabled = false;
+      }
+      if (!current() || SESSION.modalCb !== save) return;
+      if (!saved) return showError('Save could not be confirmed. Refresh Nights before retrying.');
+      if (saved.error) {
+        const messages = {
+          NIGHT_EDIT_STALE: 'This Night changed while you were editing. Reopen it and review the latest details.',
+          NIGHT_EDIT_BUSY: 'This Night is being updated. Refresh Nights to review the latest details.',
+          NIGHT_EDIT_NAME_DATE_CONFLICT: 'This venue already has a Night with that name and date.',
+          NIGHT_EDIT_INVALID_DETAILS: 'Enter a Night name and valid operational date.',
+          NIGHT_EDIT_REASON_REQUIRED: 'Enter a reason of 5 to 500 characters.',
+          NIGHT_EDIT_NOT_FOUND: 'This Night is no longer available in the selected venue. Refresh Nights.'
+        };
+        return showError(saved.error.code === '42501' ? 'Venue Admin access was denied.'
+          : saved.error.code === 'PGRST202' ? 'Edit Night is unavailable on this backend.'
+          : (Object.hasOwn(messages, saved.error.message) ? messages[saved.error.message] : 'Save could not be confirmed. Refresh Nights before retrying.'));
+      }
+      const updated = saved.data;
+      if (!updated || updated.id !== night.id || updated.venue_id !== night.venue_id || updated.name !== name
+          || updated.date !== night.date || updated.code !== night.code || updated.active !== night.active
+          || !Object.hasOwn(updated, 'operational_date') || nightOperationalDate(updated) !== date) {
+        return showError('Save could not be verified. Refresh Nights before retrying.');
+      }
+      const cached = SESSION.cache.nights.find(row => row.id === updated.id && row.venue_id === updated.venue_id);
+      if (cached) Object.assign(cached, { name: updated.name, operational_date: updated.operational_date });
+      closeModal();
+      toast('Night updated', 't-ok');
+      await loadNights();
+    };
+
+    openModal('Edit Night', `
+      <div class="field"><label for="m-night-name">Night Name</label><input id="m-night-name" type="text" value="${esc(night.name)}" required></div>
+      <div class="field"><label for="m-night-date">Operational Date</label><input id="m-night-date" type="date" value="${esc(operationalDate)}" aria-describedby="m-night-finance" required></div>
+      <div class="field"><label for="m-night-reason">Reason for change</label><input id="m-night-reason" type="text" maxlength="500" required></div>
+      <p id="m-night-finance">Accounting date: <strong>${esc(night.date)}</strong>. Financial reporting stays on this date.</p>
+      <p class="alert alert-err" id="m-night-error" role="alert"></p>
+    `, save, '<button class="btn btn-ghost btn-sm" type="button" onclick="closeModal()">Cancel</button>'
+      + '<button class="btn btn-a btn-sm" id="m-night-edit-save" type="button" onclick="modalOK()">Save</button>');
+  } catch (_) {
+    if (current() && SESSION.modalCb === initialModal) toast('Could not load this Night. Refresh and try again.', 't-err');
+  }
 }
 
 function openAddNight() {
@@ -8234,7 +8359,7 @@ async function loadInventory() {
   const nightSel = document.getElementById('inv-night');
   const cur = nightSel.value;
   nightSel.innerHTML = '<option value="">— Select Night —</option>' +
-    SESSION.cache.nights.map(n => `<option value="${esc(n.id)}" ${n.id === cur ? 'selected' : ''}>${esc(n.name)} (${esc(n.date)})</option>`).join('');
+    SESSION.cache.nights.map(n => `<option value="${esc(n.id)}" ${n.id === cur ? 'selected' : ''}>${esc(n.name)} (${esc(nightOperationalDate(n))})</option>`).join('');
   nightSel.value = cur;
 
   const nightId = nightSel.value;
