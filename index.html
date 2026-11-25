@@ -1426,6 +1426,1293 @@ th.sortable span { font-size:10px; }
 
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// barinv-resolver.js SHA-256 d88458163d1e040aadbf2dfb294b8e89edeef141a70484dec21ee2c01598c378
+(function (root) {
+  'use strict';
+
+  var PRIORITY_FIELDS = [
+    'sku', 'barcode', 'upc', 'upc_code', 'ean', 'ean13', 'gtin',
+    'product_code', 'item_code', 'code', 'aliases', 'barcode_aliases',
+    'barcodes', 'skus', 'upcs', 'codes'
+  ];
+
+  function normalizeIdentifier(value) {
+    if (value == null) return '';
+    var text = String(value).trim();
+    if (!text || /[A-Za-z]/.test(text)) return '';
+    return text.replace(/[^0-9]/g, '');
+  }
+
+  function generateVariants(value) {
+    var digits = normalizeIdentifier(value);
+    if (digits.length < 8 || digits.length > 14) return [];
+    var variants = Object.create(null);
+    variants[digits] = true;
+    if (digits.length === 12) {
+      variants['0' + digits] = true;
+      variants['00' + digits] = true;
+    }
+    if (digits.length === 13) {
+      if (digits.charAt(0) === '0') variants[digits.slice(1)] = true;
+      variants['0' + digits] = true;
+    }
+    if (digits.length === 14) {
+      if (digits.charAt(0) === '0') variants[digits.slice(1)] = true;
+      if (digits.slice(0, 2) === '00') variants[digits.slice(2)] = true;
+    }
+    return Object.keys(variants);
+  }
+
+  function isBarcodeField(name) {
+    return PRIORITY_FIELDS.indexOf(name) >= 0
+      || /(?:barcode|upc|ean|gtin|sku|product_code|item_code|alias)/i.test(name);
+  }
+
+  function valuesForField(value) {
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function resolveItemByCode(rawCode, options) {
+    options = options || {};
+    var items = Array.isArray(options.items)
+      ? options.items
+      : (root.SESSION && root.SESSION.cache && Array.isArray(root.SESSION.cache.items)
+          ? root.SESSION.cache.items : []);
+    var logger = typeof options.logger === 'function' ? options.logger : function () {};
+    var variants = generateVariants(rawCode);
+    logger('normalized', 'raw=' + JSON.stringify(String(rawCode == null ? '' : rawCode))
+      + ' variants=' + JSON.stringify(variants) + ' items=' + items.length);
+    if (!items.length) return { item: null, reason: 'empty-cache', variants: variants };
+    if (!variants.length) return { item: null, reason: 'unknown', variants: variants };
+
+    var wanted = Object.create(null);
+    variants.forEach(function (variant) { wanted[variant] = true; });
+    var matches = Object.create(null);
+
+    items.forEach(function (item, index) {
+      if (!item || typeof item !== 'object') return;
+      Object.keys(item).forEach(function (field) {
+        if (!isBarcodeField(field)) return;
+        valuesForField(item[field]).forEach(function (storedValue, valueIndex) {
+          var normalized = normalizeIdentifier(storedValue);
+          if (normalized.length < 8 || normalized.length > 14 || !wanted[normalized]) return;
+          var key = item.id != null ? String(item.id) : ('index:' + index);
+          if (!matches[key]) {
+            matches[key] = {
+              item: item,
+              field: Array.isArray(item[field]) ? field + '[' + valueIndex + ']' : field,
+              value: String(storedValue),
+              normalized: normalized
+            };
+          }
+        });
+      });
+    });
+
+    var ids = Object.keys(matches);
+    if (!ids.length) {
+      logger('lookup-miss', 'no exact barcode match');
+      return { item: null, reason: 'unknown', variants: variants };
+    }
+    if (ids.length > 1) {
+      var conflicts = ids.map(function (id) {
+        var match = matches[id];
+        return {
+          id: match.item.id,
+          name: match.item.name,
+          field: match.field,
+          value: match.value,
+          normalized: match.normalized
+        };
+      });
+      logger('conflict', conflicts.length + ' items share this barcode');
+      return { item: null, reason: 'conflict', conflicts: conflicts, variants: variants };
+    }
+
+    var hit = matches[ids[0]];
+    logger('exact-match', 'id=' + hit.item.id + ' name=' + JSON.stringify(hit.item.name)
+      + ' field=' + hit.field + ' normalized=' + hit.normalized);
+    return {
+      item: hit.item,
+      reason: hit.item.active === false ? 'inactive' : 'ok',
+      matchedField: hit.field,
+      matchedValue: hit.value,
+      normalized: hit.normalized,
+      variants: variants
+    };
+  }
+
+  root.BARINVResolver = {
+    version: '2026-09-18-ios-scan-fix',
+    normalizeIdentifier: normalizeIdentifier,
+    generateVariants: generateVariants,
+    resolveItemByCode: resolveItemByCode
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+// event-batch-attempt.js SHA-256 fbfe76868179826f7c1081071c5dc648d77d6ae7069df93149a3f81cf7aee36f
+// Stable client event IDs for transport-uncertain batch retries.
+// No network, storage or session access; the caller supplies its ID generator.
+(function(root) {
+  'use strict';
+  function prepare(owner, records, newId) {
+    const signature = JSON.stringify(records.map(record => {
+      const { client_event_id, _name, ...payload } = record;
+      return payload;
+    }));
+    let attempt = owner.pendingEventAttempt;
+    if (!attempt || attempt.signature !== signature) {
+      attempt = { signature, ids: records.map(() => newId()) };
+      owner.pendingEventAttempt = attempt;
+    }
+    records.forEach((record, index) => { record.client_event_id = attempt.ids[index]; });
+    return attempt;
+  }
+  const api = { prepare };
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.BarinvEventBatch = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+// dispatch-scale-manager.js SHA-256 432a71c3dd62996151de79acc1740e92226355549851fd9f0a5d043a58084c30
+(function (window) {
+  'use strict';
+
+  function create(transport, {
+    now = () => window.performance?.now?.() ?? Date.now(),
+    setTimer = (callback, delay) => setTimeout(callback, delay),
+    clearTimer = timer => clearTimeout(timer),
+    retryDelays = [1000, 2000, 4000, 8000, 16000, 30000],
+    retryLimit = Infinity,
+    freshnessMs = 3500,
+    emptyPanGrams = 5,
+  } = {}) {
+    const listeners = new Set();
+    const measurements = new Set();
+    let queue = Promise.resolve();
+    let wanted = false;
+    let generation = 0;
+    let attempt;
+    let transportOwned = false;
+    let teardown;
+    let authorizedId;
+    let retryIndex = 0;
+    let retryTimer;
+    let freshnessTimer;
+    let latest;
+    let error = null;
+    let status = supported() ? 'disconnected' : 'unsupported';
+
+    function supported() {
+      return transport?.supported?.() ?? !!transport;
+    }
+
+    function snapshot(measurement) {
+      const sample = measurement ? measurement.latest : latest;
+      const age = sample ? now() - sample.receivedAt : Infinity;
+      const reading = status === 'connected' && age >= 0 && age < freshnessMs
+        ? { grams: sample.grams, stable: sample.stable }
+        : null;
+      return { status, reading, panCleared: !!measurement?.panCleared, error };
+    }
+
+    function deliver(listener, state) {
+      try { listener(state); } catch (_) { /* An observer cannot change the transport lifecycle. */ }
+    }
+
+    function notify() {
+      const observers = [...listeners];
+      const sessions = [...measurements];
+      for (const listener of observers) if (listeners.has(listener)) deliver(listener, snapshot());
+      for (const session of sessions) {
+        if (measurements.has(session)) deliver(session.listener, snapshot(session));
+      }
+    }
+
+    function publish(state, cause = null) {
+      status = state;
+      error = cause;
+      notify();
+    }
+
+    function clearReadings() {
+      if (freshnessTimer != null) clearTimer(freshnessTimer);
+      freshnessTimer = undefined;
+      latest = undefined;
+      for (const session of measurements) {
+        session.latest = undefined;
+        session.panCleared = false;
+      }
+    }
+
+    function read(value) {
+      if (!Number.isFinite(value?.grams) || value.grams < 0) return;
+      const sample = {
+        grams: value.grams,
+        stable: typeof value.stable === 'boolean' ? value.stable : null,
+        receivedAt: now(),
+      };
+      latest = sample;
+      for (const session of measurements) {
+        session.latest = sample;
+        if (sample.grams <= emptyPanGrams) session.panCleared = true;
+      }
+      if (freshnessTimer != null) clearTimer(freshnessTimer);
+      freshnessTimer = setTimer(() => {
+        if (latest !== sample) return;
+        clearReadings();
+        notify();
+      }, freshnessMs);
+      notify();
+    }
+
+    function enqueue(run) {
+      const operation = queue.then(run);
+      queue = operation.catch(() => {});
+      return operation;
+    }
+
+    function current(token) {
+      return wanted && generation === token;
+    }
+
+    function message(cause) {
+      return cause?.message || (typeof cause === 'string' && cause) || 'Scale connection was interrupted.';
+    }
+
+    function stop(cause) {
+      wanted = false;
+      authorizedId = undefined;
+      publish(supported() ? 'disconnected' : 'unsupported', cause);
+    }
+
+    function startCleanup() {
+      if (transportOwned && !teardown) teardown = Promise.resolve().then(() => transport.disconnect());
+      return teardown;
+    }
+
+    async function cleanup(token) {
+      if (!transportOwned) return true;
+      try {
+        await startCleanup();
+        transportOwned = false;
+        return true;
+      } catch (cause) {
+        if (generation === token) stop(`Scale disconnect failed: ${message(cause)}`);
+        return false;
+      } finally {
+        teardown = undefined;
+      }
+    }
+
+    function retry(token, cause) {
+      if (!current(token)) return;
+      const terminal = ['NotAllowedError', 'NotSupportedError', 'SecurityError', 'AbortError'].includes(cause?.name) ||
+        /permission denied|unauthorized|not authori[sz]ed/i.test(cause?.message || '');
+      if (!authorizedId || !supported() || terminal || retryIndex >= retryLimit || !retryDelays.length) {
+        stop(message(cause));
+        return;
+      }
+      const delay = retryDelays[Math.min(retryIndex++, retryDelays.length - 1)];
+      retryTimer = setTimer(() => {
+        retryTimer = undefined;
+        if (current(token)) void open(authorizedId, token);
+      }, delay);
+      publish('reconnecting', message(cause));
+    }
+
+    function unexpected(owner, token, cause) {
+      if (!current(token) || owner !== attempt) return;
+      attempt = undefined;
+      clearReadings();
+      if (authorizedId) publish('reconnecting', message(cause));
+      else stop(message(cause));
+      void enqueue(async () => {
+        if (generation === token && await cleanup(token)) retry(token, cause);
+      });
+    }
+
+    function open(deviceId, token) {
+      return enqueue(async () => {
+        if (!current(token) || !(await cleanup(token)) || !current(token)) return false;
+        const owner = {};
+        attempt = owner;
+        transportOwned = true;
+        const isCurrent = () => current(token) && attempt === owner;
+        try {
+          const connectedId = await transport.connect({
+            deviceId,
+            isCurrent,
+            onReading(value) { if (isCurrent() && status === 'connected') read(value); },
+            onDisconnect(cause) { unexpected(owner, token, cause); },
+          });
+          if (!isCurrent()) return false;
+          if (typeof connectedId !== 'string' || !connectedId.trim() || (deviceId && connectedId !== deviceId)) {
+            const failure = new Error('Scale transport did not confirm the authorized device.');
+            failure.name = 'SecurityError';
+            throw failure;
+          }
+          authorizedId = connectedId;
+          retryIndex = 0;
+          publish('connected');
+          return isCurrent();
+        } catch (cause) {
+          if (!isCurrent()) return false;
+          attempt = undefined;
+          if (await cleanup(token)) retry(token, cause);
+          return false;
+        }
+      });
+    }
+
+    function connect() {
+      if (wanted) return queue;
+      if (!supported()) {
+        publish('unsupported');
+        return Promise.resolve(false);
+      }
+      const token = ++generation;
+      wanted = true;
+      retryIndex = 0;
+      clearReadings();
+      publish('connecting');
+      return open(undefined, token);
+    }
+
+    function disconnect() {
+      const token = ++generation;
+      wanted = false;
+      authorizedId = undefined;
+      attempt = undefined;
+      if (retryTimer != null) clearTimer(retryTimer);
+      retryTimer = undefined;
+      clearReadings();
+      // Wake a pending native scan now, then wait for its cleanup in sequence.
+      startCleanup()?.catch(() => {});
+      const closing = enqueue(() => cleanup(token));
+      publish(supported() ? 'disconnected' : 'unsupported');
+      return closing;
+    }
+
+    function toggle() {
+      return wanted ? disconnect() : connect();
+    }
+
+    function subscribe(listener) {
+      listeners.add(listener);
+      deliver(listener, snapshot());
+      return () => listeners.delete(listener);
+    }
+
+    function measurement(listener) {
+      const session = { listener, panCleared: false };
+      measurements.add(session);
+      deliver(listener, snapshot(session));
+      return {
+        release() { measurements.delete(session); },
+        isCurrentReading(value) {
+          if (!measurements.has(session) || !session.panCleared) return false;
+          const { reading } = snapshot(session);
+          return !!reading && reading.grams > emptyPanGrams && Number(value) === reading.grams;
+        },
+      };
+    }
+
+    return { connect, disconnect, toggle, subscribe, measurement };
+  }
+
+  window.BarinvScaleManager = { create };
+})(window);
+</script>
+<script>
+// scale-ui.js SHA-256 829e80c8ace195c30e792f1152a95c29664a0f2b3ebfa07c3cfea2699abbcd55
+(function (root) {
+  'use strict';
+
+  let manager;
+  let latest = { status: 'unsupported', reading: null };
+  const statusText = {
+    unsupported: 'Manual entry only',
+    disconnected: 'Disconnected',
+    connecting: 'Connecting…',
+    connected: 'Connected',
+    reconnecting: 'Reconnecting…',
+  };
+
+  function changeHeader() {
+    const button = document.getElementById('barinv-global-scale');
+    if (!button) return;
+    const connected = latest.status === 'connected';
+    const pending = latest.status === 'connecting' || latest.status === 'reconnecting';
+    button.textContent = connected ? 'Scale Connected' : pending ? statusText[latest.status] : 'Connect to Scale';
+    button.disabled = latest.status === 'unsupported';
+    button.setAttribute('aria-pressed', String(connected || pending));
+    button.setAttribute('aria-label', connected ? 'Scale Connected. Disconnect scale' :
+      pending ? statusText[latest.status] + ' Cancel scale connection' : 'Connect to Scale');
+    button.title = latest.error || (button.disabled ? 'Bluetooth scale unavailable. Enter weight manually.' :
+      connected ? 'Disconnect scale' : pending ? 'Cancel connection and automatic retries' : 'Connect to Scale');
+  }
+
+  function init(transport) {
+    manager = root.BarinvScaleManager.create(transport);
+    manager.subscribe(snapshot => {
+      latest = snapshot;
+      changeHeader();
+    });
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', changeHeader, { once: true });
+    root.addEventListener('pagehide', () => void manager.disconnect());
+    return manager;
+  }
+
+  function mountInput(input, isCurrent, onInput) {
+    if (!manager || !input) return null;
+    const status = document.getElementById('dsp-arb-status');
+    const weight = document.getElementById('dsp-arb-weight');
+    const stability = document.getElementById('dsp-arb-stability');
+    const hint = document.getElementById('dsp-arb-hint');
+    function updateInput(value) {
+      if (input.value === value) return;
+      input.value = value;
+      onInput();
+    }
+    const measurement = manager.measurement(snapshot => {
+      if (!isCurrent()) return;
+      const { reading, panCleared } = snapshot;
+      const eligible = snapshot.status === 'connected' && !!reading && panCleared && reading.grams > 5;
+      if (status) status.textContent = statusText[snapshot.status];
+      if (weight) weight.textContent = reading ? reading.grams.toFixed(1) + ' g' : '— g';
+      if (stability) stability.textContent = reading ? (reading.stable == null ? 'Stability unavailable' :
+        reading.stable ? 'Stable' : 'Unstable') : 'Waiting';
+      const source = input.getAttribute('data-weight-source');
+      if (source !== 'manual' && eligible) {
+        input.setAttribute('data-weight-source', 'arboleaf-direct');
+        updateInput(String(reading.grams));
+      } else if (source === 'arboleaf-direct') {
+        input.removeAttribute('data-weight-source');
+        updateInput('');
+      }
+      if (hint) hint.textContent = source === 'manual' ? 'Manual weight selected.' :
+        snapshot.status !== 'connected' ? 'Connect from the main header, or enter weight manually.' :
+        !panCleared ? 'Clear the pan before placing this bottle.' :
+        eligible ? 'Check the weight, then confirm to save it to the draft.' : 'Place this bottle on the scale for a fresh reading.';
+    });
+    return {
+      release: measurement.release,
+      isCurrentReading: value => isCurrent() && measurement.isCurrentReading(value),
+    };
+  }
+
+  root.BarinvScaleUI = {
+    init,
+    supports: () => latest.status !== 'unsupported',
+    snapshot: () => latest,
+    onHeaderClick() {
+      if (!manager) return;
+      if (['connecting', 'connected', 'reconnecting'].includes(latest.status)) {
+        if (root.confirm('Disconnect the scale?')) void manager.disconnect();
+      } else {
+        void manager.connect();
+      }
+    },
+    closeConnection() { if (manager) void manager.disconnect(); },
+    subscribe(listener) { return manager?.subscribe(listener); },
+    measurement(listener) { return manager?.measurement(listener); },
+    mountInput,
+  };
+})(window);
+</script>
+<script>
+// rapid-dispatch.js SHA-256 a01a56b190b6d2ddeb7c3c881d4a4f2516df81cc6ffbb82decc7b81732cd1df4
+(function (window) {
+  'use strict';
+
+  const document = window.document;
+  const titles = { taking: 'Rapid Taking', returning: 'Rapid Return' };
+  const sameCodeGapMs = 400;
+  let bridge;
+  let session;
+  let browserCamera;
+  let nativeScan;
+
+  function element(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  function button(text, action, primary = false) {
+    const node = element('button', text, `btn btn-${primary ? 'a' : 'ghost'} btn-sm`);
+    node.type = 'button';
+    node.addEventListener('click', action);
+    return node;
+  }
+
+  function isCurrent(current, context = current.adapter.context()) {
+    return session === current && context?.active && context.ready &&
+      context.mode === current.context.mode && context.key === current.context.key &&
+      context.draftRef === current.context.draftRef && context.userRef === current.context.userRef;
+  }
+
+  function say(current, message) {
+    current.status.textContent = message;
+  }
+
+  function paintControls(current) {
+    const busy = current.committing || !!current.weighing || !!current.camera?.native;
+    current.scan.disabled = busy;
+    current.code.disabled = busy;
+    current.addCode.disabled = busy;
+    current.apply.disabled = busy || !current.rows.size ||
+      Array.from(current.rows.values()).some(row => row.pending > 0);
+    current.cancel.disabled = current.committing;
+  }
+
+  function paintRows(current) {
+    current.list.replaceChildren();
+    let total = 0;
+    for (const row of current.rows.values()) {
+      total += row.quantity + row.pending + row.weighed.length;
+      const card = element('li');
+      card.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border)';
+      card.append(element('strong', row.name));
+      const quantity = element('input');
+      quantity.type = 'number';
+      quantity.min = '0';
+      quantity.step = '1';
+      quantity.inputMode = 'numeric';
+      quantity.style.cssText = 'width:5rem;max-width:100%;padding:5px';
+      quantity.value = String(row.quantity);
+      quantity.disabled = current.committing || !!current.weighing;
+      const returning = current.context.mode === 'returning' && !current.context.singleItemForm;
+      quantity.setAttribute('aria-label', `${returning ? 'Full returns' : 'Quantity'} for ${row.name}`);
+      quantity.addEventListener('change', () => {
+        if (!isCurrent(current)) return refresh();
+        const number = quantity.value === '' ? NaN : Number(quantity.value);
+        if (!Number.isSafeInteger(number) || number < 0) {
+          quantity.value = String(row.quantity);
+          return say(current, 'Enter a whole quantity of zero or more.');
+        }
+        row.quantity = number;
+        if (!row.quantity && !row.pending && !row.weighed.length) current.rows.delete(row.itemId);
+        paintRows(current);
+      });
+      const actions = [];
+      if (current.context.singleItemForm) {
+        if (row.canWeigh) {
+          const partial = button('Weigh this bottle in Submit Event', () => void commit(current, { partial: true }));
+          partial.disabled = row.quantity !== 1;
+          actions.push(partial);
+        }
+      } else if (returning) {
+        card.append(element('span', `${row.pending} to classify · ${row.weighed.length} weighed`));
+        const markFull = button('Mark full', () => {
+          if (!isCurrent(current)) return refresh();
+          if (row.pending < 1 || !Number.isSafeInteger(row.quantity + 1)) return;
+          row.pending -= 1;
+          row.quantity += 1;
+          paintRows(current);
+        });
+        const weighOne = button('Weigh one', () => weigh(current, row));
+        markFull.disabled = !row.pending;
+        weighOne.disabled = !row.pending || !row.canWeigh;
+        actions.push(markFull, weighOne);
+      } else if (row.canWeigh) {
+        const partial = button('Use one partial', () => weigh(current, row));
+        partial.disabled = !row.quantity;
+        actions.push(partial);
+        if (row.weighed.length) card.append(element('span', `${row.weighed.length} partial · ${row.weighed.map(entry => (entry.fraction * 100).toFixed(1) + '%').join(', ')}`));
+      }
+      if (row.weighed.length) {
+        actions.push(button(returning ? 'Undo last weight' : 'Undo last partial', () => {
+          if (!isCurrent(current)) return refresh();
+          const field = returning ? 'pending' : 'quantity';
+          if (!row.weighed.length || !Number.isSafeInteger(row[field] + 1)) return;
+          row.weighed.pop();
+          row[field] += 1;
+          paintRows(current);
+        }));
+      }
+      const remove = button('Remove', () => {
+        if (!isCurrent(current)) return refresh();
+        current.rows.delete(row.itemId);
+        paintRows(current);
+      });
+      remove.setAttribute('aria-label', `Remove ${row.name}`);
+      actions.push(remove);
+      if (current.committing || current.weighing) actions.forEach(control => { control.disabled = true; });
+      card.append(quantity, ...actions);
+      current.list.append(card);
+    }
+    current.summary.textContent = total ? `${total} ${total === 1 ? 'unit' : 'units'} across ${current.rows.size} ${current.rows.size === 1 ? 'product' : 'products'}` : 'No products added';
+    paintControls(current);
+  }
+
+  function record(current, rawCode, acceptItem = () => true) {
+    if (!isCurrent(current)) { refresh(); return false; }
+    if (current.committing || current.weighing) return false;
+    const code = String(rawCode ?? '').trim();
+    if (!code) return false;
+    let result;
+    try { result = current.adapter.resolve(code); }
+    catch (_) { say(current, 'The local catalog is unavailable. Try again.'); return false; }
+    if (!result?.item || (result.reason && result.reason !== 'ok')) {
+      const messages = {
+        conflict: 'This barcode matches several products. Check the catalog before adding it.',
+        inactive: 'This product is inactive or unavailable for this destination.',
+        ineligible: 'This product is outside the current operation’s item list.',
+        loading: 'The item list is loading. Scan again when it is ready.',
+        'empty-cache': 'The catalog is still loading. Try again when it is ready.'
+      };
+      say(current, messages[result?.reason] || 'This barcode was not found in the current venue.');
+      return false;
+    }
+    const { id, name } = result.item;
+    if (id == null) return false;
+    const itemId = String(id);
+    if (current.context.singleItemForm && current.rows.size && !current.rows.has(itemId)) {
+      say(current, 'Submit Event uses one product at a time. Apply this product or remove it before scanning another.');
+      return false;
+    }
+    if (!acceptItem(itemId)) return false;
+    const canWeigh = current.context.singleItemForm ? current.adapter.canWeigh(result.item) : current.context.mode === 'taking'
+      ? (result.item.measurement_mode || 'shot') === 'shot'
+      : Number(result.item.empty_bottle_weight_g) > 0;
+    const row = current.rows.get(itemId) || { itemId, name, canWeigh, quantity: 0, pending: 0, weighed: [] };
+    const field = current.context.mode === 'taking' || current.context.singleItemForm ? 'quantity' : 'pending';
+    if (!Number.isSafeInteger(row[field] + 1)) return false;
+    row[field] += 1;
+    current.rows.set(itemId, row);
+    say(current, `${name} added.`);
+    paintRows(current);
+    return true;
+  }
+
+  function weigh(current, row) {
+    if (!isCurrent(current)) return refresh();
+    const field = current.context.mode === 'returning' ? 'pending' : 'quantity';
+    if (current.weighing || current.committing || current.camera?.native || !row.canWeigh || !row[field]) return;
+    const attempt = {};
+    current.weighing = attempt;
+    paintRows(current);
+
+    function dismiss() {
+      if (current.weighing !== attempt) return;
+      current.weighing = null;
+      if (isCurrent(current)) paintRows(current);
+    }
+
+    void (async () => {
+      try {
+        await stopCamera(current);
+        if (!isCurrent(current) || current.weighing !== attempt) return;
+        attempt.close = current.adapter.weigh(row.itemId, entry => {
+          if (!isCurrent(current) || current.weighing !== attempt || attempt.accepted || !row[field] || !entry) return false;
+          attempt.accepted = true;
+          row[field] -= 1;
+          row.weighed.push({ ...entry });
+          say(current, `${row.name} ${field === 'pending' ? 'weight' : 'partial'} added to review.`);
+          paintRows(current);
+          return true;
+        }, dismiss);
+        if (!attempt.close) dismiss();
+      } catch (error) {
+        dismiss();
+        if (isCurrent(current)) say(current, error?.message || 'Unable to open the scale panel.');
+      }
+    })();
+  }
+
+  function useNativeCamera() {
+    return window.Capacitor?.isNativePlatform?.() &&
+      (typeof window._nativeScanBarcodeForMode === 'function' || typeof window._nativeScanBarcode === 'function');
+  }
+
+  async function readNative(current) {
+    if (nativeScan || browserCamera || window.BarinvSubmitScan?.nativePending) {
+      return say(current, 'Wait for the previous camera to close.');
+    }
+    const camera = { native: true };
+    current.camera = camera;
+    paintControls(current);
+    say(current, 'Scan one product. Tap Scan again for the next one.');
+    const mode = current.context.mode === 'taking' ? 'RAPID_TAKING' : 'RAPID_RETURN';
+    nativeScan = Promise.resolve().then(() => {
+      if (!isCurrent(current) || current.camera !== camera) return null;
+      return window._nativeScanBarcodeForMode
+        ? window._nativeScanBarcodeForMode(mode) : window._nativeScanBarcode();
+    });
+    try {
+      const code = await nativeScan;
+      if (code && isCurrent(current) && current.camera === camera) record(current, code);
+    } catch (_) {
+      if (isCurrent(current) && current.camera === camera) say(current, 'Camera unavailable. Enter a barcode instead.');
+    } finally {
+      nativeScan = null;
+      if (current.camera === camera) current.camera = null;
+      if (isCurrent(current)) paintControls(current);
+    }
+  }
+
+  function stopCamera(current) {
+    const camera = current.camera;
+    if (!camera) return Promise.resolve();
+    current.camera = null;
+    if (camera.native) return nativeScan || Promise.resolve();
+    current.scan.textContent = 'Scan';
+    current.cameraRegion.hidden = true;
+    return Promise.resolve(camera.started).catch(() => {}).then(async () => {
+      try { await camera.reader.stop(); } catch (_) {}
+      try { await camera.reader.clear(); } catch (_) {}
+      if (browserCamera === camera) browserCamera = null;
+    });
+  }
+
+  function startBrowser(current) {
+    if (browserCamera || nativeScan) return say(current, 'Wait for the previous camera to close.');
+    if (typeof window.Html5Qrcode !== 'function') return say(current, 'Camera scanner unavailable. Enter a barcode instead.');
+    current.cameraRegion.hidden = false;
+    let reader;
+    try { reader = new window.Html5Qrcode(current.cameraRegion.id); }
+    catch (_) {
+      current.cameraRegion.hidden = true;
+      return say(current, 'Camera scanner unavailable. Enter a barcode instead.');
+    }
+    const camera = { reader, held: new Map(), lastCodeAt: null };
+    current.camera = browserCamera = camera;
+    current.scan.textContent = 'Stop camera';
+    say(current, 'Scan one barcode at a time. Move it away before scanning another of the same product.');
+    function seesCode(code) {
+      if (!isCurrent(current)) { refresh(); return; }
+      if (current.camera !== camera) return;
+      record(current, code, itemId => {
+        const stamp = Date.now();
+        const held = camera.held.has(itemId);
+        camera.lastCodeAt = stamp;
+        for (const [known, seenAt] of camera.held) {
+          if (known !== itemId && stamp - seenAt >= sameCodeGapMs) camera.held.delete(known);
+        }
+        camera.held.set(itemId, stamp);
+        return !held;
+      });
+    }
+    function seesNoCode() {
+      if (current.camera === camera && camera.lastCodeAt != null && Date.now() - camera.lastCodeAt >= sameCodeGapMs) camera.held.clear();
+    }
+    camera.started = Promise.resolve().then(() => {
+      if (!isCurrent(current) || current.camera !== camera) return;
+      return reader.start({ facingMode: 'environment' }, { fps: 12, qrbox: { width: 240, height: 125 } }, seesCode, seesNoCode);
+    });
+    camera.started.catch(() => {
+      if (current.camera !== camera) return;
+      void stopCamera(current);
+      if (isCurrent(current)) say(current, 'Camera unavailable. Enter a barcode instead.');
+    });
+  }
+
+  async function commit(current, options) {
+    if (!isCurrent(current)) return refresh();
+    if (current.committing || current.weighing || current.camera?.native || !current.rows.size ||
+        Array.from(current.rows.values()).some(row => row.pending > 0)) return;
+    current.committing = true;
+    paintRows(current);
+    const rows = Array.from(current.rows.values(), row => ({ ...row, weighed: row.weighed.slice() }));
+    try {
+      await stopCamera(current);
+      if (!isCurrent(current)) return refresh();
+      const result = await current.adapter.commit(current.context, rows, options);
+      if (!isCurrent(current)) return refresh();
+      if (!result?.ok) {
+        say(current, result?.error || 'The draft could not be updated.');
+        return;
+      }
+      cancel();
+    } catch (error) {
+      if (isCurrent(current)) say(current, error?.message || 'The draft could not be updated.');
+    } finally {
+      current.committing = false;
+      if (isCurrent(current)) paintRows(current);
+    }
+  }
+
+  let readerSequence = 0;
+
+  function open(context, host, adapter) {
+    if (session || !context.ready) return;
+    const current = { context: { ...context }, host, adapter, rows: new Map(), camera: null, weighing: null, committing: false };
+    session = current;
+    const panel = element('section', '', 'panel');
+    const title = context.title || titles[context.mode];
+    panel.setAttribute('aria-label', title);
+    panel.style.cssText = 'padding:10px 12px;margin:0';
+    panel.append(element('strong', title), element('div', context.label));
+
+    const form = element('form');
+    form.style.cssText = 'display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0';
+    current.code = element('input');
+    current.code.type = 'text';
+    current.code.placeholder = 'Enter or scan a barcode';
+    current.code.autocomplete = 'off';
+    current.code.autocapitalize = 'off';
+    current.code.inputMode = 'text';
+    current.code.setAttribute('aria-label', 'Product barcode');
+    current.code.style.cssText = 'padding:7px;min-width:9rem;flex:1';
+    current.addCode = element('button', 'Add code', 'btn btn-ghost btn-sm');
+    current.addCode.type = 'submit';
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const code = current.code.value;
+      if (record(current, code)) current.code.value = '';
+    });
+    current.scan = button('Scan', () => {
+      if (!isCurrent(current)) return refresh();
+      if (current.camera) return void stopCamera(current);
+      if (useNativeCamera()) return void readNative(current);
+      startBrowser(current);
+    });
+    form.append(current.code, current.addCode, current.scan);
+    panel.append(form);
+
+    current.cameraRegion = element('div');
+    current.cameraRegion.id = `dsp-rapid-reader-${++readerSequence}`;
+    current.cameraRegion.hidden = true;
+    current.cameraRegion.style.cssText = 'width:100%;max-width:420px';
+    current.status = element('div');
+    current.status.setAttribute('role', 'status');
+    current.status.style.cssText = 'font-size:12px;color:var(--muted)';
+    current.summary = element('div');
+    current.summary.style.cssText = 'font-size:12px;margin-top:7px';
+    current.list = element('ul');
+    current.list.style.cssText = 'list-style:none;padding:0;margin:0 0 8px';
+    const footer = element('div');
+    footer.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+    current.cancel = button('Cancel', () => {
+      if (isCurrent(current)) cancel();
+    });
+    current.apply = button(context.singleItemForm ? 'Apply to Submit Event' : 'Apply to Dispatch draft',
+      () => void commit(current), true);
+    footer.append(current.cancel, current.apply);
+    panel.append(current.cameraRegion, current.status, current.summary, current.list, footer);
+    host.replaceChildren(panel);
+    const guidance = context.singleItemForm
+      ? 'Scan whole units of one product, or send one calibrated bottle to the weighing form.'
+      : context.mode === 'returning'
+        ? 'Mark full bottles without the scale, or weigh partial bottles before applying.'
+        : 'Scans add whole units. Use one partial for a calibrated bottle or review the quantity.';
+    say(current, guidance);
+    paintRows(current);
+  }
+
+  function clearSession() {
+    if (!session) return;
+    const current = session;
+    session = null;
+    void stopCamera(current);
+    if (typeof current.weighing?.close === 'function') current.weighing.close();
+    current.host.hidden = true;
+    current.host.style.display = 'none';
+    current.host.replaceChildren();
+  }
+
+  function route() {
+    const context = bridge.context();
+    const submit = window.BarinvSubmitRapid;
+    if (!context.active && submit) {
+      const form = submit.context();
+      if (form.active) return { host: document.getElementById('submit-rapid'), context: form, adapter: submit };
+    }
+    return { host: document.getElementById('dsp-rapid'), context, adapter: bridge };
+  }
+
+  function refresh() {
+    if (!bridge || !document.getElementById('dsp-rapid')) return;
+    bridge.closeInactiveWeigh?.();
+    const { host, context, adapter } = route();
+    if (!host) return;
+    const visible = context?.active && Object.prototype.hasOwnProperty.call(titles, context.mode);
+    if (session && (session.adapter !== adapter || !isCurrent(session, context))) clearSession();
+    host.hidden = !session;
+    host.style.display = session ? '' : 'none';
+    if (!session) host.replaceChildren();
+    const launcher = document.getElementById('dsp-rapid-launch');
+    if (launcher) {
+      launcher.hidden = !visible;
+      launcher.style.display = visible ? '' : 'none';
+      launcher.disabled = !visible || !context.ready || !!session;
+      launcher.setAttribute('aria-expanded', String(!!session));
+      launcher.setAttribute('aria-controls', context.singleItemForm ? 'submit-rapid' : 'dsp-rapid');
+      launcher.title = visible ? (context.ready ? context.title || titles[context.mode] : context.reason) : '';
+    }
+  }
+
+  function launch() {
+    const launcher = document.getElementById('dsp-rapid-launch');
+    if (!launcher || launcher.hidden || launcher.disabled || !bridge) return;
+    const { host, context, adapter } = route();
+    if (!host || !context?.active || !context.ready || !Object.prototype.hasOwnProperty.call(titles, context.mode)) return refresh();
+    adapter.prepare?.();
+    open(adapter.context(), host, adapter);
+    refresh();
+    if (session) host.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  function cancel() {
+    clearSession();
+    refresh();
+  }
+
+  function configure(nextBridge) {
+    clearSession();
+    bridge = nextBridge;
+    refresh();
+  }
+
+  window.BarinvRapidDispatch = { configure, refresh, launch, cancel, reviewIsOpen: () => !!session };
+  document.addEventListener('change', event => {
+    if (event.target?.closest?.('#pg-dispatch') || event.target?.closest?.('#pg-submit')) queueMicrotask(refresh);
+  });
+  window.addEventListener('pagehide', () => {
+    clearSession();
+    bridge?.closeInactiveWeigh?.(true);
+  });
+})(window);
+</script>
+<script>
+// rapid-dispatch-host.js SHA-256 cac20061e5682317c977492b2a7569139882576a1b175472ccb30aeb22af2c52
+/* Dispatch bridge for the shared Rapid Taking/Return UI. All writes here are local. */
+(function (root) {
+  'use strict';
+
+  const scopeFields = ['user', 'role', 'venueRole', 'venue', 'night', 'bar', 'source', 'bartender', 'barback'];
+  const modeFields = { taking: 'taken', returning: 'returned' };
+  const normalRow = { taken: 0, returned: 0, comp: 0, shot: 0 };
+  const mismatchedScope = 'Rapid counts belong to a different destination, recipient or source. Restore that Dispatch selection before saving.';
+  let lockedScope = null;
+
+  const text = value => String(value ?? '');
+  const byId = (rows, id) => (rows || []).find(row => text(row?.id) === id);
+  const scopeKey = scope => JSON.stringify(scopeFields.map(field => scope?.[field] ?? null));
+  const selected = id => text(document.getElementById(id)?.value);
+
+  function currentScope() {
+    const user = SESSION.user;
+    const bar = DSP_SELECTED_BARS.length === 1 ? text(DSP_SELECTED_BARS[0]) : '';
+    const staff = DSP_STAFF_MAP[bar];
+    return {
+      user: user?.staff_id ? 'staff:' + user.staff_id : user?.id ? 'auth:' + user.id : '',
+      role: text(SESSION.role),
+      venueRole: text(SESSION.venueRole),
+      venue: text(SESSION.venueId),
+      night: selected('dsp-night'),
+      bar,
+      source: selected('dsp-source') || 'Liquor Room',
+      bartender: text(staff?.bartender),
+      barback: text(staff?.barback),
+    };
+  }
+
+  function authorizedNight(scope) {
+    const night = byId(SESSION.cache.nights, scope.night);
+    return night?.active && (night.venue_id == null || text(night.venue_id) === scope.venue) ? night : null;
+  }
+
+  function authorizedBar(scope) {
+    const bar = byId(SESSION.cache.bars, scope.bar);
+    if (!bar?.active || (bar.venue_id != null && text(bar.venue_id) !== scope.venue)) return null;
+    if (typeof dspBarSection === 'function' && dspBarSection(bar) === 'vip') return null;
+    if (typeof dspBarSection !== 'function' && typeof dspClassifyBar === 'function' &&
+        dspClassifyBar(text(bar.name)) === '🪑 VIP Tables') return null;
+    if (typeof dspIsScopedStaff === 'function' && dspIsScopedStaff() &&
+        !byId(submitBarsForNight(scope.night), scope.bar)) return null;
+    if (typeof NightActivationService !== 'undefined' && !NightActivationService.isBarActive(scope.night, bar.id)) return null;
+    return bar;
+  }
+
+  function context() {
+    const active = !!document.getElementById('pg-dispatch')?.classList.contains('active');
+    const mode = DSP_MODE;
+    const draftRef = DSP_STATE;
+    const scope = currentScope();
+    const revision = typeof ASSIGNMENT_CONTEXT_REV === 'number' ? ASSIGNMENT_CONTEXT_REV : 0;
+    const key = JSON.stringify([mode, revision, scopeKey(scope)]);
+    const result = { active, mode, ready: false, reason: '', label: '', key, draftRef, userRef: SESSION.user };
+    if (!active || !Object.prototype.hasOwnProperty.call(modeFields, mode)) return result;
+    const night = authorizedNight(scope);
+    if (!scope.user || !scope.venue || !night) {
+      result.reason = 'Select an authorized venue and active Night first.';
+      return result;
+    }
+    const bar = authorizedBar(scope);
+    if (!bar) {
+      result.reason = 'Select exactly one active Dispatch destination first.';
+      return result;
+    }
+    if (lockedScope && scopeKey(scope) !== scopeKey(lockedScope)) {
+      result.reason = mismatchedScope;
+      return result;
+    }
+    if (typeof dspSaveAll === 'function' && dspSaveAll.pendingEventAttempt?.rapid === true) {
+      result.reason = 'Finish the pending Dispatch before adding more Rapid counts.';
+      return result;
+    }
+    const recipientNames = [scope.bartender, scope.barback]
+      .filter(Boolean)
+      .map(id => byId(SESSION.cache.staff, id)?.name)
+      .filter(Boolean);
+    result.ready = true;
+    result.label = [night.name, bar.name, ...recipientNames].filter(Boolean).join(' · ');
+    return result;
+  }
+
+  function sameContext(opened, current) {
+    return !!opened && current.ready && opened.key === current.key && opened.draftRef === current.draftRef &&
+      opened.userRef === current.userRef;
+  }
+
+  function weighContext(mode = 'returning') {
+    const current = context();
+    return current.active && current.mode === mode ? current : null;
+  }
+
+  function supportsBottleScale() {
+    return !!root.BarinvScaleUI?.supports();
+  }
+
+  function bottleScalePanel() {
+    return `<div id="dsp-arb-scale" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);background:var(--s2);border-radius:8px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px">
+        <strong>Scale reading</strong>
+      </div>
+      <div>Connection: <span id="dsp-arb-status" role="status">Disconnected</span></div>
+      <div>Live weight: <strong id="dsp-arb-weight">— g</strong> · <span id="dsp-arb-stability">Waiting</span></div>
+      <div id="dsp-arb-hint" style="color:var(--muted);font-size:12px;margin-top:4px">Connect in the main header or enter weight manually.</div>
+    </div>`;
+  }
+
+  function closeInactiveWeigh(force = false) {
+    const callback = SESSION.modalCb;
+    if (callback?.dispatchWeighIsCurrent && (force || !callback.dispatchWeighIsCurrent())) closeModal();
+  }
+
+  function eligibleItem(id) {
+    const item = byId(SESSION.cache.items, text(id));
+    return item?.active && item.service_mode !== 'vip_only' ? item : null;
+  }
+
+  function resolve(code) {
+    if (!context().ready) return { item: null, reason: 'context' };
+    const result = root.BARINVResolver?.resolveItemByCode(code, { items: SESSION.cache.items || [] });
+    if (!result) return { item: null, reason: 'unavailable' };
+    if (result.reason === 'ok' && !eligibleItem(result.item?.id)) return { item: null, reason: 'unavailable' };
+    return result;
+  }
+
+  function weigh(itemId, onWeight, onDismiss) {
+    const opened = context();
+    const item = eligibleItem(itemId);
+    if (!opened.ready || !item) return null;
+    const taking = opened.mode === 'taking';
+    const available = taking ? (item.measurement_mode || 'shot') === 'shot' : Number(item.empty_bottle_weight_g) > 0;
+    const open = taking ? root.dspOpenPartialModal : root.dspWeighReturn;
+    if (!available || typeof open !== 'function') return null;
+    return open(item.id, {
+      onWeight(entry) {
+        if (!sameContext(opened, context())) return false;
+        return onWeight(entry);
+      },
+      onDismiss,
+    });
+  }
+
+  function validBottleWeight(weight, empty, full) {
+    // Stored calibrations are displayed in grams. Allow half a gram for rounding.
+    const roundingGrams = 0.5;
+    return Number.isFinite(weight) && weight > 0 &&
+      Number.isFinite(empty) && empty > 0 && Number.isFinite(full) && full > empty &&
+      weight >= empty - roundingGrams && weight <= full + roundingGrams;
+  }
+
+  function validWeight(entry) {
+    if (!entry || !Number.isFinite(entry.weight) || entry.weight <= 0) return false;
+    if (entry.returnedFrac == null) return entry.rapidQty === 1;
+    return Number.isFinite(entry.returnedFrac) && entry.returnedFrac >= 0 && entry.returnedFrac <= 0.999 &&
+      entry.rapidQty === entry.returnedFrac;
+  }
+
+  function commit(opened, rows) {
+    const current = context();
+    const fail = error => ({ ok: false, error });
+    if (!sameContext(opened, current)) return fail(current.reason || 'Dispatch changed. Reopen Rapid for the correct Night and destination.');
+    if (!Array.isArray(rows) || !rows.length) return fail('Scan at least one item first.');
+    const field = modeFields[current.mode];
+    const taking = field === 'taken';
+    const next = { ...DSP_STATE };
+    const overReturned = new Set();
+    for (const row of rows) {
+      const item = eligibleItem(row?.itemId);
+      const unitCount = row?.quantity;
+      const weights = row?.weighed || [];
+      const validPartial = entry => (item.measurement_mode || 'shot') === 'shot' &&
+        Number.isFinite(entry?.fraction) && entry.fraction > 0 && entry.fraction < 1;
+      if (!item || !Number.isSafeInteger(unitCount) || unitCount < 0 || row.pending ||
+          !Array.isArray(weights) || !weights.every(taking ? validPartial : validWeight) ||
+          (!unitCount && !weights.length)) {
+        return fail('Review quantities and finish or remove every pending bottle.');
+      }
+      const existing = Object.prototype.hasOwnProperty.call(next, item.id) ? next[item.id] : normalRow;
+      const entry = { ...existing, [field]: (existing[field] || 0) + unitCount };
+      if (taking && weights.length) {
+        entry.partials = [...(existing.partials || []), ...weights.map(({ fraction, ts }) => ({ fraction, ts }))];
+        entry.taken = Math.round((entry.taken + weights.reduce((total, partial) => total + partial.fraction, 0)) * 10000) / 10000;
+      } else if (weights.length) {
+        entry.weighed = [...(existing.weighed || [])];
+        for (const weight of weights) {
+          const { rapidQty, ...auditEntry } = weight;
+          entry.returned += rapidQty;
+          if (auditEntry.returnedFrac != null) entry.returned = Math.round(entry.returned * 10000) / 10000;
+          entry.weighed.push(auditEntry);
+        }
+      }
+      if (!Number.isFinite(entry[field])) return fail('Enter a valid quantity.');
+      Object.defineProperty(next, item.id, { value: entry, enumerable: true, writable: true, configurable: true });
+      if (field === 'returned') overReturned.add(item.id);
+    }
+    const oldState = DSP_STATE;
+    const oldScope = lockedScope;
+    lockedScope = currentScope();
+    DSP_STATE = next;
+    if (typeof dspPersistDraft === 'function') {
+      let saved;
+      try { saved = dspPersistDraft(); } catch (_) {}
+      if (!saved) {
+        DSP_STATE = oldState;
+        lockedScope = oldScope;
+        return fail('Draft could not be saved on this device. The existing draft is unchanged.');
+      }
+    }
+    dspRenderCards();
+    if (typeof dspCheckOverReturn === 'function') overReturned.forEach(id => dspCheckOverReturn(id));
+    return { ok: true };
+  }
+
+  function scopeSnapshot() {
+    return lockedScope ? { ...lockedScope } : null;
+  }
+
+  function restoreScope(value) {
+    if (value == null) lockedScope = null;
+    else {
+      // Invalid stored attribution must continue to block submission.
+      const valid = typeof value === 'object' && scopeFields.every(field => typeof value[field] === 'string')
+        && value.user && value.venue && value.night && value.bar;
+      lockedScope = valid ? Object.fromEntries(scopeFields.map(field => [field, value[field]])) : {};
+    }
+  }
+
+  function canSubmit() {
+    if (!lockedScope) return true;
+    const scope = currentScope();
+    if (scopeKey(scope) === scopeKey(lockedScope) && authorizedNight(scope) && authorizedBar(scope)) return true;
+    toast(mismatchedScope, 't-warn');
+    return false;
+  }
+
+  function canLeaveScopeChange() {
+    if (!lockedScope) return true;
+    toast('Finish or reset the Rapid Dispatch draft before changing its venue or Night.', 't-warn');
+    return false;
+  }
+
+  root.BarinvRapidHost = {
+    scopeSnapshot,
+    restoreScope,
+    canSubmit,
+    canLeaveScopeChange,
+    weighContext,
+    supportsBottleScale,
+    bottleScalePanel,
+    validBottleWeight,
+    isCurrentWeigh(opened) {
+      const current = weighContext(opened.mode);
+      return current != null && opened.key === current.key && opened.draftRef === current.draftRef &&
+        opened.userRef === current.userRef;
+    },
+    closeInactiveWeigh,
+    afterSubmit() { restoreScope(null); },
+    refresh() { root.BarinvRapidDispatch.refresh(); },
+  };
+  root.BarinvRapidDispatch.configure({ context, resolve, weigh, commit, closeInactiveWeigh });
+})(window);
+</script>
+<script>
+// submit-rapid-host.js SHA-256 54b159d0caaa8e8779c605d8a56a6f6f4e2b3ccfda4188e69ce93286851ae61a
+// The existing Submit Event form holds one product. Rapid reviews feed only that form.
+(function (root) {
+  'use strict';
+
+  const modes = { DELIVERED: 'taking', RETURNED: 'returning' };
+
+  function context() {
+    const scan = root.BarinvSubmitScan?.context();
+    const mode = scan && modes[scan.action];
+    const active = !!(scan?.active && mode && !scan.batch && SESSION.role === 'admin');
+    const pending = active && (submitEvent.pending || SESSION.scannerActive || root.BarinvSubmitScan.nativePending);
+    return {
+      ...scan,
+      active,
+      mode,
+      ready: active && scan.ready && !pending,
+      reason: pending ? 'Wait for the current scan or submission to finish.' : scan?.reason,
+      title: mode === 'taking' ? 'Submit Event · Rapid Deliver' : 'Submit Event · Rapid Return',
+      label: 'One product per Submit Event',
+      singleItemForm: true,
+    };
+  }
+
+  function canWeigh(item) {
+    return !!root.BarinvSubmitScale?.canWeighItem(item);
+  }
+
+  function commit(opened, rows, { partial = false } = {}) {
+    const current = context();
+    const fail = error => ({ ok: false, error });
+    if (!current.ready || current.key !== opened.key || current.userRef !== opened.userRef) {
+      return fail('Submit Event changed. Reopen Rapid Scan for the current operation.');
+    }
+    const row = rows[0];
+    if (rows.length !== 1 || !Number.isSafeInteger(row.quantity) || row.quantity < 1 ||
+        row.pending || row.weighed?.length) {
+      return fail('Review the whole quantity of one product.');
+    }
+    const item = SESSION.cache.items.find(entry => String(entry.id) === row.itemId);
+    const quantity = document.getElementById('ev-qty');
+    if (!quantity || !item || (partial && (row.quantity !== 1 || !canWeigh(item)))) {
+      return fail('One calibrated bottle is required for scale weighing.');
+    }
+    if (!root.BarinvSubmitScan.select(item, opened)) {
+      return fail('The product is no longer available for this operation.');
+    }
+    if (partial && current.mode === 'taking') bspEnableDeliveredScale();
+    root.BarinvSubmitScale.setQuantityMode(!partial);
+    quantity.value = partial ? '' : String(row.quantity);
+    const field = partial ? document.getElementById('bsp-scale-panel') : quantity;
+    field?.scrollIntoView?.({ block: 'nearest' });
+    toast(partial ? 'Clear the scale, place this bottle, then review the quantity.' :
+      'Quantity added to Submit Event. Review the form before submitting.', 't-info');
+    return { ok: true };
+  }
+
+  root.BarinvSubmitRapid = {
+    context,
+    prepare() { root.BarinvSubmitScan.invalidate(); },
+    resolve(code) { return root.BarinvSubmitScan.resolve(code); },
+    canWeigh,
+    commit,
+  };
+})(window);
+</script>
 </head>
 <body>
 
@@ -1534,6 +2821,15 @@ th.sortable span { font-size:10px; }
   <div class="topbar">
     <button class="nav-toggle" id="nav-toggle" type="button" onclick="event.stopPropagation(); toggleMobileNav()" aria-expanded="false">☰ Menu</button>
     <div class="topbar-logo">BARINV</div>
+    <div id="barinv-header-actions" style="display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">
+    <button id="barinv-global-scale" data-scale-connection type="button" disabled class="btn btn-ghost btn-xs"
+      style="flex:0 0 auto;max-width:7rem;white-space:normal;line-height:1.15;padding:4px 6px;font-size:10px"
+      onclick="window.BarinvScaleUI.onHeaderClick()">Connect to Scale</button>
+    <button id="dsp-rapid-launch" type="button" hidden disabled class="btn btn-ghost btn-xs"
+      style="display:none;flex:0 0 auto;white-space:nowrap;line-height:1.15;padding:4px 6px;font-size:10px"
+      aria-controls="dsp-rapid" aria-expanded="false"
+      onclick="window.BarinvRapidDispatch.launch()">Rapid Scan</button>
+    </div>
     <nav class="topbar-nav" id="top-nav"></nav>
     <div class="topbar-right">
       <select id="venue-selector" onchange="switchVenue(this.value)" style="padding:5px 8px;background:var(--s2);border:1px solid var(--a);color:var(--a);font-family:'Russo One',sans-serif;font-size:10px;letter-spacing:0.1em;outline:none;max-width:160px;cursor:pointer;display:none;">
@@ -1811,6 +3107,7 @@ th.sortable span { font-size:10px; }
 
     <!-- ══ SUBMIT (barback + admin) ══ -->
     <div class="page" id="pg-submit">
+      <section id="submit-rapid" hidden></section>
       <div class="ph">
         <div class="ph-left">
           <div class="ph-title">Submit Event</div>
@@ -1860,9 +3157,20 @@ th.sortable span { font-size:10px; }
                 <option value="">— select —</option>
               </select>
             </div>
+            <section id="bsp-scale-panel" hidden>
+              <div>Scale: <strong id="bsp-scale-status" role="status">Disconnected</strong></div>
+              <button class="btn btn-ghost btn-sm" type="button" id="bsp-delivered-scale-enable"
+                onclick="bspEnableDeliveredScale()" hidden>Use scale for a partial bottle</button>
+              <div id="bsp-live-weight" style="display:none;line-height:1.5">
+                <div>Live weight: <strong id="bsp-weight-g">— g</strong> · Stable: <span id="bsp-stable">—</span></div>
+                <div>Remaining: <span id="bsp-remaining-ml">— ml</span> · <span id="bsp-bottle-equiv">—</span></div>
+                <div id="bsp-meta-warn" style="display:none">Enter quantity manually when bottle calibration is unavailable.</div>
+                <div id="bsp-save-status" style="color:var(--muted);font-size:12px"></div>
+              </div>
+            </section>
             <div class="field">
               <label>Quantity</label>
-              <input type="number" id="ev-qty" value="1" min="0.5" step="0.5" style="max-width:120px;">
+              <input type="number" id="ev-qty" value="1" min="0.01" step="any" inputmode="decimal" style="max-width:120px;">
             </div>
           </div>
         </div>
@@ -2788,6 +4096,7 @@ th.sortable span { font-size:10px; }
         <button id="dsp-mode-taking" onclick="setDspMode('taking')" style="flex:1;padding:12px;font-family:'Russo One',sans-serif;font-size:14px;letter-spacing:0.1em;border:none;cursor:pointer;transition:all .2s;background:var(--a);color:#000;">📦 TAKING — Send to Bar</button>
         <button id="dsp-mode-returning" onclick="setDspMode('returning')" style="flex:1;padding:12px;font-family:'Russo One',sans-serif;font-size:14px;letter-spacing:0.1em;border:none;cursor:pointer;transition:all .2s;background:var(--s2);color:var(--muted);">🔙 RETURNING — Back to Stock</button>
       </div>
+      <section id="dsp-rapid" hidden></section>
 
       <!-- Summary -->
       <div class="dsp-summary" id="dsp-summary"></div>
@@ -3259,6 +4568,8 @@ async function copyBluefyDiagnostics() {
 // MODAL
 // ══════════════════════════════════════════════════════
 function openModal(title, bodyHTML, okCb, footHTML) {
+  SESSION.modalCb?.releaseRapidWeigh?.();
+  SESSION.modalCb?.releaseWeighScale?.();
   // Release the previous modal's controls before replacing its contents.
   SESSION.modalCb?.releasePendingControls?.();
   document.getElementById('modal-title').textContent = title;
@@ -3278,8 +4589,10 @@ function openModal(title, bodyHTML, okCb, footHTML) {
 }
 
 function closeModal() {
+  SESSION.modalCb?.releaseWeighScale?.();
   // A pending passcode save owns this modal until its outcome is known.
   if (SESSION.modalCb?.pending) return;
+  SESSION.modalCb?.releaseRapidWeigh?.();
   document.getElementById('modal-overlay').classList.remove('open');
   SESSION.modalCb = null;
 }
@@ -3410,6 +4723,9 @@ function showSetupWizard() {
 }
 
 function showLoginScreen() {
+  window.BarinvScaleUI?.closeConnection();
+  window.BarinvRapidDispatch?.cancel();
+  window.BarinvRapidHost?.closeInactiveWeigh(true);
   document.getElementById('setup-wizard').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
@@ -3565,7 +4881,9 @@ function renderVenueSelector() {
 // dropdown options on screen while the new venue loads.
 function clearVenueScopedState() {
   SESSION.cache = { bars:[], stations:[], items:[], staff:[], nights:[], placements:[] };
+  window.BarinvRapidDispatch?.cancel();
   DSP_STATE = {};
+  window.BarinvRapidHost?.afterSubmit();
   DSP_STAFF_MAP = {};
   renderDashboardStats(0, 0, 0, 0);
   const tbody = document.getElementById('dash-tbody');
@@ -3579,6 +4897,7 @@ function clearVenueScopedState() {
 window.switchVenue = async function(val) {
   if(val === '__add') { openAddVenue(); renderVenueSelector(); return; }
   if(val === '__manage') { openManageVenues(); renderVenueSelector(); return; }
+  if (val !== SESSION.venueId && !window.BarinvRapidHost.canLeaveScopeChange()) { renderVenueSelector(); return; }
   SESSION.venueId = val;
   SESSION.venueName = SESSION.venues.find(v => v.id === val)?.name || '';
   localStorage.setItem('barinv_venue_id', val);
@@ -3848,6 +5167,8 @@ function navigateTo(id) {
 
   const page = document.getElementById('pg-' + id);
   if (page) page.classList.add('active');
+  window.BarinvRapidDispatch?.refresh();
+  window.BarinvSubmitScale?.refresh();
 
   const nb = document.getElementById('nb-' + id);
   if (nb) {
@@ -4990,6 +6311,8 @@ async function loadSubmitPage() {
 
   // Items
   populateItemSelect();
+  window.BarinvSubmitScale?.refresh();
+  window.BarinvRapidDispatch?.refresh();
 }
 
 function populateItemSelect(filter = '') {
@@ -5002,6 +6325,8 @@ function populateItemSelect(filter = '') {
 
   sel.innerHTML = '<option value="">— select item —</option>' +
     filtered.map(i => `<option value="${esc(i.id)}" data-sku="${esc(i.sku || '')}">${esc(i.name)}${i.sku ? ' · ' + esc(i.sku) : ''}</option>`).join('');
+  window.BarinvSubmitScale?.refresh();
+  window.BarinvRapidDispatch?.refresh();
 }
 
 function filterItems() {
@@ -5023,6 +6348,8 @@ function onItemSelect() {
     document.getElementById('ev-search').value = opt.dataset.sku;
     showSkuFound(opt.text);
   }
+  window.BarinvSubmitScale?.refresh();
+  window.BarinvRapidDispatch?.refresh();
 }
 
 function showSkuFound(text) {
@@ -5031,20 +6358,292 @@ function showSkuFound(text) {
   el.style.display = 'block';
 }
 
+let bspDeliveredScaleEnabled = false;
+function batchModeEnabled() { return false; }
+function selectedStationIdForEvent() { return document.getElementById('ev-station')?.value || null; }
+function submitVisibleItemCatalog() { return SESSION.cache.items.filter(item => item?.active); }
+function bspIsScaleMode() {
+  return SESSION.selectedAction === 'RETURNED' || (SESSION.selectedAction === 'DELIVERED' && bspDeliveredScaleEnabled);
+}
+function bspEnableDeliveredScale() {
+  if (SESSION.selectedAction !== 'DELIVERED') return;
+  bspDeliveredScaleEnabled = true;
+  document.getElementById('bsp-delivered-scale-enable').hidden = true;
+  window.BarinvSubmitScale.setQuantityMode(false);
+}
+function bspComputeFromItem(item, weightG) {
+  // Returns { hasMeta, qty, remainingMl, equivLabel }.
+  if (!item) return { hasMeta: false, qty: 0, remainingMl: null, equivLabel: '—' };
+  const emptyW = Number(item.empty_bottle_weight_g || 0);
+  const bottleMl = Number(item.bottle_size_ml || 0);
+  if (!emptyW || !bottleMl) return { hasMeta: false, qty: 0, remainingMl: null, equivLabel: '—' };
+  const density = (typeof DENSITY_MAP === 'object' && DENSITY_MAP) ? (DENSITY_MAP[(item.category || '').toLowerCase()] || 0.94) : 0.94;
+  const fullW = Number(item.full_bottle_weight_g || (emptyW + bottleMl * density));
+  const liquidFullG = Math.max(1, fullW - emptyW);
+  const remainingG = Math.max(0, weightG - emptyW);
+  let fraction = remainingG / liquidFullG;
+  if (!isFinite(fraction) || fraction < 0) fraction = 0;
+  if (fraction > 1.05) fraction = 1.05; // small over-tolerance for slight overpour
+  const remainingMl = Math.round(bottleMl * fraction);
+  const qty = Math.round(fraction * 100) / 100; // bottles, 2 dp
+  const equivLabel = fraction.toFixed(2) + ' bottle';
+  return { hasMeta: true, qty, remainingMl, equivLabel };
+}
+
+function _bspSetSaveStatus(msg) {
+  const el = document.getElementById('bsp-save-status');
+  if (el) el.textContent = msg;
+}
+// Submit Event shows the shared scale's live readings and owns its item measurements.
+window.BarinvSubmitScale = (() => {
+  let session;
+  let view;
+  let manualSelection;
+  const scaleActions = ['DELIVERED', 'RETURNED'];
+  const statusLabels = {
+    unsupported: 'Manual entry only', disconnected: 'Disconnected', connecting: 'Connecting…',
+    connected: 'Connected', reconnecting: 'Reconnecting…',
+  };
+  const selected = id => document.getElementById(id)?.value || '';
+
+  function canShowWeight() {
+    return !!SESSION.user && !!document.getElementById('pg-submit')?.classList.contains('active') &&
+      scaleActions.includes(SESSION.selectedAction);
+  }
+
+  function visibleItem(id) {
+    return id == null || id === '' ? null : submitVisibleItemCatalog().find(item => String(item.id) === String(id));
+  }
+
+  function hasCalibration(item) {
+    const tare = Number(item?.empty_bottle_weight_g);
+    const full = Number(item?.full_bottle_weight_g);
+    const size = Number(item?.bottle_size_ml);
+    return Number.isFinite(tare) && tare > 0 && Number.isFinite(size) && size > 0 &&
+      (!item.full_bottle_weight_g || (Number.isFinite(full) && full > tare));
+  }
+
+  function canWeighItem(item) {
+    return canShowWeight() && hasCalibration(visibleItem(item?.id));
+  }
+
+  function batchScope(destination) {
+    return JSON.stringify([
+      SESSION.user?.staff_id ?? SESSION.user?.id ?? SESSION.user?.email,
+      SESSION.venueId, SESSION.selectedAction, selected('ev-night'), destination, selected('ev-item'),
+    ]);
+  }
+
+  function clearStaleBatchWeights() {
+    if (!batchModeEnabled()) return;
+    for (const [destination, weight] of Object.entries(BATCH_DESTINATIONS.weights)) {
+      if (batchInstructionFor(destination) !== 'WEIGH' || weight.scope !== batchScope(destination)) {
+        delete BATCH_DESTINATIONS.weights[destination];
+      }
+    }
+  }
+
+  function context(requireScaleMode = true) {
+    if (!canShowWeight() || (requireScaleMode && !bspIsScaleMode())) return null;
+    const item = visibleItem(selected('ev-item'));
+    const batch = batchModeEnabled();
+    const destination = batch ? BATCH_DESTINATIONS.currentWeightBarId : selected('ev-bar');
+    if (!item || !destination || !selected('ev-night')) return null;
+    return { item, batch, destination, user: SESSION.user, key: JSON.stringify([
+      SESSION.venueId, SESSION.selectedAction, selected('ev-night'), destination,
+      selectedStationIdForEvent(), item.id, batch, item.empty_bottle_weight_g, item.full_bottle_weight_g,
+      item.bottle_size_ml, item.category,
+    ]) };
+  }
+
+  function isCurrent(owner) {
+    const live = context();
+    return session === owner && live?.key === owner.key && live.user === owner.user;
+  }
+
+  function clearQuantity(owner) {
+    if (owner.quantity?.getAttribute('data-scale-fill') !== 'yes') return;
+    owner.quantity.removeAttribute('data-scale-fill');
+    owner.quantity.value = '';
+  }
+
+  function setText(id, value) {
+    const field = document.getElementById(id);
+    if (field) field.textContent = value;
+  }
+
+  function paintReading(reading) {
+    const stable = document.getElementById('bsp-stable');
+    setText('bsp-weight-g', reading ? reading.grams + ' g' : '— g');
+    if (stable) {
+      stable.textContent = reading?.stable == null ? '—' : reading.stable ? 'YES' : '…';
+      stable.style.color = reading?.stable === true ? 'var(--a)' : '';
+    }
+  }
+
+  function paintCalculation(calc, missingCalibration = false) {
+    setText('bsp-remaining-ml', calc?.remainingMl == null ? '— ml' : calc.remainingMl + ' ml');
+    setText('bsp-bottle-equiv', calc?.equivLabel || '—');
+    const warning = document.getElementById('bsp-meta-warn');
+    if (warning) warning.style.display = missingCalibration ? '' : 'none';
+  }
+
+  function refreshView() {
+    const panel = document.getElementById('bsp-live-weight');
+    const visible = canShowWeight();
+    if (panel) panel.style.display = visible ? '' : 'none';
+    if (visible && view?.user === SESSION.user) return;
+    view?.unsubscribe?.();
+    view = null;
+    if (!visible) { paintReading(null); return; }
+    const owner = { user: SESSION.user };
+    view = owner;
+    owner.unsubscribe = window.BarinvScaleUI.subscribe?.(({ status, reading }) => {
+      if (view !== owner || !canShowWeight() || SESSION.user !== owner.user) return;
+      setText('bsp-scale-status', statusLabels[status] || status);
+      paintReading(reading);
+    });
+    if (!owner.unsubscribe) view = null;
+  }
+
+  function release() {
+    const old = session;
+    session = null;
+    if (old) {
+      old.measurement?.release();
+      clearQuantity(old);
+    }
+    paintCalculation(null);
+  }
+
+  function refresh() {
+    refreshView();
+    clearStaleBatchWeights();
+    const live = context();
+    const batchInput = document.getElementById('bsp-batch-manual');
+    if (batchInput) batchInput.hidden = !live?.batch;
+    if (!live) {
+      release();
+      if (canShowWeight()) _bspSetSaveStatus(!bspIsScaleMode()
+        ? 'Enable partial bottle weighing to calculate quantity.'
+        : 'Select an eligible item and destination to calculate quantity.');
+      return;
+    }
+    if (session && isCurrent(session)) return;
+    release();
+    if (batchInput) batchInput.value = '';
+    const quantity = document.getElementById('ev-qty');
+    const manual = manualSelection?.key === live.key && manualSelection.user === live.user && manualSelection.quantity === quantity;
+    const owner = { ...live, quantity, manual, reading: null };
+    session = owner;
+    const calibrated = hasCalibration(owner.item);
+    owner.measurement = window.BarinvScaleUI.measurement(({ status, reading, panCleared }) => {
+      if (!isCurrent(owner)) return;
+      owner.reading = calibrated && status === 'connected' && panCleared && reading?.grams > 5 &&
+        reading.stable === true ? reading : null;
+      owner.calc = owner.reading && bspComputeFromItem(owner.item, owner.reading.grams);
+      paintCalculation(owner.calc, !calibrated);
+      if (!owner.batch && owner.quantity && !owner.manual) {
+        if (owner.calc?.hasMeta && owner.calc.qty > 0) {
+          owner.quantity.value = String(owner.calc.qty);
+          owner.quantity.setAttribute('data-scale-fill', 'yes');
+        } else clearQuantity(owner);
+      }
+      _bspSetSaveStatus(status !== 'connected' ? 'Connect from the main header or enter weight manually.' :
+        !calibrated ? 'This item has no valid bottle calibration. Enter quantity manually.' :
+        owner.manual ? 'Manual quantity selected.' :
+        !panCleared ? 'Clear the pan before placing this bottle.' :
+        owner.reading ? (owner.batch ? 'Review the reading, then tap Use Weight.' : 'Review the quantity, then submit.') :
+          'Waiting for a fresh stable reading.');
+    });
+  }
+
+  function auditNote() {
+    const qty = document.getElementById('ev-qty');
+    if (qty?.getAttribute('data-scale-fill') !== 'yes') return '';
+    if (!session || !isCurrent(session) || !session.reading ||
+        !session.measurement?.isCurrentReading(session.reading.grams) ||
+        Number(qty.value) !== session.calc?.qty) return null;
+    return '[scale] weight=' + session.reading.grams + 'g stable=true equiv=' + session.calc.equivLabel;
+  }
+
+  function setQuantityMode(manual) {
+    if (manual) {
+      const live = context(false);
+      const quantity = document.getElementById('ev-qty');
+      manualSelection = live ? { key: live.key, user: live.user, quantity } : null;
+      if (session && isCurrent(session)) session.manual = true;
+      quantity?.removeAttribute('data-scale-fill');
+      return;
+    }
+    manualSelection = null;
+    release();
+    refresh();
+  }
+
+  function captureBatchWeight() {
+    const owner = session;
+    if (!owner?.batch || !isCurrent(owner)) return;
+    const entered = selected('bsp-batch-manual');
+    const fromScale = !entered;
+    const weight = fromScale ? owner.reading?.grams : Number(entered);
+    if (!Number.isFinite(weight) || weight <= 0 ||
+        (fromScale && !owner.measurement?.isCurrentReading(weight))) {
+      toast('Use a fresh stable reading or enter weight manually.', 't-warn');
+      return;
+    }
+    const calc = bspComputeFromItem(hasCalibration(owner.item) ? owner.item : null, weight);
+    BATCH_DESTINATIONS.weights[owner.destination] = {
+      weight_g: weight, calc, source: fromScale ? 'scale' : 'manual', scope: batchScope(owner.destination),
+    };
+    BATCH_DESTINATIONS.currentWeightBarId = null;
+    release();
+    bspSetPanelVisible(false);
+    renderBatchDestinations();
+    const next = batchSelectedIds().find(id => batchInstructionFor(id) === 'WEIGH' && !BATCH_DESTINATIONS.weights[id]);
+    if (next) startBatchDestinationWeight(next);
+  }
+
+  document.addEventListener('change', () => queueMicrotask(refresh));
+  document.addEventListener('input', event => {
+    if (event.isTrusted && event.target.id === 'ev-qty') setQuantityMode(true);
+  });
+  return { refresh, release, auditNote, captureBatchWeight, clearStaleBatchWeights, canWeighItem, setQuantityMode };
+})();
+
+
 function pickAction(action) {
+  bspDeliveredScaleEnabled = false;
+  document.getElementById('bsp-scale-panel').hidden = !['DELIVERED', 'RETURNED'].includes(action);
+  document.getElementById('bsp-delivered-scale-enable').hidden = action !== 'DELIVERED';
   SESSION.selectedAction = action;
   ['REQUEST', 'DELIVERED', 'RETURNED'].forEach(a => {
     document.getElementById('ao-' + a).classList.toggle('sel', a === action);
   });
+  window.BarinvSubmitScale?.refresh();
+  window.BarinvRapidDispatch?.refresh();
 }
 
 async function submitEvent() {
+  if (window.BarinvRapidDispatch?.reviewIsOpen()) {
+    toast('Apply or cancel the Rapid review before submitting.', 't-warn');
+    return;
+  }
+  if (submitEvent.pending) return;
+  submitEvent.pending = true;
+  try {
+  const submitted = window.BarinvSubmitScan.context();
+  const notesField = document.getElementById('ev-notes');
+  const originalNotes = notesField.value;
   const nightId   = document.getElementById('ev-night').value || null;
   const barId     = document.getElementById('ev-bar').value || null;
   const stationId = document.getElementById('ev-station').value || null;
   const itemId    = document.getElementById('ev-item').value || null;
-  const qty       = parseFloat(document.getElementById('ev-qty').value) || 1;
-  const notes     = document.getElementById('ev-notes').value.trim() || null;
+  const qty       = Number(document.getElementById('ev-qty').value);
+  const audit = window.BarinvSubmitScale.auditNote();
+  if (audit === null) { toast('Scale reading expired. Weigh again or enter quantity manually.', 't-warn'); return; }
+  const notes = [originalNotes.trim(), audit].filter(Boolean).join(' | ') || null;
+  if (!Number.isFinite(qty) || qty <= 0) { toast('Enter a positive quantity', 't-err'); return; }
   const action    = SESSION.selectedAction;
   const by        = SESSION.role === 'admin'
     ? (SESSION.user?.email?.split('@')[0] || 'admin')
@@ -5095,6 +6694,9 @@ async function submitEvent() {
     }
   }
 
+  if (!window.BarinvSubmitScan.isCurrent(submitted) || notesField.value !== originalNotes ||
+      Number(document.getElementById('ev-qty').value) !== qty) return;
+  window.BarinvSubmitScale.release();
   // Reset form completely
   document.getElementById('ev-item').value = '';
   document.getElementById('ev-search').value = '';
@@ -5104,7 +6706,7 @@ async function submitEvent() {
   document.querySelectorAll('.action-btn').forEach(b => b.classList.remove('selected'));
   const reqBtn = document.querySelector('.action-btn[data-action="REQUEST"]');
   if(reqBtn) reqBtn.classList.add('selected');
-  SESSION.selectedAction = 'REQUEST';
+  pickAction('REQUEST');
   // Reset bar/station selects
   const barSel = document.getElementById('ev-bar');
   const stSel = document.getElementById('ev-station');
@@ -5117,8 +6719,12 @@ async function submitEvent() {
 
   // Auto-restart scanner for next scan
   if(!SESSION.scannerActive) {
-    setTimeout(() => startScanner(), 500);
+    const emptyForm = window.BarinvSubmitScan.context();
+    setTimeout(() => {
+      if (window.BarinvSubmitScan.isCurrent(emptyForm)) void startScanner();
+    }, 500);
   }
+  } finally { submitEvent.pending = false; window.BarinvRapidDispatch?.refresh(); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -5128,10 +6734,14 @@ let QR_SCANNER = null;
 
 async function toggleScanner() {
   if (SESSION.scannerActive) { stopScanner(); return; }
-  await startScanner();
+  if (window.BarinvSubmitScan.nativePending || window.BarinvRapidDispatch?.reviewIsOpen()) return;
+  const scan = window.BarinvSubmitScan.begin();
+  if (!scan.active) return;
+  await startScanner(scan);
 }
 
-async function startScanner() {
+async function startScanner(scan = window.BarinvSubmitScan.begin()) {
+  if (!window.BarinvSubmitScan.isCurrent(scan)) return;
   bluefyDiagRecord({ flow: 'NORMAL_SCAN_LAUNCH', lookupFunction: 'startScanner', lookupFields: 'Html5Qrcode.start', matchResult: 'UNKNOWN' });
   const area  = document.getElementById('scanner-area');
   const hint  = document.getElementById('scanner-hint');
@@ -5143,6 +6753,7 @@ async function startScanner() {
     return;
   }
 
+  if (!window.BarinvSubmitScan.isCurrent(scan)) return;
   // Reset qr-reader div (must be clean for Html5Qrcode)
   qrDiv.innerHTML = '';
   qrDiv.style.display = 'block';
@@ -5150,25 +6761,39 @@ async function startScanner() {
   area.classList.add('scanning');
   btn.textContent = '⏹ Stop Scanner';
 
+  let ownScanner;
   try {
-    QR_SCANNER = new Html5Qrcode('qr-reader');
+    ownScanner = new Html5Qrcode('qr-reader');
+    QR_SCANNER = ownScanner;
     SESSION.scannerActive = true;
+    window.BarinvRapidDispatch?.refresh();
 
-    await QR_SCANNER.start(
+    await ownScanner.start(
       { facingMode: 'environment' },
       {
         fps: 25,
         qrbox: { width: 280, height: 150 },
         aspectRatio: 1.5
       },
-      (decodedText) => { stopScanner(); handleScannedCode(decodedText); },
+      decodedText => {
+        if (QR_SCANNER !== ownScanner) return;
+        if (!window.BarinvSubmitScan.isCurrent(scan)) { stopScanner(false); return; }
+        stopScanner(false);
+        void handleScannedCode(decodedText, scan);
+      },
       () => {}
     );
+    if (QR_SCANNER !== ownScanner) releaseSubmitScanner(ownScanner);
+    else if (!window.BarinvSubmitScan.isCurrent(scan)) stopScanner(false);
 
   } catch (e) {
-    // Camera stream failed — reset UI then try file picker fallback
-    if (QR_SCANNER) { try { QR_SCANNER.clear(); } catch {} QR_SCANNER = null; }
+    if (ownScanner && QR_SCANNER !== ownScanner) return;
+    if (!window.BarinvSubmitScan.isCurrent(scan)) { stopScanner(false); return; }
+    // Camera stream failed — reset UI then try file picker fallback.
+    QR_SCANNER = null;
+    releaseSubmitScanner(ownScanner);
     SESSION.scannerActive = false;
+    window.BarinvRapidDispatch?.refresh();
     qrDiv.style.display = 'none';
     qrDiv.innerHTML = '';
     hint.style.display = 'block';
@@ -5183,27 +6808,31 @@ async function startScanner() {
     input.capture = 'environment';
     input.style.display = 'none';
     document.body.appendChild(input);
+    input.addEventListener('cancel', () => input.remove(), { once: true });
     input.onchange = async () => {
       const file = input.files[0];
-      document.body.removeChild(input);
-      if (!file) return;
+      input.remove();
+      if (!file || !window.BarinvSubmitScan.isCurrent(scan)) return;
       hint.textContent = 'Processing image...';
+      const tmpId = 'qr-tmp-' + Date.now();
+      const tmpDiv = document.createElement('div');
+      let scanner;
       try {
-        const tmpId = 'qr-tmp-' + Date.now();
-        const tmpDiv = document.createElement('div');
         tmpDiv.id = tmpId;
         tmpDiv.style.display = 'none';
         document.body.appendChild(tmpDiv);
-        const scanner = new Html5Qrcode(tmpId);
+        scanner = new Html5Qrcode(tmpId);
         const result = await scanner.scanFile(file, false);
-        scanner.clear();
-        tmpDiv.remove();
+        if (!window.BarinvSubmitScan.isCurrent(scan)) return;
         hint.textContent = 'Tap "Scan Barcode" to use camera, or search below';
-        handleScannedCode(result);
-        toast('✓ Barcode found!', 't-ok');
+        await handleScannedCode(result, scan);
       } catch {
+        if (!window.BarinvSubmitScan.isCurrent(scan)) return;
         hint.textContent = 'Tap "Scan Barcode" to use camera, or search below';
         toast('Could not read barcode. Try a clearer photo.', 't-err');
+      } finally {
+        try { scanner?.clear(); } catch (_) {}
+        tmpDiv.remove();
       }
     };
     toast('📸 Take a photo of the barcode', 't-info');
@@ -5211,28 +6840,24 @@ async function startScanner() {
   }
 }
 
-function stopScanner() {
-  if (QR_SCANNER) {
-    try {
-      const state = QR_SCANNER.getState?.();
-      if (state === 2 || state === undefined) { // SCANNING or unknown
-        QR_SCANNER.stop().then(() => {
-          try { QR_SCANNER.clear(); } catch(_){}
-          QR_SCANNER = null;
-        }).catch(() => {
-          try { QR_SCANNER.clear(); } catch(_){}
-          QR_SCANNER = null;
-        });
-      } else {
-        try { QR_SCANNER.clear(); } catch(_){}
-        QR_SCANNER = null;
-      }
-    } catch(_) {
-      try { QR_SCANNER.clear(); } catch(_){}
-      QR_SCANNER = null;
-    }
-  }
+function releaseSubmitScanner(scanner) {
+  if (!scanner) return;
+  const clear = () => { try { scanner.clear(); } catch (_) {} };
+  try {
+    const state = scanner.getState?.();
+    if (state === 2 || state === 3 || state === undefined) {
+      void Promise.resolve(scanner.stop()).then(clear, clear);
+    } else clear();
+  } catch (_) { clear(); }
+}
+
+function stopScanner(invalidate = true) {
+  if (invalidate) window.BarinvSubmitScan.invalidate();
+  const scanner = QR_SCANNER;
+  QR_SCANNER = null;
+  releaseSubmitScanner(scanner);
   SESSION.scannerActive = false;
+  window.BarinvRapidDispatch?.refresh();
 
   const area  = document.getElementById('scanner-area');
   const hint  = document.getElementById('scanner-hint');
@@ -5392,17 +7017,134 @@ window.parWizardSave = async function() {
   toast(`✓ Opening stock saved: ${itemCount} items × ${bars.length} bars`, 't-ok');
 };
 
-function autoSelectItem(item) {
-  populateItemSelect();
-  const sel = document.getElementById('ev-item');
-  sel.value = item.id;
-  sel.blur();
+/* Submit Event selection and scan lifetime. No inventory writes. */
+window.BarinvSubmitScan = (() => {
+  'use strict';
+
+  let revision = 0;
+  let nativePending = false;
+  const value = id => String(document.getElementById(id)?.value ?? '');
+
+  function context() {
+    const active = !!document.getElementById('pg-submit')?.classList.contains('active');
+    const userRef = SESSION.user;
+    const venueId = String(SESSION.venueId ?? '');
+    const nightId = value('ev-night');
+    const action = String(SESSION.selectedAction ?? '').toUpperCase();
+    const batch = typeof batchModeEnabled === 'function' && batchModeEnabled();
+    const barIds = (batch && typeof submitSelectedBatchBarIds === 'function'
+      ? submitSelectedBatchBarIds() : [value('ev-bar')]).filter(Boolean).map(String).sort();
+    const stationId = value('ev-station');
+    const pool = typeof submitItemFilterMode === 'function' ? submitItemFilterMode() : 'active-catalog';
+    const poolStatus = typeof SUBMIT_ITEM_POOL_STATUS === 'undefined' ? null : SUBMIT_ITEM_POOL_STATUS;
+    const returnPool = ['single-return', 'batch-return-single', 'batch-return-intersection'].includes(pool);
+    const itemId = value('ev-item');
+    const quantity = value('ev-qty');
+    const manualQuantity = document.getElementById('ev-qty')?.getAttribute?.('data-scale-fill') === 'yes'
+      ? '' : quantity;
+    const assignmentRevision = typeof ASSIGNMENT_CONTEXT_REV === 'number' ? ASSIGNMENT_CONTEXT_REV : 0;
+    const scopeKey = JSON.stringify([revision, assignmentRevision, SESSION.role, SESSION.venueRole, venueId,
+      nightId, barIds, stationId, action, batch, pool]);
+    const key = JSON.stringify([scopeKey, itemId, manualQuantity]);
+    let reason = '';
+    if (!active || !userRef || !venueId || !nightId || !barIds.length) reason = 'Select a Night and destination first.';
+    else if (returnPool && poolStatus !== 'LOADED_WITH_RESULTS') {
+      reason = poolStatus === 'LOADING' ? 'Wait for the eligible return items to load.' :
+        'No eligible return items are available for this destination.';
+    }
+    return { active, userRef, key, scopeKey, action, venueId, nightId, barIds, stationId, batch, pool, poolStatus,
+      itemId, quantity, ready: !reason, reason };
+  }
+
+  function isCurrent(snapshot) {
+    const current = context();
+    return !!snapshot?.active && current.active && snapshot.userRef === current.userRef && snapshot.key === current.key;
+  }
+
+  function catalog() {
+    return typeof submitVisibleItemCatalog === 'function' ? submitVisibleItemCatalog() :
+      (SESSION.cache?.items || []).filter(item => item?.active);
+  }
+
+  function eligible(item) {
+    return item?.id != null && catalog().some(row => String(row.id) === String(item.id));
+  }
+
+  function resolve(code) {
+    const resolver = window.BARINVResolver;
+    if (typeof resolver?.resolveItemByCode !== 'function') return { item: null, reason: 'unavailable' };
+    const result = resolver.resolveItemByCode(code, { items: SESSION.cache?.items || [] });
+    if (result?.item && (!result.reason || result.reason === 'ok') && !eligible(result.item)) {
+      return { ...result, item: null, reason: 'ineligible' };
+    }
+    return result || { item: null, reason: 'unknown' };
+  }
+
+  function clearMessage() {
+    const field = document.getElementById('sku-found');
+    if (field) { field.textContent = ''; field.style.display = 'none'; }
+  }
+
+  function select(item, snapshot) {
+    if (!isCurrent(snapshot) || !eligible(item)) return false;
+    const selectItem = document.getElementById('ev-item');
+    if (!selectItem) return false;
+    const id = String(item.id);
+    const previous = selectItem.value;
+    populateItemSelect('', { preserveSelection: true });
+    if (document.getElementById('ev-item') !== selectItem) return false;
+    const painted = context();
+    if (!painted.active || painted.userRef !== snapshot.userRef || painted.scopeKey !== snapshot.scopeKey) return false;
+    // The Web select builder ignores preserveSelection; restore the prior
+    // still-available option before rechecking the captured form.
+    if (selectItem.value !== previous) selectItem.value = previous;
+    if (!isCurrent(snapshot) || !eligible(item)) return false;
+    selectItem.value = id;
+    if (selectItem.value !== id) { selectItem.value = previous; return false; }
+    onItemSelect();
+    const chosen = context();
+    if (!chosen.active || chosen.userRef !== snapshot.userRef || chosen.scopeKey !== snapshot.scopeKey) return false;
+    if (document.getElementById('ev-item') === selectItem && chosen.itemId === id) return true;
+    clearMessage();
+    return false;
+  }
+
+  function invalidate() { revision++; }
+
+  return {
+    context, isCurrent, resolve, eligible, select, clearMessage, invalidate,
+    catalog,
+    begin() { invalidate(); clearMessage(); return context(); },
+    get nativePending() { return nativePending; },
+    async scanNative(scanner) {
+      if (nativePending) return null;
+      nativePending = true;
+      window.BarinvRapidDispatch?.refresh();
+      try { return await scanner(); }
+      finally {
+        nativePending = false;
+        window.BarinvRapidDispatch?.refresh();
+      }
+    },
+  };
+})();
+
+function autoSelectItem(item, scan = window.BarinvSubmitScan.context()) {
+  if (!window.BarinvSubmitScan.isCurrent(scan)) return false;
+  if (!window.BarinvSubmitScan.select(item, scan)) {
+    window.BarinvSubmitScan.clearMessage();
+    toast('Barcode recognized, but this item is unavailable for the selected operation.', 't-warn');
+    return false;
+  }
+  document.getElementById('ev-item').blur();
   document.getElementById('ev-search').value = item.name;
-  showSkuFound('✓ ' + item.name + (item.sku ? ' · ' + item.sku : '') + ' — auto-selected');
-  toast('✓ ' + item.name + ' — ready to submit', 't-ok');
+  showSkuFound(item.name + (item.sku ? ' · ' + item.sku : '') + ' — selected');
+  toast(item.name + ' selected. Review before submitting.', 't-ok');
+  return true;
 }
 
-async function handleScannedCode(code) {
+async function handleScannedCode(code, scan = window.BarinvSubmitScan.begin()) {
+  if (!window.BarinvSubmitScan.isCurrent(scan)) return;
   try {
     const diagCatalog = bluefyDiagCatalogMatches(code);
     const diagExact = diagCatalog.matches.filter(i => i && i.active !== false);
@@ -5414,7 +7156,7 @@ async function handleScannedCode(code) {
     const exactMatch = activeItems.find(i => i.sku && i.sku.toLowerCase() === code.toLowerCase());
     if (exactMatch) {
       bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku exact', exactMatchCount: diagExact.length, matchResult: diagExact.length > 1 ? 'DUPLICATE' : 'MATCH', matchedItem: exactMatch, selectedItemAfterLookup: exactMatch });
-      autoSelectItem(exactMatch);
+      autoSelectItem(exactMatch, scan);
       return;
     }
 
@@ -5423,7 +7165,7 @@ async function handleScannedCode(code) {
     const partialMatch = activeItems.find(i => i.sku && i.sku.substring(0, 8) === prefix);
     if (partialMatch) {
       bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku first-8 prefix', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: partialMatch, selectedItemAfterLookup: partialMatch });
-      autoSelectItem(partialMatch);
+      autoSelectItem(partialMatch, scan);
       if(isAdmin) {
         // Offer to save the new barcode
         toast(`Matched by prefix. Update SKU from ${partialMatch.sku} to ${code}?`, 't-info');
@@ -5435,7 +7177,7 @@ async function handleScannedCode(code) {
     const nameMatch = activeItems.find(i => i.name.toLowerCase().includes(code.toLowerCase()) || code.toLowerCase().includes(i.name.toLowerCase()));
     if (nameMatch) {
       bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'active item.name contains', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: nameMatch, selectedItemAfterLookup: nameMatch });
-      autoSelectItem(nameMatch);
+      autoSelectItem(nameMatch, scan);
       return;
     }
 
@@ -5450,6 +7192,8 @@ async function handleScannedCode(code) {
       }
     } catch {}
 
+    if (!window.BarinvSubmitScan.isCurrent(scan)) return;
+
     // 3. Fallback: UPCitemdb
     if (!productName) {
       try {
@@ -5460,6 +7204,8 @@ async function handleScannedCode(code) {
         }
       } catch {}
     }
+
+    if (!window.BarinvSubmitScan.isCurrent(scan)) return;
 
     // 4. Fuzzy match against catalog
     if (productName) {
@@ -5472,11 +7218,11 @@ async function handleScannedCode(code) {
         if (score > bestScore) { bestScore = score; bestMatch = item; }
       }
 
-      if (bestMatch && bestScore >= 1) {
+      if (bestMatch && bestScore >= 1 && window.BarinvSubmitScan.eligible(bestMatch)) {
         // Barback: just select the item, no DB write
         if (!isAdmin) {
           bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'OpenFoodFacts/UPCitemdb then catalog name fuzzy', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: bestMatch, selectedItemAfterLookup: bestMatch });
-          autoSelectItem(bestMatch);
+          autoSelectItem(bestMatch, scan);
           return;
         }
         bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, normalizedBarcode: String(code).trim(), lookupFunction: 'handleScannedCode', lookupFields: 'OpenFoodFacts/UPCitemdb then catalog name fuzzy', exactMatchCount: diagExact.length, matchResult: 'MATCH', matchedItem: bestMatch, selectedItemAfterLookup: null });
@@ -5494,16 +7240,28 @@ async function handleScannedCode(code) {
             Save this barcode to <b style="color:var(--text);">${esc(bestMatch.name)}</b>? Next scan will match instantly.
           </div>`,
           async () => {
-            try { await SB.from('items').update({ sku: code }).eq('id', bestMatch.id); bestMatch.sku = code; } catch (e) { toast('Save failed: ' + e.message, 't-err'); }
-            populateItemSelect();
-            document.getElementById('ev-item').value = bestMatch.id;
-            showSkuFound(bestMatch.name + ' · ' + code);
-            toast('✓ Barcode saved to ' + bestMatch.name, 't-ok');
+            if (!window.BarinvSubmitScan.isCurrent(scan) || !window.BarinvSubmitScan.eligible(bestMatch)) return;
+            try {
+              const result = await SB.from('items').update({ sku: code }).eq('id', bestMatch.id);
+              if (result?.error) throw result.error;
+            } catch (e) {
+              if (window.BarinvSubmitScan.isCurrent(scan)) toast('Save failed: ' + e.message, 't-err');
+              return;
+            }
+            if (!window.BarinvSubmitScan.isCurrent(scan)) return;
+            bestMatch.sku = code;
+            autoSelectItem(bestMatch, scan);
             closeModal();
           },
-          `<button class="btn btn-ghost btn-sm" onclick="closeModal();openBarcodeManualPicker('${esc(code)}')">Pick Different Item</button>
+          `<button class="btn btn-ghost btn-sm" id="bc-pick-different">Pick Different Item</button>
            <button class="btn btn-a btn-sm" onclick="modalOK()">✓ Save & Use</button>`
         );
+        const pickDifferent = document.getElementById('bc-pick-different');
+        if (pickDifferent) pickDifferent.onclick = () => {
+          if (!window.BarinvSubmitScan.isCurrent(scan)) return;
+          closeModal();
+          openBarcodeManualPicker(code, productName, scan);
+        };
         return;
       }
     }
@@ -5515,7 +7273,7 @@ async function handleScannedCode(code) {
       toast('Barcode not recognized — pick from list', 't-info');
       return;
     }
-    openBarcodeManualPicker(code, productName);
+    openBarcodeManualPicker(code, productName, scan);
   } catch (e) {
     bluefyDiagRecord({ flow: 'NORMAL_SCAN', rawBarcode: code, lookupFunction: 'handleScannedCode', lookupFields: 'active item.sku/prefix/name then online lookup/fuzzy', matchResult: 'ERROR', error: e && e.message ? e.message : e });
     console.error('Scanner error:', e);
@@ -5523,8 +7281,9 @@ async function handleScannedCode(code) {
   }
 }
 
-function openBarcodeManualPicker(code, lookupName) {
-  const items = SESSION.cache.items.filter(i => i.active).sort((a, b) => a.name.localeCompare(b.name));
+function openBarcodeManualPicker(code, lookupName, scan = window.BarinvSubmitScan.context()) {
+  if (!window.BarinvSubmitScan.isCurrent(scan)) return;
+  const items = [...window.BarinvSubmitScan.catalog()].sort((a, b) => a.name.localeCompare(b.name));
   const optionsHtml = items.map(i => `<option value="${esc(i.id)}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
 
   openModal('Link Barcode to Item',
@@ -5547,12 +7306,17 @@ function openBarcodeManualPicker(code, lookupName) {
       const itemId = document.getElementById('bc-item')?.value;
       if (!itemId) { toast('Select an item first', 't-err'); return; }
       const item = SESSION.cache.items.find(i => i.id === itemId);
-      if (!item) return;
-      await SB.from('items').update({ sku: code }).eq('id', itemId);
+      if (!window.BarinvSubmitScan.isCurrent(scan) || !window.BarinvSubmitScan.eligible(item)) return;
+      try {
+        const result = await SB.from('items').update({ sku: code }).eq('id', itemId);
+        if (result?.error) throw result.error;
+      } catch (error) {
+        if (window.BarinvSubmitScan.isCurrent(scan)) toast('Save failed: ' + error.message, 't-err');
+        return;
+      }
+      if (!window.BarinvSubmitScan.isCurrent(scan)) return;
       item.sku = code;
-      document.getElementById('ev-item').value = itemId;
-      showSkuFound(item.name + ' (' + item.unit + ')');
-      toast('✓ Barcode saved to ' + item.name, 't-ok');
+      autoSelectItem(item, scan);
       closeModal();
     },
     `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
@@ -5564,7 +7328,7 @@ function bcFilterItems() {
   const q = (document.getElementById('bc-filter')?.value || '').toLowerCase();
   const sel = document.getElementById('bc-item');
   if (!sel) return;
-  const items = SESSION.cache.items.filter(i => i.active).sort((a, b) => a.name.localeCompare(b.name));
+  const items = [...window.BarinvSubmitScan.catalog()].sort((a, b) => a.name.localeCompare(b.name));
   const filtered = q ? items.filter(i => i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q)) : items;
   sel.innerHTML = filtered.map(i => `<option value="${esc(i.id)}">${esc(i.name)}${i.category ? ' · ' + esc(i.category) : ''}</option>`).join('');
 }
@@ -11804,123 +13568,161 @@ async function rcpDelete(id) {
 // DISPATCH / STOCK ROOM MODULE
 // ══════════════════════════════════════════════════════
 // ── BLE SCALE (Web Bluetooth — Chrome/Mac only) ──
-const BLE_SCALE = { device: null, server: null, characteristic: null, lastWeight: null, connected: false };
+// Browser transport for the existing generic GATT scale decoder.
+// This connection owns only Bluetooth resources. It never reads or writes a draft.
+const BLE_SCALE = { device: null, server: null, characteristic: null, lastWeight: null, connected: false, connecting: false };
 
-async function bleScaleConnect(emptyW, shotW, fullShots) {
-  bluefyDiagRecord({ flow: 'SCALE_CONNECT_ATTEMPT', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'UNKNOWN', weighState: 'WAITING_FOR_SCALE' });
-  if (!navigator.bluetooth) {
-    bluefyDiagRecord({ flow: 'SCALE_ERROR', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'ERROR', weighState: 'BLE_NOT_SUPPORTED', error: 'bluetooth_not_supported' });
-    toast('Bluetooth not supported — use Chrome on Mac', 't-err');
-    return;
-  }
-  const btn = document.getElementById('ble-scale-btn');
+const webScaleTransport = (() => {
+  const optionalServices = [
+    '0000fff0-0000-1000-8000-00805f9b34fb',
+    '0000181d-0000-1000-8000-00805f9b34fb',
+    '0000180a-0000-1000-8000-00805f9b34fb',
+    '0000ffe0-0000-1000-8000-00805f9b34fb',
+  ];
+  let active;
+  let authorizedDevice;
 
-  // If already connected, disconnect
-  if (BLE_SCALE.connected && BLE_SCALE.device?.gatt?.connected) {
-    try { BLE_SCALE.device.gatt.disconnect(); } catch(_) {}
-    BLE_SCALE.connected = false;
-    BLE_SCALE.device = null;
-    BLE_SCALE.lastWeight = null;
-    if (btn) { btn.textContent = '📶 Scale'; }
-    toast('Scale disconnected', 't-info');
-    return;
+  function supported() {
+    return typeof navigator.bluetooth?.requestDevice === 'function';
   }
 
-  if (btn) { btn.textContent = '⏳ Scanning...'; btn.disabled = true; }
+  function record(flow, weighState, fields = {}) {
+    if (typeof bluefyDiagRecord === 'function') {
+      try { bluefyDiagRecord({ flow, lookupFunction: 'webScaleTransport', weighState, ...fields }); } catch (_) {}
+    }
+  }
 
-  try {
-    // Scan for BLE devices — show all devices
-    let device;
+  function closedConnection() {
+    const error = new Error('Scale connection closed.');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function current(lease) {
+    return active === lease && !lease.closed && lease.isCurrent();
+  }
+
+  function requireCurrent(lease) {
+    if (!current(lease)) throw closedConnection();
+  }
+
+  function release(lease) {
+    if (active !== lease) return;
+    lease.closed = true;
+    const { device, disconnected, notifications } = lease;
+    if (disconnected) {
+      device.removeEventListener('gattserverdisconnected', disconnected);
+      lease.disconnected = null;
+    }
+    for (const [characteristic, read] of notifications) {
+      characteristic.removeEventListener('characteristicvaluechanged', read);
+    }
+    notifications.clear();
+    if (device?.gatt.connected || lease.gattPending) {
+      lease.gattPending = false;
+      try { device.gatt.disconnect(); } catch (_) {}
+    }
+    Object.assign(BLE_SCALE, { device: null, server: null, characteristic: null, lastWeight: null, connected: false, connecting: false });
+    // The chooser and GATT promises cannot always be cancelled. Keep their
+    // lease until they settle so late cleanup cannot disconnect a new lease.
+    if (!lease.pending) active = null;
+  }
+
+  async function connect({ deviceId, onReading, onDisconnect, isCurrent }) {
+    if (!supported()) throw new Error('Bluetooth is unavailable in this browser.');
+    if (!isCurrent()) throw closedConnection();
+    if (active) throw new Error('Wait for the previous scale connection to close.');
+    const lease = { isCurrent, pending: true, closed: false, notifications: new Map() };
+    active = lease;
+    BLE_SCALE.connecting = true;
     try {
-      device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: [
-          '0000fff0-0000-1000-8000-00805f9b34fb',
-          '0000181d-0000-1000-8000-00805f9b34fb',
-          '0000180a-0000-1000-8000-00805f9b34fb',
-          '0000ffe0-0000-1000-8000-00805f9b34fb'
-        ]
-      });
-    } catch (e) {
-      if (e.name === 'NotFoundError') { if (btn) { btn.textContent = '📶 Scale'; btn.disabled = false; } return; }
-      throw e;
-    }
+      let device;
+      if (deviceId == null) {
+        // This call must run in the user's button event before any await.
+        device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices });
+      } else {
+        device = authorizedDevice;
+        if (device?.id !== deviceId) throw new Error('Select the scale again to authorize it in this browser.');
+      }
+      requireCurrent(lease);
+      if (!device?.id || !device.gatt) throw new Error('The selected Bluetooth device does not provide a GATT connection.');
+      authorizedDevice = lease.device = BLE_SCALE.device = device;
+      record('SCALE_CONNECT_ATTEMPT', 'WAITING_FOR_SCALE');
 
-    BLE_SCALE.device = device;
-    if (btn) btn.textContent = '⏳ Connecting...';
+      lease.gattPending = true;
+      const server = await device.gatt.connect();
+      lease.gattPending = false;
+      requireCurrent(lease);
+      if (!server.connected) throw new Error('The Bluetooth scale disconnected during connection.');
+      lease.disconnected = () => {
+        if (active !== lease || lease.closed || device.gatt.connected) return;
+        const notify = current(lease);
+        release(lease);
+        record('SCALE_DISCONNECT', 'DISCONNECTED', { bleConnected: false, latestWeight: null });
+        if (notify) onDisconnect();
+      };
+      device.addEventListener('gattserverdisconnected', lease.disconnected);
+      BLE_SCALE.server = server;
 
-    device.addEventListener('gattserverdisconnected', () => {
-      BLE_SCALE.connected = false;
-      BLE_SCALE.lastWeight = null;
-      const b = document.getElementById('ble-scale-btn');
-      if (b) b.textContent = '📶 Scale';
-      toast('Scale disconnected', 't-info');
-      bluefyDiagRecord({ flow: 'SCALE_DISCONNECT', lookupFunction: 'bleScaleConnect', lookupFields: 'gattserverdisconnected', matchResult: 'UNKNOWN', weighState: 'DISCONNECTED', bleConnected: false, latestWeight: null });
-    });
-
-    const server = await device.gatt.connect();
-    BLE_SCALE.server = server;
-
-    if (btn) btn.textContent = '⏳ Discovering...';
-
-    // Discover all services and find weight characteristic
-    const services = await server.getPrimaryServices();
-    let found = false;
-
-    for (const service of services) {
-      try {
-        const chars = await service.getCharacteristics();
-        for (const char of chars) {
-          // Look for characteristics that support notify (weight data streams)
-          if (char.properties.notify || char.properties.indicate) {
-            await char.startNotifications();
-            char.addEventListener('characteristicvaluechanged', (event) => {
-              const value = event.target.value;
-              const weight = bleParseWeight(value);
-              if (weight !== null && weight >= 0 && weight <= 5500) {
-                BLE_SCALE.lastWeight = weight;
-                const inp = document.getElementById('dsp-weigh-input');
-                if (inp && weight > 0) {
-                  inp.value = weight;
-                  inp.dispatchEvent(new Event('input'));
-                  dspWeighCalc(emptyW, shotW, fullShots);
-                }
-                const b = document.getElementById('ble-scale-btn');
-                if (b) b.textContent = `📶 ${weight}g`;
-                bluefyDiagRecord({ flow: 'SCALE_READING', lookupFunction: 'bleParseWeight', lookupFields: 'characteristicvaluechanged', matchResult: 'MATCH', weighState: 'READING', bleConnected: true, latestWeight: weight });
-              }
-            });
-            found = true;
-            console.log('BLE Scale: subscribed to', service.uuid, char.uuid);
-          }
+      const services = await server.getPrimaryServices();
+      requireCurrent(lease);
+      for (const service of services) {
+        let characteristics;
+        try { characteristics = await service.getCharacteristics(); }
+        catch (_) { requireCurrent(lease); continue; }
+        requireCurrent(lease);
+        for (const characteristic of characteristics) {
+          if (!(characteristic.properties.notify || characteristic.properties.indicate) || lease.notifications.has(characteristic)) continue;
+          try { await characteristic.startNotifications(); }
+          catch (_) { requireCurrent(lease); continue; }
+          requireCurrent(lease);
+          const read = event => {
+            if (!current(lease) || !BLE_SCALE.connected || !device.gatt.connected) return;
+            const grams = bleParseWeight(event.target?.value);
+            if (!Number.isFinite(grams) || grams < 0 || grams > 5500) return;
+            BLE_SCALE.lastWeight = grams;
+            record('SCALE_READING', 'READING', { bleConnected: true, latestWeight: grams });
+            onReading({ grams, stable: null });
+          };
+          characteristic.addEventListener('characteristicvaluechanged', read);
+          lease.notifications.set(characteristic, read);
+          BLE_SCALE.characteristic ??= characteristic;
         }
-      } catch (e) { console.log('BLE service skip:', service.uuid, e.message); }
+      }
+      if (!server.connected) throw new Error('The Bluetooth scale disconnected during setup.');
+      if (!lease.notifications.size) throw new Error('This Bluetooth device did not provide a weight notification stream.');
+      BLE_SCALE.connected = true;
+      record('SCALE_CONNECTED', 'CONNECTED', { bleConnected: true });
+      return device.id;
+    } catch (error) {
+      if (current(lease)) record('SCALE_ERROR', 'ERROR', { bleConnected: false, error: error.name });
+      release(lease);
+      throw error;
+    } finally {
+      lease.pending = false;
+      if (!current(lease)) release(lease);
+      BLE_SCALE.connecting = false;
     }
-
-    if (!found) {
-      bluefyDiagRecord({ flow: 'SCALE_NO_CHARACTERISTIC', lookupFunction: 'bleScaleConnect', lookupFields: 'notify/indicate characteristic', matchResult: 'ERROR', weighState: 'NO_WEIGHT_CHARACTERISTIC', bleConnected: false, error: 'no_weight_characteristic' });
-      toast('Connected but no weight data found. Try placing item on scale.', 't-err');
-      if (btn) { btn.textContent = '📶 No data'; btn.disabled = false; }
-      return;
-    }
-
-    BLE_SCALE.connected = true;
-    bluefyDiagRecord({ flow: 'SCALE_CONNECTED', lookupFunction: 'bleScaleConnect', lookupFields: 'notify/indicate characteristic', matchResult: 'MATCH', weighState: 'CONNECTED', bleConnected: true });
-    if (btn) { btn.textContent = '📶 Connected'; btn.disabled = false; }
-    toast(`Scale connected: ${device.name || 'BLE Scale'}`, 't-ok');
-
-  } catch (e) {
-    bluefyDiagRecord({ flow: 'SCALE_ERROR', lookupFunction: 'bleScaleConnect', lookupFields: 'Web Bluetooth GATT', matchResult: 'ERROR', weighState: 'ERROR', bleConnected: false, error: e?.name || e?.message || 'scale_error' });
-    if (e.name !== 'NotFoundError') toast('Scale error: ' + e.message, 't-err');
-    if (btn) { btn.textContent = '📶 Scale'; btn.disabled = false; }
   }
-}
+
+  async function disconnect() {
+    if (active) release(active);
+  }
+
+  return { supported, connect, disconnect };
+})();
+
+window.BarinvScaleUI.init(webScaleTransport);
 
 function bleParseWeight(dataView) {
   // Try multiple common BLE weight data formats
   try {
     const len = dataView.byteLength;
     if (len === 0) return null;
+    // The QN-KS frame header is not a little-endian weight. This browser
+    // adapter has no verified QN-KS decoder; enter its weight manually.
+    if (len >= 4 && dataView.getUint8(0) === 0x10 && dataView.getUint8(1) === 0x12 &&
+        ((dataView.getUint8(2) === 0x00 && dataView.getUint8(3) === 0x6c) || len >= 18)) return null;
 
     // Format 1: Simple 16-bit integer (grams) — common for kitchen scales
     if (len >= 2) {
@@ -11971,6 +13773,7 @@ let DSP_MODE = 'taking'; // 'taking' or 'returning'
 
 window.setDspMode = function(mode) {
   DSP_MODE = mode;
+  window.BarinvRapidDispatch?.refresh();
   const takBtn = document.getElementById('dsp-mode-taking');
   const retBtn = document.getElementById('dsp-mode-returning');
   if(takBtn && retBtn) {
@@ -12009,6 +13812,11 @@ async function dspLoadNightAssignments(nightId) {
 }
 
 window.dspNightChanged = async function(sel) {
+  if (window.BarinvRapidHost?.scopeSnapshot() && DSP_LOCKED_NIGHT && sel.value !== DSP_LOCKED_NIGHT) {
+    sel.value = DSP_LOCKED_NIGHT;
+    toast('Save or reset the Rapid draft before changing its Night.', 't-warn');
+    return;
+  }
   const hasData = Object.values(DSP_STATE).some(s => s.taken + s.returned + s.comp + s.shot > 0);
   if(hasData && DSP_LOCKED_NIGHT && sel.value !== DSP_LOCKED_NIGHT) {
     if(!confirm('⚠ You have unsaved dispatch data!\n\nChanging the night will keep your counts but save them under the new night.\n\nAre you sure?')) {
@@ -12370,6 +14178,7 @@ async function lookupAndOfferLink(code) {
 }
 
 function dspRenderCards() {
+  window.BarinvRapidDispatch?.refresh();
   const { items, bars } = SESSION.cache;
   const search = (document.getElementById('dsp-search')?.value || '').toLowerCase();
   const grid = document.getElementById('dsp-grid');
@@ -12439,6 +14248,11 @@ function dspRenderCards() {
                ${(item.empty_bottle_weight_g && !['Non-Alcoholic','BEER','Mixer','Energy Drink','Energy Drink / Mixer'].includes(item.category)) ? `<button class="dsp-btn" onclick="dspWeighReturn('${esc(item.id)}')" style="border-color:var(--a);color:var(--a);">⚖ Weigh</button>` : `<button class="dsp-btn dsp-btn-ret" onclick="dspAdj('${esc(item.id)}','returned',5)">+5 Ret</button>`}`
           }
         </div>
+        ${DSP_MODE === 'taking' && mode === 'shot' ? `
+        <div style="margin-bottom:6px">
+          <button class="dsp-btn" type="button" onclick="dspOpenPartialModal('${esc(item.id)}')"
+                  style="border-color:var(--a);color:var(--a);width:100%">⚗ Partial Bottle (¼ ½ ¾ or custom)</button>
+        </div>` : ''}
         ${DSP_MODE === 'taking' ? `
         <div style="display:grid;grid-template-columns:${'1fr' + (mode === 'shot' ? ' 1fr' : '')};gap:4px;">
           <button class="dsp-btn dsp-btn-comp" onclick="dspAdj('${esc(item.id)}','comp',Number(document.getElementById('dsp-qty-${esc(item.id)}').value||1))">Comp</button>
@@ -12570,7 +14384,210 @@ window.dspTransfer = function(itemId) {
   );
 };
 
-window.dspWeighReturn = function(itemId) {
+const DENSITY_MAP = {
+  'vodka':0.95, 'whisky':0.94, 'whiskey':0.94, 'irish whiskey':0.94, 'bourbon':0.94, 'scotch':0.94,
+  'rum':0.95, 'gin':0.94, 'tequila':0.94, 'mezcal':0.94, 'brandy / cognac':0.95, 'brandy':0.95, 'cognac':0.95,
+  'herbal / liqueur':1.00, 'liqueur':1.00, 'wine':0.99, 'champagne':0.99,
+  'beer':1.00, 'sake':1.00, 'non-alcoholic':1.00, 'energy drink / mixer':1.02
+};
+function dspFmtQty(n) {
+  const v = Number(n) || 0;
+  if (v === Math.round(v)) return String(Math.round(v));
+  return v.toFixed(2).replace(/\.?0+$/, '');
+}
+
+let _partialCtx = {};
+
+window.dspOpenPartialModal = function(itemId, rapid) {
+  const rapidHost = window.BarinvRapidHost;
+  const weighContext = rapidHost.weighContext('taking');
+  if (!weighContext) return;
+  if (!rapid && window.BarinvRapidDispatch.reviewIsOpen()) {
+    toast('Apply or cancel the Rapid review before weighing from Dispatch.', 't-info');
+    return;
+  }
+  const item = SESSION.cache.items.find(i => i.id === itemId);
+  if (!item) return;
+  // Close the item action sheet before opening the modal so the two
+  // overlays don't stack (same pattern as dspWeighReturn).
+  if (typeof dspCloseItemSheet === 'function') dspCloseItemSheet();
+
+  const emptyW = Number(item.empty_bottle_weight_g || 0);
+  const bottleMl = Number(item.bottle_size_ml || 750);
+  const density = Number(item.density || DENSITY_MAP[(item.category||'').toLowerCase()] || 0.94);
+  const fullShots = Number(item.full_shots || 0);
+  const fullW = Number(item.full_bottle_weight_g || Math.round(emptyW + bottleMl * density));
+  const liquidFullW = Math.max(1, fullW - emptyW);
+  const scaleSupported = rapidHost.validBottleWeight(emptyW, emptyW, fullW) && rapidHost.supportsBottleScale();
+  let scaleView;
+
+  _partialCtx = { itemId, emptyW, bottleMl, density, fullShots, fullW, liquidFullW };
+
+  openModal(`⚗ Partial Bottle — ${esc(item.name)}`,
+    `<div style="margin-bottom:14px;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">BOTTLE</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${bottleMl}ml</div></div>
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">EMPTY</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${emptyW}g</div></div>
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">FULL</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${fullW}g</div></div>
+        <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">SHOTS</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${fullShots}</div></div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="font-size:10px;letter-spacing:0.1em;color:var(--muted);">QUICK PICK</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px;">
+          <button class="dsp-btn" type="button" onclick="dspPartialQuick(0.25)">¼ (0.25)</button>
+          <button class="dsp-btn" type="button" onclick="dspPartialQuick(0.5)">½ (0.50)</button>
+          <button class="dsp-btn" type="button" onclick="dspPartialQuick(0.75)">¾ (0.75)</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="font-size:10px;letter-spacing:0.1em;color:var(--muted);">CUSTOM</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;">
+          <div class="field" style="margin:0;">
+            <label style="font-size:10px;color:var(--muted);">Percent (1–99)</label>
+            <input type="number" id="dsp-partial-pct" min="1" max="99" step="1" placeholder="e.g. 50" oninput="dspPartialFromPct()">
+          </div>
+          <div class="field" style="margin:0;">
+            <label style="font-size:10px;color:var(--muted);">Weight (g)</label>
+            <input type="number" id="dsp-partial-weight" min="${emptyW}" max="${fullW}" step="any" inputmode="decimal" data-no-modal-autofocus placeholder="${emptyW + 1}–${fullW - 1}" oninput="if(event.isTrusted)this.setAttribute('data-weight-source','manual');dspPartialFromWeight()">
+          </div>
+        </div>
+      </div>
+
+      ${scaleSupported ? rapidHost.bottleScalePanel() :
+        '<p style="color:var(--muted);font-size:12px">Enter grams or a percentage manually. Direct Arboleaf weighing needs a supported device and a configured empty-bottle weight.</p>'}
+      <div id="dsp-partial-result" style="padding:14px;border:1px solid var(--border);background:var(--s2);">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">FRACTION</span><div id="dsp-partial-frac" style="font-family:'Fira Mono',monospace;font-size:20px;color:var(--a);">—</div></div>
+          <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">LIQUID ml</span><div id="dsp-partial-ml" style="font-family:'Fira Mono',monospace;font-size:20px;color:var(--a2);">—</div></div>
+          <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">SHOTS EQ</span><div id="dsp-partial-shots" style="font-family:'Fira Mono',monospace;font-size:20px;color:var(--a3);">—</div></div>
+        </div>
+      </div>
+      <input type="hidden" id="dsp-partial-frac-val" value="">
+    </div>`,
+    () => {
+      if (!isCurrentWeigh()) return;
+      const input = document.getElementById('dsp-partial-weight');
+      if (input?.getAttribute('data-weight-source') === 'arboleaf-direct' &&
+          !scaleView?.isCurrentReading(input.value)) {
+        toast('Scale reading expired. Weigh this bottle again or enter its weight manually.', 't-warn');
+        return;
+      }
+      if (input?.value && !rapidHost.validBottleWeight(Number(input.value), emptyW, fullW)) {
+        toast('Enter a weight within the calibrated empty and full bottle weights, or use a percentage.', 't-warn');
+        return;
+      }
+      const frac = Number(document.getElementById('dsp-partial-frac-val')?.value || 0);
+      if (!isFinite(frac) || frac <= 0 || frac >= 1) {
+        toast('Enter a partial between 1% and 99% (use + Taken for a full bottle)', 't-err');
+        return;
+      }
+      if (rapid) {
+        if (rapid.onWeight({ fraction: frac, ts: new Date().toISOString() })) closeModal();
+        return;
+      }
+      dspAddPartial(itemId, frac);
+    },
+    `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
+     <button class="btn btn-a btn-sm" onclick="modalOK()">⚗ Save Partial</button>`
+  );
+  const callback = SESSION.modalCb;
+  const isCurrentWeigh = () => SESSION.modalCb === callback &&
+    document.getElementById('modal-overlay')?.classList.contains('open') && rapidHost.isCurrentWeigh(weighContext);
+  callback.dispatchWeighIsCurrent = isCurrentWeigh;
+  if (rapid) callback.releaseRapidWeigh = rapid.onDismiss;
+  if (scaleSupported) {
+    const input = document.getElementById('dsp-partial-weight');
+    scaleView = window.BarinvScaleUI.mountInput(input, () =>
+      isCurrentWeigh() && document.getElementById('dsp-partial-weight') === input, dspPartialFromWeight);
+    callback.releaseWeighScale = () => scaleView?.release();
+  }
+  return () => { if (SESSION.modalCb === callback) closeModal(); };
+};
+
+window.dspPartialQuick = function(frac) {
+  const pct = Math.round(frac * 100);
+  const pctEl = document.getElementById('dsp-partial-pct');
+  const wEl = document.getElementById('dsp-partial-weight');
+  if (pctEl) pctEl.value = pct;
+  if (wEl) { wEl.value = ''; wEl.setAttribute('data-weight-source', 'manual'); }
+  dspPartialUpdateResult(frac);
+};
+
+window.dspPartialFromPct = function() {
+  const pct = Number(document.getElementById('dsp-partial-pct')?.value || 0);
+  // Clear weight so the two inputs don't fight each other.
+  const wEl = document.getElementById('dsp-partial-weight');
+  if (wEl) { wEl.value = ''; wEl.setAttribute('data-weight-source', 'manual'); }
+  if (pct <= 0 || pct >= 100) { dspPartialUpdateResult(0); return; }
+  dspPartialUpdateResult(pct / 100);
+};
+
+window.dspPartialFromWeight = function() {
+  const c = _partialCtx;
+  const w = Number(document.getElementById('dsp-partial-weight')?.value || 0);
+  if (!window.BarinvRapidHost.validBottleWeight(w, c.emptyW, c.fullW)) {
+    const pct = document.getElementById('dsp-partial-pct');
+    if (pct) pct.value = '';
+    dspPartialUpdateResult(0);
+    return;
+  }
+  const liquidG = Math.max(0, w - c.emptyW);
+  let frac = liquidG / c.liquidFullW;
+  if (!isFinite(frac) || frac <= 0) { dspPartialUpdateResult(0); return; }
+  if (frac >= 1) frac = 0.999; // cap; full bottle must use + Taken
+  // Mirror to percent so the operator can see what was inferred.
+  const pctEl = document.getElementById('dsp-partial-pct');
+  if (pctEl) pctEl.value = Math.round(frac * 100);
+  dspPartialUpdateResult(frac);
+};
+
+function dspPartialUpdateResult(frac) {
+  const c = _partialCtx;
+  const valid = isFinite(frac) && frac > 0 && frac < 1;
+  const fEl = document.getElementById('dsp-partial-frac');
+  const mEl = document.getElementById('dsp-partial-ml');
+  const sEl = document.getElementById('dsp-partial-shots');
+  const hidden = document.getElementById('dsp-partial-frac-val');
+  if (!valid) {
+    if (fEl) fEl.textContent = '—';
+    if (mEl) mEl.textContent = '—';
+    if (sEl) sEl.textContent = '—';
+    if (hidden) hidden.value = '';
+    return;
+  }
+  const cleanFrac = Math.round(frac * 10000) / 10000;
+  const ml = Math.round((c.bottleMl || 0) * cleanFrac);
+  const shots = c.fullShots > 0 ? Math.round(c.fullShots * cleanFrac * 10) / 10 : 0;
+  if (fEl) fEl.textContent = cleanFrac.toFixed(2);
+  if (mEl) mEl.textContent = ml + ' ml';
+  if (sEl) sEl.textContent = shots;
+  if (hidden) hidden.value = String(cleanFrac);
+}
+
+window.dspAddPartial = function(itemId, frac) {
+  const cleanFrac = Math.round(Number(frac) * 10000) / 10000;
+  if (!isFinite(cleanFrac) || cleanFrac <= 0 || cleanFrac >= 1) return;
+  const item = SESSION.cache.items.find(i => i.id === itemId);
+  const name = item?.name || 'Item';
+  if (!DSP_STATE[itemId]) DSP_STATE[itemId] = { taken:0, returned:0, comp:0, shot:0, weighed:[], comp_recipients:[], partials:[] };
+  if (!DSP_STATE[itemId].partials) DSP_STATE[itemId].partials = [];
+  DSP_STATE[itemId].partials.push({ fraction: cleanFrac, ts: new Date().toISOString() });
+  DSP_STATE[itemId].taken = Math.round(((DSP_STATE[itemId].taken || 0) + cleanFrac) * 10000) / 10000;
+  try { if (typeof dspPersistDraft === 'function') dspPersistDraft(); } catch (_) {}
+  closeModal();
+  dspRenderCards();
+  toast(`⚗ ${name}: +${dspFmtQty(cleanFrac)} bottle (partial)`, 't-ok');
+};
+
+window.dspWeighReturn = function(itemId, rapid) {
+  const weighContext = window.BarinvRapidHost.weighContext();
+  if (!weighContext) return;
+  if (!rapid && window.BarinvRapidDispatch.reviewIsOpen()) {
+    toast('Apply or cancel the Rapid review before weighing from Dispatch.', 't-info');
+    return;
+  }
   const item = SESSION.cache.items.find(i => i.id === itemId);
   if (!item) return;
   bluefyDiagRecord({ flow: 'WEIGH_OPEN', lookupFunction: 'dspWeighReturn', lookupFields: 'SESSION.cache.items.id', matchResult: 'MATCH', matchedItem: item, selectedItemAfterLookup: item, weighState: 'WAITING_FOR_WEIGHT' });
@@ -12579,8 +14596,10 @@ window.dspWeighReturn = function(itemId) {
   const fullShots = Number(item.full_shots || 0);
   const shotW = Number(item.shot_weight_g || 30);
   const liquidFull = fullW - emptyW;
+  const supportsScale = !!window.BarinvScaleUI?.supports();
+  let scaleView;
 
-  openModal(`⚖ Weigh Return — ${item.name}`,
+  openModal(`⚖ Weigh Return — ${esc(item.name)}`,
     `<div style="margin-bottom:14px;">
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">EMPTY BOTTLE</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${emptyW}g</div></div>
@@ -12588,12 +14607,14 @@ window.dspWeighReturn = function(itemId) {
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">FULL SHOTS</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${fullShots}</div></div>
         <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">SHOT WEIGHT</span><div style="font-family:'Fira Mono',monospace;font-size:18px;">${shotW}g</div></div>
       </div>
+      ${supportsScale ? window.BarinvRapidHost.bottleScalePanel() : ''}
       <div class="field"><label>Current Bottle Weight (g)</label>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input type="number" id="dsp-weigh-input" min="0" step="1" placeholder="Place on scale and enter weight" autofocus oninput="dspWeighCalc(${emptyW},${shotW},${fullShots})" style="flex:1;">
-          <button type="button" id="ble-scale-btn" class="btn btn-ghost btn-sm" onclick="bleScaleConnect(${emptyW},${shotW},${fullShots})" title="Connect Bluetooth Scale" style="padding:4px 10px;font-size:14px;white-space:nowrap;">${BLE_SCALE.device ? '📶 ' + (BLE_SCALE.lastWeight || '—') + 'g' : '📶 Scale'}</button>
+          <input type="number" id="dsp-weigh-input" ${rapid ? 'data-rapid-manual-weight' : ''} min="0" step="any" inputmode="decimal" data-no-modal-autofocus placeholder="Enter weight manually"
+           oninput="if(event.isTrusted)this.setAttribute('data-weight-source','manual');dspWeighCalc(${emptyW},${shotW},${fullShots})" style="flex:1;">
         </div>
       </div>
+      <p style="color:var(--muted);font-size:12px">Enter grams manually for Arboleaf QN-KS or if no compatible browser scale is available.</p>
       <div id="dsp-weigh-result" style="margin-top:12px;padding:14px;border:1px solid var(--border);background:var(--s2);display:none;">
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
           <div><span style="color:var(--muted);font-size:10px;letter-spacing:0.15em;">LIQUID REMAINING</span><div id="dsp-w-liquid" style="font-family:'Fira Mono',monospace;font-size:20px;color:var(--a2);">—</div></div>
@@ -12604,12 +14625,27 @@ window.dspWeighReturn = function(itemId) {
       </div>
     </div>`,
     () => {
-      const weight = Number(document.getElementById('dsp-weigh-input')?.value || 0);
-      if (weight <= 0) { toast('Enter weight', 't-err'); return; }
+      if (!isCurrentWeigh()) return;
+      const input = document.getElementById('dsp-weigh-input');
+      if (input?.getAttribute('data-weight-source') === 'arboleaf-direct' && !scaleView?.isCurrentReading(input.value)) {
+        toast('Scale reading expired. Weigh this bottle again or enter its weight manually.', 't-warn');
+        return;
+      }
+      const weight = Number(input?.value || 0);
+      const grossFull = fullW > 0 ? fullW : emptyW + shotW * fullShots;
+      if (!window.BarinvRapidHost.validBottleWeight(weight, emptyW, grossFull)) {
+        toast('Enter a weight within the calibrated empty and full bottle weights.', 't-warn');
+        return;
+      }
       const liquidRemaining = Math.max(0, weight - emptyW);
       const shotsRemaining = shotW > 0 ? Math.round((liquidRemaining / shotW) * 10) / 10 : 0;
       const shotsUsed = Math.max(0, Math.round((fullShots - shotsRemaining) * 10) / 10);
 
+      if (rapid) {
+        const entry = { weight, liquidRemaining, shotsRemaining, shotsUsed, ts: new Date().toISOString(), rapidQty: 1 };
+        if (rapid.onWeight(entry)) closeModal();
+        return;
+      }
       if (!DSP_STATE[itemId]) DSP_STATE[itemId] = { taken:0, returned:0, comp:0, shot:0, weighed:[] };
       if (!DSP_STATE[itemId].weighed) DSP_STATE[itemId].weighed = [];
       DSP_STATE[itemId].weighed.push({ weight, liquidRemaining, shotsRemaining, shotsUsed, ts: new Date().toISOString() });
@@ -12623,7 +14659,21 @@ window.dspWeighReturn = function(itemId) {
     `<button class="btn btn-ghost btn-sm" onclick="closeModal()">Cancel</button>
      <button class="btn btn-a btn-sm" onclick="modalOK()">⚖ Save Weight</button>`
   );
-  setTimeout(() => document.getElementById('dsp-weigh-input')?.focus(), 150);
+  const weighCallback = SESSION.modalCb;
+  const isCurrentWeigh = () => SESSION.modalCb === weighCallback &&
+    document.getElementById('modal-overlay')?.classList.contains('open') &&
+    window.BarinvRapidHost.isCurrentWeigh(weighContext);
+  weighCallback.dispatchWeighIsCurrent = isCurrentWeigh;
+  const dismissWeight = () => { if (SESSION.modalCb === weighCallback) closeModal(); };
+  if (rapid) weighCallback.releaseRapidWeigh = rapid.onDismiss;
+  if (supportsScale) {
+    const input = document.getElementById('dsp-weigh-input');
+    scaleView = window.BarinvScaleUI.mountInput(input, () =>
+      isCurrentWeigh() && document.getElementById('dsp-weigh-input') === input,
+      () => dspWeighCalc(emptyW, shotW, fullShots));
+    weighCallback.releaseWeighScale = () => scaleView?.release();
+  }
+  return dismissWeight;
 };
 
 window.dspWeighCalc = function(emptyW, shotW, fullShots) {
@@ -12767,7 +14817,10 @@ window.dspEditPreviewRemove = function(itemId) {
 
 function dspReset() {
   if(Object.keys(DSP_STATE).length && !confirm('Reset all dispatch counts? Unsaved data will be lost.')) return;
+  if (dspSaveAll.pendingEventAttempt?.rapid) { toast('A Rapid submission is unresolved. Retry the original confirmation before resetting.', 't-warn'); return; }
+  window.BarinvRapidDispatch?.cancel();
   DSP_STATE = {};
+  window.BarinvRapidHost?.afterSubmit();
   DSP_STAFF_MAP = {};
   try { localStorage.removeItem('barinv_staff_map'); } catch(_){}
   DSP_SELECTED_BARS = [];
@@ -12780,10 +14833,44 @@ function dspReset() {
 function dspClearDraft() { /* no-op: draft persistence not yet implemented */ }
 
 async function dspSaveAll() {
+  const rapidHost = window.BarinvRapidHost;
+  if (!rapidHost?.canSubmit()) return;
+  if (window.BarinvRapidDispatch.reviewIsOpen()) { toast('Apply or cancel the Rapid review before saving Dispatch.', 't-warn'); return; }
+  const rapidScope = rapidHost.scopeSnapshot();
+  const submittedDraft = DSP_STATE;
+  const submittedJson = JSON.stringify(DSP_STATE);
+  const sessionUser = SESSION.user;
+  const venueId = SESSION.venueId;
   const nightId = document.getElementById('dsp-night')?.value || null;
   const source  = document.getElementById('dsp-source')?.value || 'Liquor Room';
   const ticket  = document.getElementById('dsp-ticket')?.value.trim() || null;
   const dspNote = document.getElementById('dsp-note')?.value.trim() || null;
+
+  const rapidReceiptKey = 'barinv_rapid_receipt_v1:' + JSON.stringify([sessionUser?.id, venueId, nightId]);
+  function readRapidReceipt() {
+    const saved = localStorage.getItem(rapidReceiptKey);
+    if (saved == null) return null;
+    let receipt;
+    try { receipt = JSON.parse(saved); } catch (_) {}
+    if (receipt?.rapid !== true || typeof receipt.signature !== 'string' ||
+        !Array.isArray(receipt.ids) || receipt.ids.some(id => typeof id !== 'string' || !id) ||
+        new Set(receipt.ids).size !== receipt.ids.length) {
+      throw new Error('Rapid retry receipt is invalid. Review the Event Log before retrying.');
+    }
+    return receipt;
+  }
+  if (!rapidScope) {
+    try {
+      if (readRapidReceipt()) {
+        toast('A Rapid receipt is unresolved. Review the Event Log or restore the original Rapid batch before retrying.', 't-warn');
+        return;
+      }
+    } catch (error) {
+      if (error.message.startsWith('Rapid retry receipt')) { toast(error.message, 't-warn'); return; }
+    }
+  }
+  const rapidDetailsStillCurrent = () => (document.getElementById('dsp-note')?.value.trim() || null) === dspNote &&
+    (document.getElementById('dsp-ticket')?.value.trim() || null) === ticket;
   const by      = SESSION.user?.email?.split('@')[0] || 'admin';
   const allStaff = SESSION.cache.staff || [];
 
@@ -12822,6 +14909,7 @@ async function dspSaveAll() {
 
   if(!records.length) { toast('Nothing to save — adjust some items first', 't-err'); return; }
 
+  if (rapidScope) records.forEach(record => { record.venue_id = venueId; });
   const barNames = SESSION.cache.bars.filter(b => DSP_SELECTED_BARS.includes(b.id));
   const barLabel = barNames.map(b => b.name).join(', ');
   const previewRows = records.map(r =>
@@ -12847,11 +14935,54 @@ async function dspSaveAll() {
     </div>`,
     async () => {
       const cleanRecords = records.map(r => { const { _name, ...rest } = r; return rest; });
-      const { error } = await SB.from('events').insert(cleanRecords);
+      let attempt;
+      if (rapidScope) {
+        if (dspSaveAll.rapidRequest) return;
+        if (!rapidHost.canSubmit() || JSON.stringify(rapidScope) !== JSON.stringify(rapidHost.scopeSnapshot()) || SESSION.user !== sessionUser ||
+            SESSION.venueId !== venueId || DSP_STATE !== submittedDraft || JSON.stringify(DSP_STATE) !== submittedJson ||
+            !rapidDetailsStillCurrent()) {
+          toast('Rapid draft changed. Close and review it before confirming.', 't-warn');
+          return;
+        }
+        let previousAttempt;
+        try { previousAttempt = readRapidReceipt() || dspSaveAll.pendingEventAttempt; }
+        catch (_) { toast('Rapid retry receipt could not be read. No events submitted.', 't-warn'); return; }
+        dspSaveAll.pendingEventAttempt = previousAttempt;
+        attempt = BarinvEventBatch.prepare(dspSaveAll, cleanRecords, () => crypto.randomUUID());
+        if (previousAttempt?.rapid && (previousAttempt !== attempt || previousAttempt.ids.length !== cleanRecords.length)) {
+          dspSaveAll.pendingEventAttempt = previousAttempt;
+          toast('A Rapid submission is unresolved. Restore the original quantities and details before retrying.', 't-warn');
+          return;
+        }
+        attempt.rapid = true;
+        try { localStorage.setItem(rapidReceiptKey, JSON.stringify(attempt)); }
+        catch (_) {
+          dspSaveAll.pendingEventAttempt = previousAttempt;
+          toast('Rapid retry receipt could not be saved. No events submitted.', 't-warn');
+          return;
+        }
+        dspSaveAll.rapidRequest = attempt;
+      }
+      let error;
+      try { ({ error } = await SB.from('events').insert(cleanRecords)); }
+      catch (_) { error = {message: 'Connection lost. Review the original draft before retrying.'}; }
+      finally { if (attempt) dspSaveAll.rapidRequest = null; }
       if(error) { toast('Save error: ' + error.message, 't-err'); return; }
 
       toast(`✓ Saved ${cleanRecords.length} events across ${DSP_SELECTED_BARS.length} bar(s) · Stock updated by database`, 't-ok');
+      if (attempt && (!rapidHost.canSubmit() || SESSION.user !== sessionUser || SESSION.venueId !== venueId ||
+                      DSP_STATE !== submittedDraft || JSON.stringify(DSP_STATE) !== submittedJson ||
+                      !rapidDetailsStillCurrent())) {
+        toast('Saved the original events. The changed draft was kept for review.', 't-warn');
+        return;
+      }
       DSP_STATE = {};
+      if (attempt) {
+        dspSaveAll.pendingEventAttempt = null;
+        try { localStorage.removeItem(rapidReceiptKey); }
+        catch (_) { toast('Events saved. The local Rapid receipt could not be cleared.', 't-warn'); }
+      }
+      rapidHost.afterSubmit();
       DSP_STAFF_MAP = {};
       try { localStorage.removeItem('barinv_staff_map'); } catch(_){}
       dspClearDraft();
