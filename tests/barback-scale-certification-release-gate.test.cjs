@@ -41,6 +41,7 @@ function harness() {
       latest: null,
     },
     state: { selectedAction: 'TAKEN' },
+    phase1WeighPendingItem: null,
     _BLE_SURFACES: ['main-ble', 'qm-ble', 'rf-ble'],
     $: element,
     statusOn: (...args) => statuses.push(args),

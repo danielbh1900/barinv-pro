@@ -52,6 +52,7 @@ function harness() {
       lastPayload: '',
     },
     state: { selectedAction: 'TAKEN' },
+    phase1WeighPendingItem: null,
     $: element,
     statusOn: (...args) => statuses.push(args),
     // P0-08 adds an operator confirmation after the P0-04 trust check. This

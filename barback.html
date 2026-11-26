@@ -940,13 +940,13 @@
         <div class="phase1-pending-label" style="color:#bfdbfe;">WEIGH ITEM — NOT ADDED YET</div>
         <div id="phase1-weigh-item" class="phase1-pending-item"></div>
         <div id="phase1-weigh-help" class="phase1-pending-help" style="color:#dbeafe;">Place bottle on scale or enter measured weight. Saved as Weight (g), Qty 1.</div>
+        <button type="button" id="phase1-weigh-use-latest" class="btn btn-secondary" style="margin-top:8px;" disabled>WAITING FOR FRESH STABLE WEIGHT…</button>
+        <button type="button" id="phase1-weigh-manual" class="btn btn-secondary" style="margin-top:6px;">ENTER WEIGHT MANUALLY</button>
         <button type="button" id="phase1-weigh-add" class="btn btn-success" style="margin-top:10px;">ADD WEIGHTED TO REVIEW</button>
         <button type="button" id="phase1-weigh-cancel" class="btn btn-secondary" style="margin-top:8px;">CANCEL / SKIP ITEM</button>
         <div id="phase1-weigh-timeout" style="display:none;margin-top:10px;padding:9px;border:1px solid #fbbf24;border-radius:7px;color:#fde68a;font-size:12px;line-height:1.4;">
-          <b>No stable weight received.</b>
+          <b>No fresh stable weight currently available. Other options:</b>
           <div style="margin-top:7px;display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-            <button type="button" id="phase1-weigh-use-latest">USE LATEST STABLE WEIGHT</button>
-            <button type="button" id="phase1-weigh-manual">ENTER WEIGHT MANUALLY</button>
             <button type="button" id="phase1-weigh-reconnect">RECONNECT / CHECK SCALE</button>
             <button type="button" id="phase1-weigh-unopened">MARK AS UNOPENED UNIT</button>
             <button type="button" id="phase1-weigh-skip" style="grid-column:1 / -1;">SKIP ITEM</button>
@@ -1958,6 +1958,8 @@ let phase1PendingItemName = '';
 let phase1ReplacementArmed = false;
 let phase1WeighPendingItem = null;
 let phase1WeighTimeoutTimer = null;
+let phase1WeighStartedAt = 0;
+let phase1WeighPreviewTimer = null;
 
 function resolveScanWorkflow() {
   const selected = $('scan-workflow');
@@ -1978,8 +1980,61 @@ function renderScanWorkflowLabel() {
       ? 'WEIGH: scan item, then place bottle on scale.'
       : 'SET QTY: scan item, then enter quantity.';
 }
+// BARINV_LEGACY_PENDING_SCALE_V1 — preview only; retain explicit estimate confirmation.
+// Freshness limit is a provisional UI guard, not a change to BLE stability.
+const PHASE1_SCALE_FRESH_MS = 2500;
+const PHASE1_SCALE_EMPTY_G = 2;
+let phase1ScaleEmptyAt = 0;
+function phase1PendingScaleReading(nowMs = Date.now()) {
+  if (!phase1WeighPendingItem || !phase1WeighStartedAt ||
+      state.selectedItemId !== phase1WeighPendingItem.id || phase1MeasureUnit !== 'WEIGHT' ||
+      (state.selectedAction !== 'TAKEN' && state.selectedAction !== 'RETURNED') ||
+      !bleScale.connected || !_scaleBetaEnabled()) return null;
+  const r = bleScale.latest;
+  if (!_isTrustedLocalScaleReading(r) ||
+      !Number.isFinite(r.raw) ||
+      !Number.isFinite(r.ts) || r.ts <= phase1WeighStartedAt ||
+      r.ts > nowMs || nowMs - r.ts > PHASE1_SCALE_FRESH_MS) return null;
+
+  if (Math.abs(r.raw) <= PHASE1_SCALE_EMPTY_G) {
+    phase1ScaleEmptyAt = r.ts;
+    return null;
+  }
+
+  if (phase1ScaleEmptyAt <= phase1WeighStartedAt ||
+      r.ts <= phase1ScaleEmptyAt ||
+      !r.stable || r.raw <= PHASE1_SCALE_EMPTY_G ||
+      r.grams <= 0) return null;
+
+  return r;
+}
+function phase1PendingScaleSync() {
+  const button = $('phase1-weigh-use-latest');
+  if (!button) return;
+  const r = phase1PendingScaleReading();
+  const label = r ? 'USE STABLE WEIGHT — ' + r.grams + ' g' :
+    !bleScale.connected ? 'SCALE NOT CONNECTED' :
+    !_scaleBetaEnabled() ? 'ENABLE BETA SCALE ESTIMATES' :
+    phase1ScaleEmptyAt <= phase1WeighStartedAt ? 'CLEAR SCALE BEFORE WEIGHING' :
+    'WAITING FOR FRESH STABLE WEIGHT…';
+  if (button.textContent !== label) button.textContent = label;
+  button.disabled = !r;
+}
+function phase1StopScalePreview() {
+  if (phase1WeighPreviewTimer !== null) clearInterval(phase1WeighPreviewTimer);
+  phase1WeighPreviewTimer = null;
+}
+function phase1StopWeighTimeout() {
+  if (phase1WeighTimeoutTimer !== null) clearTimeout(phase1WeighTimeoutTimer);
+  phase1WeighTimeoutTimer = null;
+}
+// END BARINV_LEGACY_PENDING_SCALE_V1
+
 function clearWeighPending() {
-  if (phase1WeighTimeoutTimer) { try { clearTimeout(phase1WeighTimeoutTimer); } catch (_) {} phase1WeighTimeoutTimer = null; }
+  phase1StopWeighTimeout();
+  phase1StopScalePreview();
+  phase1ScaleEmptyAt = 0;
+  phase1WeighStartedAt = 0;
   phase1WeighPendingItem = null;
   const card = $('phase1-weigh-pending');
   if (card) card.classList.remove('active');
@@ -1987,6 +2042,10 @@ function clearWeighPending() {
   if (timeout) timeout.style.display = 'none';
 }
 function beginWeighPending(it) {
+  phase1StopWeighTimeout();
+  phase1StopScalePreview();
+  phase1ScaleEmptyAt = 0;
+  phase1WeighStartedAt = Date.now();
   const previousSelectedItemId = state.selectedItemId;
   const previousSelectedItemName = state.selectedItemName;
   try { if (typeof bluefyBarbackDiagWeighState === 'function') bluefyBarbackDiagWeighState('WEIGH_BEGIN_ENTER', it); } catch (_) {}
@@ -2035,12 +2094,34 @@ function beginWeighPending(it) {
   try { renderPhase1MeasureControls(); } catch (_) {}
   try { statusOn('save-status', 'Scanned: ' + (it.name || 'item') + ' — place bottle on scale or enter weight', 'info'); } catch (_) {}
   try { VoiceGuide.announceOperationalState('scanned', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'Item scanned. Place bottle on scale.' }); } catch (_) {}
+  if (accepted) {
+    const gross = $('phase1-gross-weight');
+    const net = $('weight-g-input');
+    if (gross) gross.value = '';
+    if (net) net.value = '';
+    if (state.weightSource) state.weightSource.scaleUsed = false;
+    try { phase1RenderWeightTare(); } catch (_) {}
+    try { updateRemainingDisplay(); } catch (_) {}
+  } else {
+    phase1WeighStartedAt = 0;
+  }
+  phase1PendingScaleSync();
+  if (accepted) phase1WeighPreviewTimer = setInterval(function () {
+    if (!phase1WeighPendingItem || state.selectedItemId !== phase1WeighPendingItem.id || phase1MeasureUnit !== 'WEIGHT') {
+      phase1StopScalePreview();
+      return;
+    }
+    phase1PendingScaleSync();
+  }, 200);
   phase1WeighTimeoutTimer = setTimeout(function () {
     phase1WeighTimeoutTimer = null;
-    if (!phase1WeighPendingItem) return;
+    if (!phase1WeighPendingItem || phase1WeighPendingItem !== it || state.selectedItemId !== it.id || phase1MeasureUnit !== 'WEIGHT') return;
+    const gross = $('phase1-gross-weight');
+    if (gross && Number.isFinite(Number(gross.value)) && Number(gross.value) > 0) return;
+    if (phase1PendingScaleReading()) return;
     if (timeout) timeout.style.display = '';
-    try { statusOn('save-status', 'No stable weight received — choose an option', 'warn'); } catch (_) {}
-    try { VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'No stable weight received.' }); } catch (_) {}
+    try { statusOn('save-status', 'No fresh stable weight currently available — choose an option', 'warn'); } catch (_) {}
+    try { VoiceGuide.announceOperationalState('failed', { itemId: it.id, itemName: it.name, source: 'scan', voicePhrase: 'No fresh stable weight available.' }); } catch (_) {}
   }, 9000);
 }
 function weighPendingMarkUnopened() {
@@ -2074,7 +2155,7 @@ function initScanWorkflowControls() {
   });
   var add = $('phase1-weigh-add'); if (add) add.addEventListener('click', function () { var save = $('save-btn'); if (save) save.click(); });
   var cancel = $('phase1-weigh-cancel'); if (cancel) cancel.addEventListener('click', function () { clearWeighPending(); releaseRapidScanLock(); statusOn('save-status', 'Skipped item — scanner ready', 'info'); });
-  var latest = $('phase1-weigh-use-latest'); if (latest) latest.addEventListener('click', function () { _bleUseLatestMain(); });
+  var latest = $('phase1-weigh-use-latest'); if (latest) latest.addEventListener('click', function () { if (phase1PendingScaleReading()) _bleUseLatestMain(); phase1PendingScaleSync(); });
   var manual = $('phase1-weigh-manual'); if (manual) manual.addEventListener('click', function () { var g = $('phase1-gross-weight'); if (g) { g.focus(); g.scrollIntoView({ block: 'center' }); } });
   var reconnect = $('phase1-weigh-reconnect'); if (reconnect) reconnect.addEventListener('click', function () { var b = $('phase1-scale-access-open'); if (b) b.click(); });
   var unopened = $('phase1-weigh-unopened'); if (unopened) unopened.addEventListener('click', weighPendingMarkUnopened);
@@ -5423,6 +5504,7 @@ function _bleSetConnected(name) {
 }
 function _bleSetDisconnected() {
   bleScale.connected = false; bleScale.latest = null; bleScale.name = ''; bleScale.gotFrame = false;
+  phase1ScaleEmptyAt = 0;
   try { _bleStabReset(); } catch (_) {}   // clear software-stability history for the next session
   for (var i = 0; i < _BLE_SURFACES.length; i++) {
     var p = _BLE_SURFACES[i];
@@ -5567,6 +5649,7 @@ function _bleUseLatest() {
 }
 // Main RETURN form — scale readings feed the single gross-weight field.
 function _bleUseLatestReturn() {
+  if (phase1WeighPendingItem) return _bleUseLatestMain();
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
   if (!_scaleConfirmEstimateUse(reading, 'RETURN weight')) return;
   var gross = $('phase1-gross-weight'); if (gross) gross.value = String(reading.grams);
@@ -5581,10 +5664,18 @@ function _bleUseLatestReturn() {
 // recalc remaining % from the DB/local profile. Operator still sets bottle state
 // and taps ADD TO REVIEW. Never submits, never writes DB.
 function _bleUseLatestMain() {
-  var reading = _trustedLocalScaleReading(true); if (!reading) return;
+  var pending = phase1WeighPendingItem;
+  var reading = pending ? phase1PendingScaleReading() : _trustedLocalScaleReading(true);
+  if (!reading) return;
   if (!_scaleConfirmEstimateUse(reading, state.selectedAction === 'RETURNED' ? 'RETURN weight' : 'TAKEN bottle weight')) return;
   var g = String(reading.grams);
-  var gross = $('phase1-gross-weight'); if (gross) gross.value = g;
+  var gross = $('phase1-gross-weight');
+  if (pending && (!gross || phase1WeighPendingItem !== pending || state.selectedItemId !== pending.id || phase1MeasureUnit !== 'WEIGHT')) return;
+  if (gross) gross.value = g;
+  if (pending) {
+    phase1StopWeighTimeout();
+    var timeout = $('phase1-weigh-timeout'); if (timeout) timeout.style.display = 'none';
+  }
   var q = $('qty-input'); if (q) q.value = '1';
   if (state.weightSource) state.weightSource.scaleUsed = true;
   try { phase1RenderWeightTare(); } catch (_) {}
@@ -5595,10 +5686,15 @@ function _bleUseLatestMain() {
 // WEIGHT field) in sync: visible when a station scale is connected here, enabled
 // only on a stable reading. Called from _bleOnFrame and connect/disconnect.
 function _weightUseScaleSync() {
+  if (phase1WeighPendingItem) phase1PendingScaleSync();
   var btn = $('weight-use-scale'); if (!btn) return;
   var connected = !!(typeof bleScale !== 'undefined' && bleScale && (bleScale.supported || bleScale.nativeMode) && bleScale.connected);
   var enabled = _scaleBetaEnabled();
-  var hasStable = enabled && connected && !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable);
+  var hasStable = enabled && connected && (
+    phase1WeighPendingItem
+      ? !!phase1PendingScaleReading()
+      : !!(_isTrustedLocalScaleReading(bleScale.latest) && bleScale.latest.stable)
+  );
   btn.style.display = connected ? '' : 'none';
   btn.disabled = !hasStable;
   btn.style.opacity = hasStable ? '1' : '0.55';
@@ -5609,6 +5705,7 @@ function _weightUseScaleSync() {
 // Fill the WEIGHT (g) field with the CORRECTED stable grams + recalc remaining %.
 // Works for TAKEN/PARTIAL bottles sent to a bar; never submits, never writes DB.
 function _weightUseScaleFill() {
+  if (phase1WeighPendingItem) return _bleUseLatestMain();
   var reading = _trustedLocalScaleReading(true); if (!reading) return;
   if (!_scaleConfirmEstimateUse(reading, 'TAKEN bottle weight')) return;
   var w = $('weight-g-input'); if (!w) return;
@@ -6439,6 +6536,10 @@ function installHidListener() {
         }
         if (it) {
           if (state.selectedAction) {
+            if (phase1WeighPendingItem) {
+              statusOn('save-status', 'Finish or cancel the pending bottle before another HID scan.', 'warn');
+              return;
+            }
             // PLAN-2026-06-13 — HID continuous-speed path now goes through the
             // SHARED core (qty=1), so it matches the touch SAVE button and the
             // camera scanner (Multi-Bar fan-out + draft refresh inside).
@@ -8135,6 +8236,13 @@ function addCurrentSelectionToReview(opts) {
   const itemId   = opts.item ? opts.item.id   : state.selectedItemId;
   const itemName = opts.item ? opts.item.name : state.selectedItemName;
   if (!itemId) return { ok:false, error:'Pick or scan an item first' };
+
+  if (phase1WeighPendingItem &&
+      (!phase1WeighStartedAt ||
+       itemId !== phase1WeighPendingItem.id ||
+       state.selectedItemId !== phase1WeighPendingItem.id)) {
+    return { ok:false, error:'Pending bottle mismatch. Cancel and scan again.' };
+  }
   const itemObj = opts.item || _selectedItemObj() || { id: itemId, name: itemName };
   const destinationBarId = opts.destination_bar_id != null ? opts.destination_bar_id : state.transferDestinationBarId;
   if (state.selectedAction === 'TRANSFER') {
@@ -8697,13 +8805,8 @@ function onBleNotify(ev) {
   const w = $('ble-weight');
   w.textContent = grams.toFixed(1) + ' g' + (state.ble.lastStable ? ' ✓' : ' …');
   w.classList.toggle('unstable', !state.ble.lastStable);
-  // Auto-suggest the single gross Weight field when WEIGHT mode is selected.
-  if (state.selectedAction && phase1MeasureUnit === 'WEIGHT' && state.ble.lastStable && state.selectedItemId) {
-    $('phase1-gross-weight').value = grams.toFixed(1);
-    $('qty-input').value = '1';
-    if (state.weightSource) state.weightSource.scaleUsed = true;
-    try { phase1RenderWeightTare(); } catch (_) {}
-  }
+  // Legacy ASCII notifications are display-only.
+  // Inventory weight requires the trusted scale confirmation path.
 }
 
 // ════════════════════════════════════════════════════════════════════
